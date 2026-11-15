@@ -30,6 +30,7 @@ public sealed class App : Application
     private LyricsService? _lyrics;
     private HomeworkHub? _homework;
     private YuketangService? _ykt;
+    private XuexitongService? _xxt;
     private VolumeWatcher? _volume;
     private SystemWatch _sys = null!;
     private Updater _upd = null!;
@@ -142,6 +143,7 @@ public sealed class App : Application
         {
             _homework = new HomeworkHub(_store); _window.Homework = _homework; _homework.Changed += _window.OnHomeworkChanged;
             _ykt = new YuketangService(_homework, _store);
+            _xxt = new XuexitongService(_homework, _store);
             _homework.Tick(); _window.OnHomeworkChanged();
         }
         catch (Exception ex) { Log("作业: " + ex.Message); }
@@ -168,6 +170,7 @@ public sealed class App : Application
             if (DateTime.Today != _day) { _day = DateTime.Today; _countdown?.Refresh(); }
             if (_tickN % 30 == 0) { try { _classes?.Tick(); } catch (Exception ex) { Log("课表: " + ex.Message); } }
             if (_tickN % 10 == 0) { try { _ykt?.Tick(); } catch (Exception ex) { Log("雨课堂: " + ex.Message); } }
+            if (_tickN % 10 == 5) { try { _xxt?.Tick(); } catch (Exception ex) { Log("学习通: " + ex.Message); } }
             if (_tickN % 60 == 0) { try { _homework?.Tick(); _window.OnHomeworkChanged(); } catch (Exception ex) { Log("作业: " + ex.Message); } }
         };
         _tick.Start();
@@ -183,13 +186,34 @@ public sealed class App : Application
             return;
         }
         var ykt = _ykt;
-        var w = new QrLoginWindow("雨课堂扫码登录", "用微信扫一扫，登录后只读取各课程的作业和截止时间。",
-            async () => { var qr = await YuketangService.RequestQr(); return (qr.Content, ct => ykt.WaitLogin(qr, ct)); });
+        var w = new QrLoginWindow("雨课堂扫码登录", "用微信扫一扫，登录后只读取各课程的作业和截止时间。", "请用微信扫码，并在手机上确认",
+            async () => { var qr = await YuketangService.RequestQr(); return (QrLoginWindow.Render(qr.Content), ct => ykt.WaitLogin(qr, ct)); });
         w.Closed += (_, _) =>
         {
             if (!w.Success) return;
             _store.Remove("ykt:expired");
             _store.Upsert(new IslandActivity("ykt:login", HomeworkHub.Source, "雨课堂已连接", $"{ykt.UserName} · 正在读取作业…", ActivityKind.Done, 60, DurationSeconds: 5));
+        };
+        w.Show();
+    }
+
+    private void XuexitongLoginOrOut()
+    {
+        if (_xxt == null) return;
+        if (_xxt.LoggedIn && !_xxt.Expired)
+        {
+            if (System.Windows.MessageBox.Show($"退出学习通账号 {_xxt.UserName}？本机保存的登录状态会被删除。", "Qisland", MessageBoxButton.OKCancel) == MessageBoxResult.OK) _xxt.Logout();
+            return;
+        }
+        var xxt = _xxt;
+        QrLoginWindow? w = null;
+        w = new QrLoginWindow("学习通扫码登录", "用学习通 App 扫一扫（首页右上角），登录后只读取作业和截止时间。", "请用学习通 App 扫码",
+            async () => { var qr = await XuexitongService.RequestQr(); return (QrLoginWindow.FromBytes(qr.Png), ct => xxt.WaitLogin(qr, t => w!.SetStatus(t), ct)); });
+        w.Closed += (_, _) =>
+        {
+            if (!w.Success) return;
+            _store.Remove("xxt:expired");
+            _store.Upsert(new IslandActivity("xxt:login", HomeworkHub.Source, "学习通已连接", $"{xxt.UserName} · 正在读取作业…", ActivityKind.Done, 60, DurationSeconds: 5));
         };
         w.Show();
     }
@@ -298,14 +322,19 @@ public sealed class App : Application
         var yktLogin = new System.Windows.Forms.ToolStripMenuItem("雨课堂：扫码登录…");
         yktLogin.Click += (_, _) => Dispatcher.BeginInvoke(YuketangLoginOrOut);
         var hwRefresh = new System.Windows.Forms.ToolStripMenuItem("立即刷新作业");
-        hwRefresh.Click += (_, _) => Dispatcher.BeginInvoke(() => _ykt?.RefreshNow());
+        hwRefresh.Click += (_, _) => Dispatcher.BeginInvoke(() => { _ykt?.RefreshNow(); _xxt?.RefreshNow(); });
+        var xxtLogin = new System.Windows.Forms.ToolStripMenuItem("学习通：扫码登录…");
+        xxtLogin.Click += (_, _) => Dispatcher.BeginInvoke(XuexitongLoginOrOut);
         hwMenu.DropDownItems.Add(yktLogin);
+        hwMenu.DropDownItems.Add(xxtLogin);
         hwMenu.DropDownItems.Add(hwRefresh);
         hwMenu.DropDownOpening += (_, _) =>
         {
             yktLogin.Text = _ykt is { LoggedIn: true } y ? (y.Expired ? "雨课堂：登录过期，重新扫码…" : $"雨课堂：已登录 {y.UserName}（点此退出）") : "雨课堂：扫码登录…";
-            hwRefresh.Enabled = _ykt?.LoggedIn == true;
-            hwRefresh.Text = _ykt?.LastOk is { } t ? $"立即刷新作业（上次 {t:HH:mm}）" : "立即刷新作业";
+            xxtLogin.Text = _xxt is { LoggedIn: true } x ? (x.Expired ? "学习通：登录过期，重新扫码…" : $"学习通：已登录 {x.UserName}（点此退出）") : "学习通：扫码登录…";
+            hwRefresh.Enabled = _ykt?.LoggedIn == true || _xxt?.LoggedIn == true;
+            var last = new[] { _ykt?.LastOk, _xxt?.LastOk }.Max();
+            hwRefresh.Text = last is { } t ? $"立即刷新作业（上次 {t:HH:mm}）" : "立即刷新作业";
         };
         menu.Items.Add(hwMenu);
         menu.Items.Add("编辑倒计时", null, (_, _) => Process.Start(new ProcessStartInfo("notepad.exe", "\"" + Countdowns.PathName + "\"") { UseShellExecute = true }));

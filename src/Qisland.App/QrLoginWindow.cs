@@ -15,16 +15,19 @@ namespace Qisland.App;
 /// </summary>
 public sealed class QrLoginWindow : Window
 {
-    private readonly Func<Task<(string content, Func<CancellationToken, Task<bool>> wait)>> _issue;
+    private readonly Func<Task<(ImageSource qr, Func<CancellationToken, Task<bool>> wait)>> _issue;
     private readonly Image _img = new() { Width = 200, Height = 200, Stretch = Stretch.Uniform };
     private readonly TextBlock _status;
     private readonly Border _qrBox;
     private CancellationTokenSource? _cts;
     public bool Success { get; private set; }
+    private readonly string _scanHint;
+    public void SetStatus(string text) => Dispatcher.BeginInvoke(() => _status.Text = text);
 
-    public QrLoginWindow(string title, string hint, Func<Task<(string, Func<CancellationToken, Task<bool>>)>> issue)
+    public QrLoginWindow(string title, string hint, string scanHint, Func<Task<(ImageSource, Func<CancellationToken, Task<bool>>)>> issue)
     {
         _issue = issue;
+        _scanHint = scanHint;
         Title = title;
         WindowStyle = WindowStyle.None; AllowsTransparency = true; Background = Brushes.Transparent;
         ResizeMode = ResizeMode.NoResize; SizeToContent = SizeToContent.WidthAndHeight;
@@ -72,9 +75,9 @@ public sealed class QrLoginWindow : Window
         _status.Text = "正在获取二维码…";
         try
         {
-            var (content, wait) = await _issue();
-            _img.Source = Render(content);
-            _status.Text = "请用微信 / 对应 App 扫码，并在手机上确认";
+            var (qr, wait) = await _issue();
+            _img.Source = qr;
+            _status.Text = _scanHint;
             var ok = await wait(ct);
             if (ct.IsCancellationRequested) return;
             if (ok)
@@ -90,7 +93,18 @@ public sealed class QrLoginWindow : Window
         catch (Exception ex) { _img.Opacity = 0.25; _status.Text = "出错了，点二维码刷新"; App.Log("扫码登录: " + ex.Message); }
     }
 
-    private static BitmapImage Render(string content)
+    public static BitmapImage FromBytes(byte[] png)
+    {
+        var bmp = new BitmapImage();
+        bmp.BeginInit();
+        bmp.CacheOption = BitmapCacheOption.OnLoad;
+        bmp.StreamSource = new MemoryStream(png);
+        bmp.EndInit();
+        bmp.Freeze();
+        return bmp;
+    }
+
+    public static BitmapImage Render(string content)
     {
         using var gen = new QRCodeGenerator();
         using var data = gen.CreateQrCode(content, QRCodeGenerator.ECCLevel.M);
