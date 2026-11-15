@@ -391,7 +391,7 @@ public sealed class IslandWindow : Window
         var show = Math.Clamp(_show.Value, 0, 1);
         _root.Opacity = show;
         _rootShift.Y = (1 - show) * -(TopGap + h);
-        if (Theme.IsGlass) UpdateGlassRegion(left, w, h, r, bo, show);
+        UpdateHitRegion(left, w, h, r, bo, show);
     }
 
     // ───────────────────────────── 外观 ─────────────────────────────
@@ -428,7 +428,35 @@ public sealed class IslandWindow : Window
     // 所以玻璃外观不用系统模糊，只用半透明白 + 高光描边 + 顶部反光，窗口始终保持透明扩展。
     private void SetGlass(bool on) { }
 
-    private void UpdateGlassRegion(double left, double w, double h, double r, double bubbleOp, double show) { }
+    private (int, int, int, int, int, int) _lastRgn = (-1, -1, -1, -1, -1, -1);
+
+    // 窗口形状 = 岛 + 阴影的范围。WS_EX_TRANSPARENT 对非分层窗口不会把点击让给别的程序，
+    // 所以用窗口区域把 680×600 的窗口裁到岛本身：区域外的点击、悬停直接落到下面的窗口。
+    private void UpdateHitRegion(double left, double w, double h, double r, double bubbleOp, double show)
+    {
+        if (_hwnd == IntPtr.Zero) return;
+        var dpi = VisualTreeHelper.GetDpi(this);
+        int P(double v) => (int)Math.Round(v * dpi.DpiScaleX);
+        const double side = 16, below = 20;
+        var y0 = TopGap + _rootShift.Y;
+        var key = show < 0.02 ? (0, 0, 0, 0, 0, 0)
+            : (P(left - side), P(Math.Max(0, y0 - side)), P(left + w + side), P(y0 + h + below), P((r + side) * 2), bubbleOp > 0.05 ? P(_bubbleShift.X) : -1);
+        if (key == _lastRgn) return;
+        _lastRgn = key;
+        IntPtr rgn;
+        if (key.Item3 == 0) rgn = Native.CreateRoundRectRgn(0, 0, 0, 0, 0, 0);
+        else
+        {
+            rgn = Native.CreateRoundRectRgn(key.Item1, key.Item2, key.Item3 + 1, key.Item4 + 1, key.Item5, key.Item5);
+            if (key.Item6 >= 0)
+            {
+                var b = Native.CreateRoundRectRgn(key.Item6 - P(8), key.Item2, key.Item6 + P(CompactH + 8) + 1, P(y0 + CompactH + below) + 1, P(CompactH + 16), P(CompactH + 16));
+                Native.CombineRgn(rgn, rgn, b, 2);
+                Native.DeleteObject(b);
+            }
+        }
+        Native.SetWindowRgn(_hwnd, rgn, false); // 系统接管 rgn，不用 DeleteObject
+    }
 
     private static void Place(FrameworkElement layer, double width) => Canvas.SetLeft(layer, Math.Round((WinW - width) / 2));
 
