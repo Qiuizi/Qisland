@@ -1,0 +1,697 @@
+using System.Globalization;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
+using System.Windows.Shapes;
+using System.Windows.Threading;
+using Qisland.Core;
+
+namespace Qisland.App;
+
+/// <summary>
+/// 灵动岛窗口。窗口本身固定尺寸、永不移动，所有形变只发生在里面的胶囊上：
+/// 用 GPU 合成（DWM 玻璃 + 透明背景），不走 AllowsTransparency 的软件分层窗口。
+/// </summary>
+public sealed class IslandWindow : Window
+{
+    private enum Mode { Idle, Compact, Expanded }
+
+    private const double WinW = 680, WinH = 400, TopGap = 10;
+    private const double IdleW = 176, IdleH = 34, CompactH = 38, ExpandedW = 452, RowH = 56;
+    private const int MaxRows = 4;
+
+    private readonly ActivityStore _store;
+    private readonly bool _layered;
+
+    private readonly Canvas _root = new() { Width = WinW, Height = WinH };
+    private readonly Border _pill = new() { Background = Theme.Pill, SnapsToDevicePixels = false };
+    private readonly Grid _content = new() { ClipToBounds = false };
+    private readonly RectangleGeometry _clip = new();
+    private readonly Grid _idle = new(), _compact = new(), _expanded = new();
+    private readonly Border _bubble = new() { Background = Theme.Pill, Width = CompactH, Height = CompactH, CornerRadius = new CornerRadius(CompactH / 2) };
+    private readonly TranslateTransform _rootShift = new();
+    private static readonly (double k, byte a)[] ShadowLayers = [(14, 0x07), (9, 0x0C), (5, 0x14), (2, 0x22)];
+    private readonly List<Border> _shadows = [];
+
+    private readonly Spring _w = new(IdleW), _h = new(IdleH), _r = new(IdleH / 2);
+    private readonly Spring _idleOp = new(1) { Response = 0.30, DampingRatio = 1, Epsilon = 0.004 };
+    private readonly Spring _compactOp = new(0) { Response = 0.30, DampingRatio = 1, Epsilon = 0.004 };
+    private readonly Spring _expOp = new(0) { Response = 0.34, DampingRatio = 1, Epsilon = 0.004 };
+    private readonly Spring _bubbleOp = new(0) { Response = 0.36, DampingRatio = 0.9, Epsilon = 0.004 };
+    private readonly Spring _show = new(1) { Response = 0.40, DampingRatio = 1, Epsilon = 0.004 };
+    private Spring[] Springs => [_w, _h, _r, _idleOp, _compactOp, _expOp, _bubbleOp, _show];
+
+    private Mode _mode = Mode.Idle;
+    private bool _animating, _clickThrough = true, _pinned, _hidden;
+    private TimeSpan _lastRender;
+    private DateTime _hoverSince = DateTime.MaxValue, _outsideSince = DateTime.MinValue;
+    private DateTime _peekUntil = DateTime.MinValue;
+    private string? _lastTopId;
+    private DateTime _lastTopUpdated;
+    private IntPtr _hwnd;
+    private readonly DispatcherTimer _poll = new(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(33) };
+    private readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromSeconds(1) };
+    private string _clockText = "";
+    private WeatherSnapshot? _weather;
+
+    private readonly TextBlock _idleClock = Txt(13.5, FontWeights.SemiBold, Theme.Primary);
+    private readonly TextBlock _idleWeatherGlyph = Glyph("", 13, Theme.Secondary);
+    private readonly TextBlock _idleTemp = Txt(13, FontWeights.Medium, Theme.Secondary);
+    private double _compactW = 260, _expandedH = 140;
+
+    public IslandWindow(ActivityStore store)
+    {
+        _store = store;
+        _layered = Environment.GetEnvironmentVariable("QISLAND_LAYERED") == "1";
+        Title = "Qisland";
+        WindowStyle = WindowStyle.None;
+        ResizeMode = ResizeMode.NoResize;
+        ShowInTaskbar = false;
+        Topmost = true;
+        ShowActivated = false;
+        Width = WinW;
+        Height = WinH;
+        AllowsTransparency = _layered;
+        Background = Brushes.Transparent;
+        UseLayoutRounding = true;
+        TextOptions.SetTextFormattingMode(this, TextFormattingMode.Ideal);
+        TextOptions.SetTextRenderingMode(this, TextRenderingMode.Grayscale);
+        RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.HighQuality);
+
+        BuildVisuals();
+        Content = _root;
+
+        _store.Changed += OnStoreChanged;
+        _poll.Tick += (_, _) => Poll();
+        _tick.Tick += (_, _) => OnSecond();
+        SourceInitialized += (_, _) => SetupHwnd();
+        Loaded += (_, _) => { App.Log($"render tier {RenderCapability.Tier >> 16}, layered={_layered}"); PlaceOnScreen(); OnSecond(); RebuildIdle(); ApplyFrame(); _poll.Start(); _tick.Start(); };
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) => Dispatcher.BeginInvoke(PlaceOnScreen);
+    }
+
+    // ───────────────────────────── 外壳 ─────────────────────────────
+
+    private void BuildVisuals()
+    {
+        _root.RenderTransform = _rootShift;
+        // 阴影不用 DropShadowEffect（每帧都要重新模糊整块像素），用几层半透明圆角矩形叠出柔和的投影
+        foreach (var (k, a) in ShadowLayers)
+        {
+            var sb = new Border { Background = Theme.Freeze(new SolidColorBrush(Color.FromArgb(a, 0, 0, 0))), IsHitTestVisible = false };
+            _shadows.Add(sb);
+            _root.Children.Add(sb);
+        }
+        _root.Children.Add(_pill);
+
+        _content.Clip = _clip;
+        foreach (var layer in new[] { _idle, _compact, _expanded })
+        {
+            layer.HorizontalAlignment = HorizontalAlignment.Center;
+            layer.VerticalAlignment = VerticalAlignment.Top;
+            layer.RenderTransformOrigin = new Point(0.5, 0);
+            layer.RenderTransform = new ScaleTransform(1, 1);
+            _content.Children.Add(layer);
+        }
+        _root.Children.Add(_content);
+
+        _bubble.Opacity = 0;
+        _root.Children.Add(_bubble);
+
+        // 空闲：左时钟，右天气
+        _idle.Height = IdleH;
+        _idle.Width = IdleW;
+        _idle.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _idle.ColumnDefinitions.Add(new ColumnDefinition());
+        _idle.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _idleClock.Margin = new Thickness(16, 0, 0, 0);
+        _idleClock.VerticalAlignment = VerticalAlignment.Center;
+        _idle.Children.Add(_idleClock);
+        var wx = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 15, 0), VerticalAlignment = VerticalAlignment.Center };
+        _idleWeatherGlyph.Margin = new Thickness(0, 1, 6, 0);
+        wx.Children.Add(_idleWeatherGlyph);
+        wx.Children.Add(_idleTemp);
+        Grid.SetColumn(wx, 2);
+        _idle.Children.Add(wx);
+
+        _pill.MouseLeftButtonUp += (_, e) => { _pinned = !_pinned; SetMode(_pinned ? Mode.Expanded : DesiredRestMode()); e.Handled = true; };
+        _bubble.MouseLeftButtonUp += (_, e) => { _pinned = true; SetMode(Mode.Expanded); e.Handled = true; };
+        _content.IsHitTestVisible = false;
+    }
+
+    private void SetupHwnd()
+    {
+        _hwnd = new WindowInteropHelper(this).Handle;
+        Native.SetExStyle(_hwnd, Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE | Native.WS_EX_TRANSPARENT, true);
+        if (_layered) return;
+
+        var src = HwndSource.FromHwnd(_hwnd);
+        if (src?.CompositionTarget != null) src.CompositionTarget.BackgroundColor = Colors.Transparent;
+        var m = new Native.MARGINS { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+        Native.DwmExtendFrameIntoClientArea(_hwnd, ref m);
+        var corner = 1; // DWMWCP_DONOTROUND
+        Native.DwmSetWindowAttribute(_hwnd, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
+        var border = unchecked((int)0xFFFFFFFE); // DWMWA_COLOR_NONE
+        Native.DwmSetWindowAttribute(_hwnd, Native.DWMWA_BORDER_COLOR, ref border, sizeof(int));
+        var backdrop = 1; // DWMSBT_NONE
+        Native.DwmSetWindowAttribute(_hwnd, Native.DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
+    }
+
+    private void PlaceOnScreen()
+    {
+        var wa = SystemParameters.WorkArea;
+        Left = Math.Round((SystemParameters.PrimaryScreenWidth - WinW) / 2);
+        Top = wa.Top > 1 ? wa.Top : 0;
+    }
+
+    // ───────────────────────────── 状态 ─────────────────────────────
+
+    private Mode DesiredRestMode() => _store.Ranked().Count > 0 ? Mode.Compact : Mode.Idle;
+
+    private void SetMode(Mode m)
+    {
+        if (m == Mode.Expanded) RebuildExpanded();
+        if (m == Mode.Compact) RebuildCompact();
+        _mode = m;
+        var top = _store.Ranked();
+        (_w.Target, _h.Target, _r.Target) = m switch
+        {
+            Mode.Expanded => (ExpandedW, _expandedH, 30d),
+            Mode.Compact => (_compactW, CompactH, CompactH / 2),
+            _ => (IdleW, IdleH, IdleH / 2),
+        };
+        // 展开时更有弹性，收起时更干脆
+        var resp = m == Mode.Expanded ? 0.46 : 0.38;
+        var damp = m == Mode.Expanded ? 0.78 : 0.88;
+        foreach (var s in new[] { _w, _h, _r }) { s.Response = resp; s.DampingRatio = damp; }
+        _idleOp.Target = m == Mode.Idle ? 1 : 0;
+        _compactOp.Target = m == Mode.Compact ? 1 : 0;
+        _expOp.Target = m == Mode.Expanded ? 1 : 0;
+        _bubbleOp.Target = m == Mode.Compact && top.Count > 1 ? 1 : 0;
+        _idle.IsHitTestVisible = false;
+        _compact.IsHitTestVisible = false;
+        _expanded.IsHitTestVisible = m == Mode.Expanded;
+        _content.IsHitTestVisible = m == Mode.Expanded;
+        Kick();
+    }
+
+    private void OnStoreChanged()
+    {
+        var ranked = _store.Ranked();
+        var top = ranked.Count > 0 ? ranked[0] : null;
+        // 新的头条活动：像 iOS 一样先展开“偷看”几秒
+        var fresh = top != null && (top.Id != _lastTopId || top.Updated > _lastTopUpdated)
+                    && (DateTime.Now - top.Updated).TotalSeconds < 2
+                    && (top.Id != _lastTopId || top.Kind is ActivityKind.Done or ActivityKind.Error or ActivityKind.WaitingApproval);
+        _lastTopId = top?.Id;
+        _lastTopUpdated = top?.Updated ?? DateTime.MinValue;
+        RebuildCompact();
+        RebuildBubble(ranked);
+        if (_mode == Mode.Expanded) { RebuildExpanded(); SetMode(Mode.Expanded); }
+        else if (fresh && !_hidden) { _peekUntil = DateTime.Now.AddSeconds(4); SetMode(Mode.Expanded); }
+        else SetMode(DesiredRestMode());
+    }
+
+    private void OnSecond()
+    {
+        var now = DateTime.Now;
+        var text = now.ToString("HH:mm", CultureInfo.InvariantCulture);
+        if (text != _clockText) { _clockText = text; _idleClock.Text = text; if (_mode == Mode.Expanded) RebuildExpanded(); }
+        if (now.Second % 5 == 0) _store.Expire();
+        if (_peekUntil != DateTime.MinValue && now > _peekUntil && !_pinned && _hoverSince == DateTime.MaxValue)
+        {
+            _peekUntil = DateTime.MinValue;
+            SetMode(DesiredRestMode());
+        }
+        var full = Native.ForegroundIsFullscreen();
+        if (full != _hidden) { _hidden = full; _show.Target = full ? 0 : 1; Kick(); }
+        if (_mode == Mode.Expanded && now.Second == 0) RebuildExpanded();
+    }
+
+    public void SetWeather(WeatherSnapshot w)
+    {
+        _weather = w;
+        RebuildIdle();
+        if (_mode == Mode.Expanded) RebuildExpanded();
+    }
+
+    // ───────────────────────────── 鼠标 ─────────────────────────────
+
+    private void Poll()
+    {
+        if (_hwnd == IntPtr.Zero || !Native.GetCursorPos(out var p)) return;
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var x = (p.X / dpi.DpiScaleX) - Left;
+        var y = (p.Y / dpi.DpiScaleY) - Top;
+        var pillLeft = (WinW - _w.Value) / 2;
+        const double slop = 6;
+        var inPill = x >= pillLeft - slop && x <= pillLeft + _w.Value + slop && y >= 0 && y <= TopGap + _h.Value + slop;
+        var bx = pillLeft + _w.Value + 8;
+        var inBubble = _bubble.Opacity > 0.5 && x >= bx && x <= bx + CompactH && y >= TopGap && y <= TopGap + CompactH;
+        var inside = !_hidden && (inPill || inBubble);
+
+        if (inside == _clickThrough)
+        {
+            _clickThrough = !inside;
+            Native.SetExStyle(_hwnd, Native.WS_EX_TRANSPARENT, _clickThrough);
+        }
+
+        var now = DateTime.Now;
+        if (inside)
+        {
+            if (_hoverSince == DateTime.MaxValue) _hoverSince = now;
+            _outsideSince = DateTime.MinValue;
+            if (_mode != Mode.Expanded && (now - _hoverSince).TotalMilliseconds > 160) SetMode(Mode.Expanded);
+        }
+        else
+        {
+            _hoverSince = DateTime.MaxValue;
+            if (_outsideSince == DateTime.MinValue) _outsideSince = now;
+            if (_mode == Mode.Expanded && !_pinned && now > _peekUntil && (now - _outsideSince).TotalMilliseconds > 420)
+                SetMode(DesiredRestMode());
+        }
+
+        // 鼠标离岛很远时降低轮询频率，空转几乎不耗 CPU
+        var far = y > WinH + 160 || x < -300 || x > WinW + 300;
+        var want = far && !_animating ? 120 : 33;
+        if ((int)_poll.Interval.TotalMilliseconds != want) _poll.Interval = TimeSpan.FromMilliseconds(want);
+    }
+
+    // ───────────────────────────── 动画 ─────────────────────────────
+
+    private void Kick()
+    {
+        if (_animating) return;
+        _animating = true;
+        _lastRender = TimeSpan.Zero;
+        CompositionTarget.Rendering += OnRendering;
+    }
+
+    private void OnRendering(object? sender, EventArgs e)
+    {
+        var t = ((RenderingEventArgs)e).RenderingTime;
+        if (t == _lastRender) return;
+        var dt = _lastRender == TimeSpan.Zero ? 1.0 / 60 : (t - _lastRender).TotalSeconds;
+        _lastRender = t;
+        var settled = true;
+        foreach (var s in Springs) { s.Step(dt); settled &= s.IsSettled; }
+        ApplyFrame();
+        if (settled)
+        {
+            CompositionTarget.Rendering -= OnRendering;
+            _animating = false;
+            if (_mode != Mode.Expanded) App.TrimSoon();
+        }
+    }
+
+    private void ApplyFrame()
+    {
+        var w = Math.Max(20, _w.Value);
+        var h = Math.Max(20, _h.Value);
+        var r = Math.Clamp(_r.Value, 4, h / 2);
+        var left = (WinW - w) / 2;
+
+        _pill.Width = w; _pill.Height = h;
+        _pill.CornerRadius = new CornerRadius(r);
+        Canvas.SetLeft(_pill, left); Canvas.SetTop(_pill, TopGap);
+        _content.Width = w; _content.Height = h;
+        Canvas.SetLeft(_content, left); Canvas.SetTop(_content, TopGap);
+        for (var i = 0; i < _shadows.Count; i++)
+        {
+            var k = ShadowLayers[i].k;
+            var sb = _shadows[i];
+            sb.Width = w + 2 * k; sb.Height = h + 2 * k;
+            sb.CornerRadius = new CornerRadius(r + k);
+            Canvas.SetLeft(sb, left - k); Canvas.SetTop(sb, TopGap - k + 5);
+        }
+        _clip.Rect = new Rect(0, 0, w, h);
+        _clip.RadiusX = _clip.RadiusY = r;
+
+        Fade(_idle, _idleOp.Value);
+        Fade(_compact, _compactOp.Value);
+        Fade(_expanded, _expOp.Value);
+
+        _bubble.Opacity = Math.Clamp(_bubbleOp.Value, 0, 1);
+        var bScale = 0.6 + 0.4 * Math.Clamp(_bubbleOp.Value, 0, 1.2);
+        _bubble.RenderTransformOrigin = new Point(0, 0.5);
+        _bubble.RenderTransform = new ScaleTransform(bScale, bScale);
+        Canvas.SetLeft(_bubble, left + w + 8 - (1 - _bubbleOp.Value) * 22);
+        Canvas.SetTop(_bubble, TopGap);
+
+        var show = Math.Clamp(_show.Value, 0, 1);
+        _root.Opacity = show;
+        _rootShift.Y = (1 - show) * -(TopGap + h);
+    }
+
+    private static void Fade(FrameworkElement layer, double v)
+    {
+        var o = Math.Clamp(v, 0, 1);
+        layer.Opacity = o;
+        layer.Visibility = o < 0.01 ? Visibility.Hidden : Visibility.Visible;
+        var st = (ScaleTransform)layer.RenderTransform;
+        st.ScaleX = st.ScaleY = 0.94 + 0.06 * o;
+    }
+
+    // ───────────────────────────── 内容 ─────────────────────────────
+
+    private void RebuildIdle()
+    {
+        _idleClock.Text = _clockText;
+        if (_weather is { } w)
+        {
+            _idleWeatherGlyph.Text = Theme.WeatherGlyph(w.Code);
+            _idleTemp.Text = $"{w.Temperature:0}°";
+        }
+        else { _idleWeatherGlyph.Text = ""; _idleTemp.Text = DateTime.Now.ToString("ddd", new CultureInfo("zh-CN")); }
+    }
+
+    private void RebuildCompact()
+    {
+        _compact.Children.Clear();
+        _compact.ColumnDefinitions.Clear();
+        var ranked = _store.Ranked();
+        if (ranked.Count == 0) return;
+        var a = ranked[0];
+
+        _compact.Height = CompactH;
+        _compact.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _compact.ColumnDefinitions.Add(new ColumnDefinition());
+        _compact.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var tile = Tile(a.Source, 24, 7);
+        tile.Margin = new Thickness(7, 0, 0, 0);
+        _compact.Children.Add(tile);
+
+        var src = Theme.SourceName(a.Source);
+        var title = new TextBlock
+        {
+            FontFamily = Theme.Text, FontSize = 13, VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(10, 0, 10, 1),
+        };
+        title.Inlines.Add(new Run(src) { Foreground = Theme.Secondary, FontWeight = FontWeights.Medium });
+        title.Inlines.Add(new Run("  " + a.Title) { Foreground = Theme.Primary, FontWeight = FontWeights.SemiBold });
+        Grid.SetColumn(title, 1);
+        _compact.Children.Add(title);
+
+        var status = StatusView(a, compact: true);
+        status.Margin = new Thickness(0, 0, 13, 0);
+        status.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(status, 2);
+        _compact.Children.Add(status);
+
+        status.Measure(new Size(double.PositiveInfinity, CompactH));
+        var textW = MeasureText(src, 13, FontWeights.Medium) + MeasureText("  " + a.Title, 13, FontWeights.SemiBold);
+        _compactW = Math.Clamp(7 + 24 + 10 + Math.Min(textW, 270) + 10 + status.DesiredSize.Width + 13, 230, 420);
+        _compact.Width = _compactW;
+        if (_mode == Mode.Compact) _w.Target = _compactW;
+    }
+
+    private void RebuildBubble(IReadOnlyList<LiveActivity> ranked)
+    {
+        if (ranked.Count < 2) { _bubble.Child = null; return; }
+        if (ranked.Count == 2)
+        {
+            var t = Tile(ranked[1].Source, 24, 7);
+            t.HorizontalAlignment = HorizontalAlignment.Center;
+            t.VerticalAlignment = VerticalAlignment.Center;
+            _bubble.Child = t;
+        }
+        else
+        {
+            var tb = Txt(12.5, FontWeights.SemiBold, Theme.Primary);
+            tb.Text = $"+{ranked.Count - 1}";
+            tb.HorizontalAlignment = HorizontalAlignment.Center;
+            tb.VerticalAlignment = VerticalAlignment.Center;
+            _bubble.Child = tb;
+        }
+    }
+
+    private void RebuildExpanded()
+    {
+        _expanded.Children.Clear();
+        _expanded.Width = ExpandedW;
+        var stack = new StackPanel { Margin = new Thickness(16, 14, 16, 0) };
+        var ranked = _store.Ranked();
+
+        if (ranked.Count == 0)
+        {
+            stack.Children.Add(HeroClock());
+        }
+        else
+        {
+            foreach (var a in ranked.Take(MaxRows)) stack.Children.Add(Row(a));
+            if (ranked.Count > MaxRows)
+            {
+                var more = Txt(12, FontWeights.Medium, Theme.Tertiary);
+                more.Text = $"还有 {ranked.Count - MaxRows} 条";
+                more.Margin = new Thickness(46, 0, 0, 2);
+                stack.Children.Add(more);
+            }
+            stack.Children.Add(Footer());
+        }
+        _expanded.Children.Add(stack);
+        stack.Measure(new Size(ExpandedW, double.PositiveInfinity));
+        _expandedH = Math.Ceiling(stack.DesiredSize.Height + 14 + 10);
+        _expanded.Height = _expandedH;
+        if (_mode == Mode.Expanded) _h.Target = _expandedH;
+    }
+
+    private FrameworkElement HeroClock()
+    {
+        var g = new Grid { Height = 76 };
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var left = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0) };
+        var big = new TextBlock { Text = _clockText, FontFamily = Theme.Display, FontSize = 38, FontWeight = FontWeights.SemiBold, Foreground = Theme.Primary };
+        var date = Txt(13, FontWeights.Medium, Theme.Secondary);
+        date.Text = DateTime.Now.ToString("M月d日 dddd", new CultureInfo("zh-CN"));
+        date.Margin = new Thickness(2, -2, 0, 0);
+        left.Children.Add(big);
+        left.Children.Add(date);
+        g.Children.Add(left);
+        if (_weather is { } w)
+        {
+            var right = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 0, 6, 0) };
+            var line = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            var gl = Glyph(Theme.WeatherGlyph(w.Code), 22, Theme.Primary);
+            gl.Margin = new Thickness(0, 4, 8, 0);
+            line.Children.Add(gl);
+            line.Children.Add(new TextBlock { Text = $"{w.Temperature:0}°", FontFamily = Theme.Display, FontSize = 30, FontWeight = FontWeights.Medium, Foreground = Theme.Primary });
+            right.Children.Add(line);
+            var d = Txt(12.5, FontWeights.Medium, Theme.Secondary);
+            d.Text = $"成都 · {WeatherParser.Describe(w.Code)}  {w.Low:0}° / {w.High:0}°";
+            d.HorizontalAlignment = HorizontalAlignment.Right;
+            right.Children.Add(d);
+            Grid.SetColumn(right, 1);
+            g.Children.Add(right);
+        }
+        return g;
+    }
+
+    private FrameworkElement Row(LiveActivity a)
+    {
+        var g = new Grid { Height = RowH, Background = Brushes.Transparent };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var tile = Tile(a.Source, 34, 10);
+        tile.VerticalAlignment = VerticalAlignment.Center;
+        g.Children.Add(tile);
+
+        var mid = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 12, 0) };
+        var t = Txt(14, FontWeights.SemiBold, Theme.Primary);
+        t.Text = a.Title;
+        mid.Children.Add(t);
+        var sub = Txt(12.5, FontWeights.Normal, Theme.Secondary);
+        sub.Text = string.IsNullOrWhiteSpace(a.Body) ? Theme.SourceName(a.Source) : $"{Theme.SourceName(a.Source)} · {a.Body}";
+        sub.Margin = new Thickness(0, 2, 0, 0);
+        mid.Children.Add(sub);
+        if (a.Progress is { } p)
+        {
+            var track = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = Theme.Fill, Margin = new Thickness(0, 6, 0, 0) };
+            var fill = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = Theme.Blue, HorizontalAlignment = HorizontalAlignment.Left };
+            track.Child = fill;
+            track.SizeChanged += (_, e) => fill.Width = Math.Max(3, e.NewSize.Width * Math.Clamp(p, 0, 1));
+            mid.Children.Add(track);
+        }
+        Grid.SetColumn(mid, 1);
+        g.Children.Add(mid);
+
+        var right = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right };
+        var st = StatusView(a, compact: false);
+        st.HorizontalAlignment = HorizontalAlignment.Right;
+        right.Children.Add(st);
+        var ago = Txt(11, FontWeights.Normal, Theme.Tertiary);
+        ago.Text = Theme.Ago(a.Updated);
+        ago.HorizontalAlignment = HorizontalAlignment.Right;
+        ago.Margin = new Thickness(0, 3, 0, 0);
+        right.Children.Add(ago);
+        Grid.SetColumn(right, 2);
+        g.Children.Add(right);
+
+        if (!a.Sticky)
+        {
+            g.Cursor = Cursors.Hand;
+            g.ToolTip = null;
+            g.MouseRightButtonUp += (_, e) => { _store.Remove(a.Id); e.Handled = true; };
+        }
+        return g;
+    }
+
+    private FrameworkElement Footer()
+    {
+        var g = new Grid { Height = 40, Margin = new Thickness(0, 2, 0, 0) };
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var left = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 0, 0) };
+        if (_weather is { } w)
+        {
+            var gl = Glyph(Theme.WeatherGlyph(w.Code), 13, Theme.Secondary);
+            gl.Margin = new Thickness(0, 1, 7, 0);
+            left.Children.Add(gl);
+            var tx = Txt(12.5, FontWeights.Medium, Theme.Secondary);
+            tx.Text = $"{w.Temperature:0}°  {WeatherParser.Describe(w.Code)}  {w.Low:0}° / {w.High:0}°";
+            left.Children.Add(tx);
+        }
+        g.Children.Add(left);
+        var clock = Txt(12.5, FontWeights.Medium, Theme.Secondary);
+        clock.Text = DateTime.Now.ToString("M月d日 ddd  HH:mm", new CultureInfo("zh-CN"));
+        clock.VerticalAlignment = VerticalAlignment.Center;
+        clock.Margin = new Thickness(0, 0, 2, 0);
+        Grid.SetColumn(clock, 1);
+        g.Children.Add(clock);
+        return g;
+    }
+
+    // ───────────────────────────── 小部件 ─────────────────────────────
+
+    private static FrameworkElement StatusView(LiveActivity a, bool compact)
+    {
+        switch (a.Kind)
+        {
+            case ActivityKind.Running when a.Progress is { } p:
+                return Ring(p, compact ? 16 : 18);
+            case ActivityKind.Running:
+                return Spinner(compact ? 15 : 17);
+            case ActivityKind.Done:
+                return Glyph("\uE73E", compact ? 13 : 14, Theme.Green);
+            case ActivityKind.WaitingApproval:
+                return Chip("待确认", Theme.Orange);
+            case ActivityKind.Error:
+                return Chip("出错", Theme.Red);
+            case ActivityKind.Warning:
+                return Glyph("\uE7BA", compact ? 13 : 14, Theme.Orange);
+            default:
+                return compact ? new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), Background = Theme.Blue }
+                               : new Border { Width = 0 };
+        }
+    }
+
+    private static FrameworkElement Chip(string text, Brush color)
+    {
+        var tb = new TextBlock { Text = text, FontFamily = Theme.Text, FontSize = 11.5, FontWeight = FontWeights.SemiBold, Foreground = color };
+        var c = ((SolidColorBrush)color).Color;
+        return new Border
+        {
+            Child = tb, Padding = new Thickness(8, 2, 8, 3), CornerRadius = new CornerRadius(10),
+            Background = Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x2E, c.R, c.G, c.B))),
+        };
+    }
+
+    // 苹果式 8 辐条活动指示器：本来就是逐格跳动的，10 fps 就够，渲染开销只有连续旋转的几分之一
+    private static readonly DoubleAnimationUsingKeyFrames SpinAnim = MakeSpin();
+    private static DoubleAnimationUsingKeyFrames MakeSpin()
+    {
+        var a = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromSeconds(0.8), RepeatBehavior = RepeatBehavior.Forever };
+        for (var i = 0; i < 8; i++) a.KeyFrames.Add(new DiscreteDoubleKeyFrame(i * 45, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(i * 0.1))));
+        Timeline.SetDesiredFrameRate(a, 10);
+        a.Freeze();
+        return a;
+    }
+
+    private static FrameworkElement Spinner(double size)
+    {
+        var c = new Canvas { Width = size, Height = size };
+        var sw = Math.Max(1.6, size * 0.12);
+        var sh = size * 0.28;
+        for (var i = 0; i < 8; i++)
+        {
+            var spoke = new Rectangle
+            {
+                Width = sw, Height = sh, RadiusX = sw / 2, RadiusY = sw / 2,
+                Fill = Theme.Primary, Opacity = 0.18 + 0.82 * (i / 7.0),
+                RenderTransform = new RotateTransform(i * 45, sw / 2, size / 2),
+            };
+            Canvas.SetLeft(spoke, (size - sw) / 2);
+            c.Children.Add(spoke);
+        }
+        var rot = new RotateTransform(0, size / 2, size / 2);
+        c.RenderTransform = rot;
+        rot.BeginAnimation(RotateTransform.AngleProperty, SpinAnim);
+        return c;
+    }
+
+    private static FrameworkElement Ring(double p, double size)
+    {
+        var g = new Grid { Width = size, Height = size };
+        g.Children.Add(new Ellipse { Stroke = Theme.Fill, StrokeThickness = 2.2 });
+        g.Children.Add(ArcPath(size, Math.Clamp(p, 0.02, 0.999), Theme.Blue, 2.2));
+        return g;
+    }
+
+    private static Path ArcPath(double size, double fraction, Brush stroke, double thick)
+    {
+        var r = (size - thick) / 2;
+        var c = size / 2;
+        var angle = fraction * 2 * Math.PI;
+        var start = new Point(c, c - r);
+        var end = new Point(c + r * Math.Sin(angle), c - r * Math.Cos(angle));
+        var fig = new PathFigure { StartPoint = start, IsClosed = false };
+        fig.Segments.Add(new ArcSegment(end, new Size(r, r), 0, fraction > 0.5, SweepDirection.Clockwise, true));
+        var geo = new PathGeometry([fig]);
+        geo.Freeze();
+        return new Path { Data = geo, Stroke = stroke, StrokeThickness = thick, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
+    }
+
+    private static FrameworkElement Tile(string source, double size, double radius)
+    {
+        var (color, glyph, text) = Theme.Mark(source);
+        var top = Color.FromRgb((byte)Math.Min(255, color.R + 22), (byte)Math.Min(255, color.G + 22), (byte)Math.Min(255, color.B + 22));
+        var b = new Border
+        {
+            Width = size, Height = size, CornerRadius = new CornerRadius(radius),
+            Background = Theme.Freeze(new LinearGradientBrush(top, color, 90)),
+        };
+        var tb = text != null
+            ? new TextBlock { Text = text, FontFamily = new FontFamily("Segoe UI Symbol"), FontSize = size * 0.62, Foreground = Brushes.White, FontWeight = FontWeights.Bold }
+            : new TextBlock { Text = glyph, FontFamily = Theme.Icons, FontSize = size * 0.5, Foreground = Brushes.White };
+        tb.HorizontalAlignment = HorizontalAlignment.Center;
+        tb.VerticalAlignment = VerticalAlignment.Center;
+        b.Child = tb;
+        return b;
+    }
+
+    private static TextBlock Txt(double size, FontWeight weight, Brush fg) => new()
+    {
+        FontFamily = Theme.Text, FontSize = size, FontWeight = weight, Foreground = fg,
+        TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap,
+    };
+
+    private static TextBlock Glyph(string g, double size, Brush fg) => new()
+    {
+        Text = g, FontFamily = Theme.Icons, FontSize = size, Foreground = fg, VerticalAlignment = VerticalAlignment.Center,
+    };
+
+    private double MeasureText(string s, double size, FontWeight w)
+    {
+        var ft = new FormattedText(s, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+            new Typeface(Theme.Text, FontStyles.Normal, w, FontStretches.Normal), size, Brushes.White,
+            VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        return ft.WidthIncludingTrailingWhitespace;
+    }
+}
