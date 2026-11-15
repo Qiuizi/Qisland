@@ -29,14 +29,21 @@ public sealed class IslandWindow : Window
     private readonly bool _layered;
 
     private readonly Canvas _root = new() { Width = WinW, Height = WinH };
-    private readonly Border _pill = new() { Background = Theme.Pill, SnapsToDevicePixels = false };
-    private readonly Grid _content = new() { ClipToBounds = false };
+    // 胶囊、阴影都是 Path + RectangleGeometry：每帧只改几何参数，只触发重绘，不触发布局
+    private readonly RectangleGeometry _pillGeo = new();
+    private readonly Path _pill = new() { Fill = Theme.Pill };
+    private readonly Canvas _content = new() { Width = WinW, Height = WinH };
+    private readonly ScaleTransform _bubbleScale = new(1, 1);
+    private readonly TranslateTransform _bubbleShift = new();
+    private bool _expDirty = true;
+    private int _frames, _slowFrames;
+    private double _maxDt;
     private readonly RectangleGeometry _clip = new();
     private readonly Grid _idle = new(), _compact = new(), _expanded = new();
     private readonly Border _bubble = new() { Background = Theme.Pill, Width = CompactH, Height = CompactH, CornerRadius = new CornerRadius(CompactH / 2) };
     private readonly TranslateTransform _rootShift = new();
     private static readonly (double k, byte a)[] ShadowLayers = [(14, 0x07), (9, 0x0C), (5, 0x14), (2, 0x22)];
-    private readonly List<Border> _shadows = [];
+    private readonly List<RectangleGeometry> _shadows = [];
 
     private readonly Spring _w = new(IdleW), _h = new(IdleH), _r = new(IdleH / 2);
     private readonly Spring _idleOp = new(1) { Response = 0.30, DampingRatio = 1, Epsilon = 0.004 };
@@ -54,7 +61,7 @@ public sealed class IslandWindow : Window
     private string? _lastTopId;
     private DateTime _lastTopUpdated;
     private IntPtr _hwnd;
-    private readonly DispatcherTimer _poll = new(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(33) };
+    private readonly DispatcherTimer _poll = new(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(16) };
     private readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromSeconds(1) };
     private string _clockText = "";
     private WeatherSnapshot? _weather;
@@ -102,17 +109,17 @@ public sealed class IslandWindow : Window
         // 阴影不用 DropShadowEffect（每帧都要重新模糊整块像素），用几层半透明圆角矩形叠出柔和的投影
         foreach (var (k, a) in ShadowLayers)
         {
-            var sb = new Border { Background = Theme.Freeze(new SolidColorBrush(Color.FromArgb(a, 0, 0, 0))), IsHitTestVisible = false };
-            _shadows.Add(sb);
-            _root.Children.Add(sb);
+            var g = new RectangleGeometry();
+            _shadows.Add(g);
+            _root.Children.Add(new Path { Data = g, Fill = Theme.Freeze(new SolidColorBrush(Color.FromArgb(a, 0, 0, 0))), IsHitTestVisible = false });
         }
+        _pill.Data = _pillGeo;
         _root.Children.Add(_pill);
 
         _content.Clip = _clip;
         foreach (var layer in new[] { _idle, _compact, _expanded })
         {
-            layer.HorizontalAlignment = HorizontalAlignment.Center;
-            layer.VerticalAlignment = VerticalAlignment.Top;
+            Canvas.SetTop(layer, TopGap);
             layer.RenderTransformOrigin = new Point(0.5, 0);
             layer.RenderTransform = new ScaleTransform(1, 1);
             _content.Children.Add(layer);
@@ -120,11 +127,15 @@ public sealed class IslandWindow : Window
         _root.Children.Add(_content);
 
         _bubble.Opacity = 0;
+        _bubble.RenderTransformOrigin = new Point(0, 0.5);
+        _bubble.RenderTransform = new TransformGroup { Children = { _bubbleScale, _bubbleShift } };
+        Canvas.SetTop(_bubble, TopGap);
         _root.Children.Add(_bubble);
 
         // 空闲：左时钟，右天气
         _idle.Height = IdleH;
         _idle.Width = IdleW;
+        Place(_idle, IdleW);
         _idle.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _idle.ColumnDefinitions.Add(new ColumnDefinition());
         _idle.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -174,8 +185,7 @@ public sealed class IslandWindow : Window
 
     private void SetMode(Mode m)
     {
-        if (m == Mode.Expanded) RebuildExpanded();
-        if (m == Mode.Compact) RebuildCompact();
+        if (m == Mode.Expanded && _expDirty) RebuildExpanded();
         _mode = m;
         var top = _store.Ranked();
         (_w.Target, _h.Target, _r.Target) = m switch
@@ -185,8 +195,8 @@ public sealed class IslandWindow : Window
             _ => (IdleW, IdleH, IdleH / 2),
         };
         // 展开时更有弹性，收起时更干脆
-        var resp = m == Mode.Expanded ? 0.46 : 0.38;
-        var damp = m == Mode.Expanded ? 0.78 : 0.88;
+        var resp = m == Mode.Expanded ? 0.42 : 0.36;
+        var damp = m == Mode.Expanded ? 0.86 : 0.96;
         foreach (var s in new[] { _w, _h, _r }) { s.Response = resp; s.DampingRatio = damp; }
         _idleOp.Target = m == Mode.Idle ? 1 : 0;
         _compactOp.Target = m == Mode.Compact ? 1 : 0;
@@ -211,7 +221,8 @@ public sealed class IslandWindow : Window
         _lastTopUpdated = top?.Updated ?? DateTime.MinValue;
         RebuildCompact();
         RebuildBubble(ranked);
-        if (_mode == Mode.Expanded) { RebuildExpanded(); SetMode(Mode.Expanded); }
+        RebuildExpanded(); // 数据变化时就预先建好展开视图，悬停展开那一帧不再临时造控件
+        if (_mode == Mode.Expanded) SetMode(Mode.Expanded);
         else if (fresh && !_hidden) { _peekUntil = DateTime.Now.AddSeconds(4); SetMode(Mode.Expanded); }
         else SetMode(DesiredRestMode());
     }
@@ -220,7 +231,8 @@ public sealed class IslandWindow : Window
     {
         var now = DateTime.Now;
         var text = now.ToString("HH:mm", CultureInfo.InvariantCulture);
-        if (text != _clockText) { _clockText = text; _idleClock.Text = text; if (_mode == Mode.Expanded) RebuildExpanded(); }
+        if (text != _clockText) { _clockText = text; _idleClock.Text = text; _expDirty = true; }
+        if (_expDirty && !_animating) RebuildExpanded();
         if (now.Second % 5 == 0) _store.Expire();
         if (_peekUntil != DateTime.MinValue && now > _peekUntil && !_pinned && _hoverSince == DateTime.MaxValue)
         {
@@ -229,14 +241,13 @@ public sealed class IslandWindow : Window
         }
         var full = Native.ForegroundIsFullscreen();
         if (full != _hidden) { _hidden = full; _show.Target = full ? 0 : 1; Kick(); }
-        if (_mode == Mode.Expanded && now.Second == 0) RebuildExpanded();
     }
 
     public void SetWeather(WeatherSnapshot w)
     {
         _weather = w;
         RebuildIdle();
-        if (_mode == Mode.Expanded) RebuildExpanded();
+        _expDirty = true;
     }
 
     // ───────────────────────────── 鼠标 ─────────────────────────────
@@ -265,7 +276,7 @@ public sealed class IslandWindow : Window
         {
             if (_hoverSince == DateTime.MaxValue) _hoverSince = now;
             _outsideSince = DateTime.MinValue;
-            if (_mode != Mode.Expanded && (now - _hoverSince).TotalMilliseconds > 160) SetMode(Mode.Expanded);
+            if (_mode != Mode.Expanded && (now - _hoverSince).TotalMilliseconds > 90) SetMode(Mode.Expanded);
         }
         else
         {
@@ -277,7 +288,7 @@ public sealed class IslandWindow : Window
 
         // 鼠标离岛很远时降低轮询频率，空转几乎不耗 CPU
         var far = y > WinH + 160 || x < -300 || x > WinW + 300;
-        var want = far && !_animating ? 120 : 33;
+        var want = far && !_animating ? 50 : 16;
         if ((int)_poll.Interval.TotalMilliseconds != want) _poll.Interval = TimeSpan.FromMilliseconds(want);
     }
 
@@ -297,6 +308,7 @@ public sealed class IslandWindow : Window
         if (t == _lastRender) return;
         var dt = _lastRender == TimeSpan.Zero ? 1.0 / 60 : (t - _lastRender).TotalSeconds;
         _lastRender = t;
+        _frames++; _maxDt = Math.Max(_maxDt, dt); if (dt > 0.025) _slowFrames++;
         var settled = true;
         foreach (var s in Springs) { s.Step(dt); settled &= s.IsSettled; }
         ApplyFrame();
@@ -304,6 +316,8 @@ public sealed class IslandWindow : Window
         {
             CompositionTarget.Rendering -= OnRendering;
             _animating = false;
+            App.Log($"anim → {_mode}: {_frames} 帧, 掉帧 {_slowFrames}, 最长 {_maxDt * 1000:0} ms");
+            _frames = 0; _slowFrames = 0; _maxDt = 0;
             if (_mode != Mode.Expanded) App.TrimSoon();
         }
     }
@@ -315,43 +329,41 @@ public sealed class IslandWindow : Window
         var r = Math.Clamp(_r.Value, 4, h / 2);
         var left = (WinW - w) / 2;
 
-        _pill.Width = w; _pill.Height = h;
-        _pill.CornerRadius = new CornerRadius(r);
-        Canvas.SetLeft(_pill, left); Canvas.SetTop(_pill, TopGap);
-        _content.Width = w; _content.Height = h;
-        Canvas.SetLeft(_content, left); Canvas.SetTop(_content, TopGap);
+        _pillGeo.Rect = new Rect(left, TopGap, w, h);
+        _pillGeo.RadiusX = _pillGeo.RadiusY = r;
         for (var i = 0; i < _shadows.Count; i++)
         {
             var k = ShadowLayers[i].k;
-            var sb = _shadows[i];
-            sb.Width = w + 2 * k; sb.Height = h + 2 * k;
-            sb.CornerRadius = new CornerRadius(r + k);
-            Canvas.SetLeft(sb, left - k); Canvas.SetTop(sb, TopGap - k + 5);
+            var g = _shadows[i];
+            g.Rect = new Rect(left - k, TopGap - k + 5, w + 2 * k, h + 2 * k);
+            g.RadiusX = g.RadiusY = r + k;
         }
-        _clip.Rect = new Rect(0, 0, w, h);
+        _clip.Rect = new Rect(left, TopGap, w, h);
         _clip.RadiusX = _clip.RadiusY = r;
 
         Fade(_idle, _idleOp.Value);
         Fade(_compact, _compactOp.Value);
         Fade(_expanded, _expOp.Value);
 
-        _bubble.Opacity = Math.Clamp(_bubbleOp.Value, 0, 1);
+        var bo = Math.Clamp(_bubbleOp.Value, 0, 1);
+        _bubble.Opacity = bo;
         var bScale = 0.6 + 0.4 * Math.Clamp(_bubbleOp.Value, 0, 1.2);
-        _bubble.RenderTransformOrigin = new Point(0, 0.5);
-        _bubble.RenderTransform = new ScaleTransform(bScale, bScale);
-        Canvas.SetLeft(_bubble, left + w + 8 - (1 - _bubbleOp.Value) * 22);
-        Canvas.SetTop(_bubble, TopGap);
+        _bubbleScale.ScaleX = _bubbleScale.ScaleY = bScale;
+        _bubbleShift.X = left + w + 8 - (1 - _bubbleOp.Value) * 22;
 
         var show = Math.Clamp(_show.Value, 0, 1);
         _root.Opacity = show;
         _rootShift.Y = (1 - show) * -(TopGap + h);
     }
 
+    private static void Place(FrameworkElement layer, double width) => Canvas.SetLeft(layer, Math.Round((WinW - width) / 2));
+
     private static void Fade(FrameworkElement layer, double v)
     {
         var o = Math.Clamp(v, 0, 1);
         layer.Opacity = o;
-        layer.Visibility = o < 0.01 ? Visibility.Hidden : Visibility.Visible;
+        var vis = o < 0.01 ? Visibility.Hidden : Visibility.Visible;
+        if (layer.Visibility != vis) layer.Visibility = vis;
         var st = (ScaleTransform)layer.RenderTransform;
         st.ScaleX = st.ScaleY = 0.94 + 0.06 * o;
     }
@@ -407,6 +419,7 @@ public sealed class IslandWindow : Window
         var textW = MeasureText(src, 13, FontWeights.Medium) + MeasureText("  " + a.Title, 13, FontWeights.SemiBold);
         _compactW = Math.Clamp(7 + 24 + 10 + Math.Min(textW, 270) + 10 + status.DesiredSize.Width + 13, 230, 420);
         _compact.Width = _compactW;
+        Place(_compact, _compactW);
         if (_mode == Mode.Compact) _w.Target = _compactW;
     }
 
@@ -434,6 +447,8 @@ public sealed class IslandWindow : Window
     {
         _expanded.Children.Clear();
         _expanded.Width = ExpandedW;
+        Place(_expanded, ExpandedW);
+        _expDirty = false;
         var stack = new StackPanel { Margin = new Thickness(16, 14, 16, 0) };
         var ranked = _store.Ranked();
 
