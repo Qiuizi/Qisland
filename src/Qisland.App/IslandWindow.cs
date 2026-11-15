@@ -656,13 +656,16 @@ public sealed partial class IslandWindow : Window
         var music = Media?.Current;
 
         var cd = CountdownStrip();
+        foreach (var ac in ApprovalCards()) stack.Children.Add(ac);
         if (FocusDoneCard() is { } fd) stack.Children.Add(fd);
+        var qc = QuotaCard();
         if (ranked.Count == 0)
         {
             stack.Children.Add(HeroClock());
             if (cd != null) stack.Children.Add(cd);
             if (tc != null) stack.Children.Add(tc);
             if (hw != null) stack.Children.Add(hw);
+            if (qc != null) stack.Children.Add(qc);
             if (RainHint() is { } rh) stack.Children.Add(rh);
             if (music != null) stack.Children.Add(Glassy(MusicWithLyrics(music)));
             if (_todos.Count > 0) stack.Children.Add(Glassy(TodoBlock()));
@@ -680,6 +683,7 @@ public sealed partial class IslandWindow : Window
                 rows.Children.Add(more);
             }
             if (rows.Children.Count > 0) stack.Children.Add(Glassy(rows));
+            if (qc != null) stack.Children.Add(qc);
             if (tc != null) stack.Children.Add(tc);
             if (hw != null) stack.Children.Add(hw);
             if (_todos.Count > 0) stack.Children.Add(Glassy(TodoBlock()));

@@ -31,6 +31,8 @@ public sealed class App : Application
     private HomeworkHub? _homework;
     private YuketangService? _ykt;
     private XuexitongService? _xxt;
+    private ApprovalBroker? _approvals;
+    private CodexQuota? _quota;
     private VolumeWatcher? _volume;
     private SystemWatch _sys = null!;
     private Updater _upd = null!;
@@ -45,7 +47,7 @@ public sealed class App : Application
     [STAThread]
     public static int Main(string[] args)
     {
-        if (args.Length >= 2 && args[0] == "hook") return HookRelay.Run(args[1]);
+        if (args.Length >= 2 && args[0] == "hook") return HookRelay.Run(args[1], args.Contains("--approve"));
         var snapshot = args.Contains("--snapshot");
         using var mutex = new Mutex(true, snapshot ? @"Local\Qisland.Snapshot" : @"Local\Qisland.Island", out var first);
         if (!first)
@@ -147,6 +149,15 @@ public sealed class App : Application
             _homework.Tick(); _window.OnHomeworkChanged();
         }
         catch (Exception ex) { Log("作业: " + ex.Message); }
+        try
+        {
+            _approvals = new ApprovalBroker(a => Dispatcher.BeginInvoke(a));
+            _window.Approvals = _approvals; _approvals.Changed += _window.OnApprovalsChanged;
+            if (_api != null) _api.Approval = _approvals.Request;
+            _quota = new CodexQuota(a => Dispatcher.BeginInvoke(a));
+            _window.Quota = _quota; _quota.Changed += _window.OnQuotaChanged;
+        }
+        catch (Exception ex) { Log("Codex: " + ex.Message); }
         try { _todo = new TodoFile(_store); _window.Todo = _todo; _todo.Changed += () => _window.SetTodos(_todo.Open); _window.SetTodos(_todo.Open); }
         catch (Exception ex) { Log("待办: " + ex.Message); }
         _toasts = new ToastMirror(_store);
@@ -171,6 +182,7 @@ public sealed class App : Application
             if (_tickN % 30 == 0) { try { _classes?.Tick(); } catch (Exception ex) { Log("课表: " + ex.Message); } }
             if (_tickN % 10 == 0) { try { _ykt?.Tick(); } catch (Exception ex) { Log("雨课堂: " + ex.Message); } }
             if (_tickN % 10 == 5) { try { _xxt?.Tick(); } catch (Exception ex) { Log("学习通: " + ex.Message); } }
+            if (_tickN % 10 == 7) { try { _quota?.Tick(); } catch (Exception ex) { Log("Codex 额度: " + ex.Message); } }
             if (_tickN % 60 == 0) { try { _homework?.Tick(); _window.OnHomeworkChanged(); } catch (Exception ex) { Log("作业: " + ex.Message); } }
         };
         _tick.Start();
@@ -337,6 +349,29 @@ public sealed class App : Application
             hwRefresh.Text = last is { } t ? $"立即刷新作业（上次 {t:HH:mm}）" : "立即刷新作业";
         };
         menu.Items.Add(hwMenu);
+        var cdx = new System.Windows.Forms.ToolStripMenuItem("Codex");
+        var approve = new System.Windows.Forms.ToolStripMenuItem("在岛上批准 Codex 请求") { ToolTipText = "Codex 要你批准命令时，岛上直接点允许 / 拒绝；100 秒不点就回终端问你。只改 ~/.codex/hooks.json 里 Qisland 的 PermissionRequest 一条，改前备份。" };
+        approve.Click += (_, _) => Dispatcher.BeginInvoke(() =>
+        {
+            var on = CodexApproveHook.IsOn() == true;
+            if (!on && System.Windows.MessageBox.Show("打开后，Codex 请求执行命令时会先等你在灵动岛上点「允许 / 拒绝 / 回终端」，最多等 100 秒，不点就照常在终端里问你，不会默认同意。\n\n这会修改 ~/.codex/hooks.json 里 Qisland 自己的 PermissionRequest 条目（改为同步、超时 120 秒），原文件备份为 hooks.json.qisland-bak。新开的 Codex 会话生效。\n\n确定打开？", "Qisland", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+            if (!CodexApproveHook.Set(!on)) System.Windows.MessageBox.Show("没改成：没找到 ~/.codex/hooks.json 里 Qisland 的 PermissionRequest 条目，或文件写不进去。", "Qisland");
+            else if (on) _approvals?.CancelAll();
+        });
+        var quotaItem = new System.Windows.Forms.ToolStripMenuItem("额度：读取中…");
+        quotaItem.Click += (_, _) => Dispatcher.BeginInvoke(() => { _quota?.Refresh(); _window?.OnQuotaChanged(); });
+        cdx.DropDownItems.Add(approve);
+        cdx.DropDownItems.Add(quotaItem);
+        cdx.DropDownOpening += (_, _) =>
+        {
+            var st = CodexApproveHook.IsOn();
+            approve.Enabled = st != null; approve.Checked = st == true;
+            if (st == null) approve.Text = "在岛上批准 Codex 请求（未找到 Qisland 的 Codex hook）";
+            quotaItem.Text = _quota is { Fresh: true } q
+                ? $"额度：5 小时已用 {q.Primary?.UsedPercent ?? 0:0}% · 本周已用 {q.Secondary?.UsedPercent ?? 0:0}%（{q.LastOk:HH:mm}，点击刷新）"
+                : "额度：还没读到（点击刷新）";
+        };
+        menu.Items.Add(cdx);
         menu.Items.Add("编辑倒计时", null, (_, _) => Process.Start(new ProcessStartInfo("notepad.exe", "\"" + Countdowns.PathName + "\"") { UseShellExecute = true }));
         var lyr = new System.Windows.Forms.ToolStripMenuItem("显示歌词") { CheckOnClick = true, Checked = LyricsService.Enabled, ToolTipText = "播放音乐时胶囊里滚动显示当前这句歌词（网易云 / LRCLIB）" };
         lyr.CheckedChanged += (_, _) => Dispatcher.BeginInvoke(() => { LyricsService.Enabled = lyr.Checked; _lyrics?.OnTrack(null); _lyrics?.OnTrack(_media?.Current); });

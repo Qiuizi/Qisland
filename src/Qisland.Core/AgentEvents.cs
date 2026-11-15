@@ -181,7 +181,7 @@ public static class AgentEventParser
         };
     }
 
-    internal static string FirstString(JsonElement root, params string[] names)
+    public static string FirstString(JsonElement root, params string[] names)
     {
         foreach (var name in names)
         {

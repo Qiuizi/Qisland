@@ -16,6 +16,8 @@ public sealed class ApiServer : IDisposable
     private readonly Action<Action> _post;
     private readonly ActivityStore _store;
     private readonly CancellationTokenSource _cts = new();
+    /// <summary>挂起式审批：hook 连着不放，直到岛上给出决定（allow / deny / 空）。</summary>
+    public Func<string, string, Task<string>>? Approval { get; set; }
 
     public ApiServer(int port, ActivityStore store, Action<Action> postToUi)
     {
@@ -50,7 +52,10 @@ public sealed class ApiServer : IDisposable
                 client.ReceiveTimeout = 3000;
                 var stream = client.GetStream();
                 var (method, path, body) = await ReadRequest(stream);
-                var (code, json) = Route(method, path, body);
+                var clean = path.Split('?')[0].TrimEnd('/');
+                var (code, json) = method == "POST" && clean.StartsWith("/v1/approval/", StringComparison.Ordinal) && Approval != null
+                    ? (200, $"{{\"decision\":{JsonSerializer.Serialize(await Approval(clean["/v1/approval/".Length..], body))}}}")
+                    : Route(method, path, body);
                 var payload = Encoding.UTF8.GetBytes(json);
                 var head = $"HTTP/1.1 {code} {(code == 200 ? "OK" : "Error")}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {payload.Length}\r\nConnection: close\r\n\r\n";
                 await stream.WriteAsync(Encoding.ASCII.GetBytes(head));
