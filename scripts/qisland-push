@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# 从标准输入读 JSON，推到 Windows 上的 Qisland。
+# 镜像网络：127.0.0.1 即可。
+# NAT：再试 resolv.conf 的 nameserver；仍失败就把文件写到 Windows 收件箱。
+set -u
+PORT="${QISLAND_PORT:-9840}"
+TOKEN="${QISLAND_TOKEN:-}"
+BODY="$(cat)"
+if [ -z "$BODY" ]; then
+  exit 0
+fi
+
+post() {
+  if [ -n "$TOKEN" ]; then
+    curl -fsS -m 2 -X POST "$1" \
+      -H "Content-Type: application/json" \
+      -H "X-Qisland-Token: $TOKEN" \
+      -H "X-WinIslands-Token: $TOKEN" \
+      --data-binary "$BODY"
+  else
+    curl -fsS -m 2 -X POST "$1" \
+      -H "Content-Type: application/json" \
+      --data-binary "$BODY"
+  fi
+}
+
+# 有 title 且不是 hook 原文时走通用推送，否则走 ingest。
+PATH_SUFFIX="/v1/qisland/ingest"
+if printf '%s' "$BODY" | grep -q '"title"' && ! printf '%s' "$BODY" | grep -Eq '"hook_event_name"|"source"|"kind"'; then
+  PATH_SUFFIX="/v3/island/push"
+fi
+
+if post "http://127.0.0.1:${PORT}${PATH_SUFFIX}" >/dev/null; then
+  exit 0
+fi
+
+HOST=""
+if [ -r /etc/resolv.conf ]; then
+  HOST="$(awk '/^nameserver / { print $2; exit }' /etc/resolv.conf)"
+fi
+if [ -z "$HOST" ]; then
+  HOST="$(ip route show default 2>/dev/null | awk '{ for (i = 1; i <= NF; i++) if ($i == "via") { print $(i + 1); exit } }')"
+fi
+if [ -n "$HOST" ] && [ "$HOST" != "127.0.0.1" ]; then
+  if post "http://${HOST}:${PORT}${PATH_SUFFIX}" >/dev/null; then
+    exit 0
+  fi
+fi
+
+WIN_USER="${WIN_USER:-}"
+if [ -z "$WIN_USER" ] && command -v cmd.exe >/dev/null 2>&1; then
+  WIN_USER="$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r')"
+fi
+if [ -z "$WIN_USER" ]; then
+  echo "qisland-push: 设好 WIN_USER 后再写收件箱" >&2
+  exit 1
+fi
+INBOX="/mnt/c/Users/${WIN_USER}/AppData/Roaming/Qisland/inbox"
+mkdir -p "$INBOX" 2>/dev/null || true
+STAMP="$(date +%s%N 2>/dev/null || date +%s)"
+printf '%s\n' "$BODY" > "${INBOX}/${STAMP}.json"
+exit 0

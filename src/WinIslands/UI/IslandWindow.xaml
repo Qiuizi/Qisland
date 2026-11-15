@@ -1,0 +1,1518 @@
+<Window x:Class="WinIslands.UI.IslandWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:conv="clr-namespace:WinIslands.UI.Converters"
+        xmlns:karaoke="clr-namespace:WinIslands.UI"
+        Title="Qisland"
+        FontFamily="Segoe UI Variable, MiSans, Segoe UI, Microsoft YaHei UI"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        ResizeMode="NoResize"
+        Width="419" Height="140"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display"
+        SnapsToDevicePixels="True"
+        RenderOptions.BitmapScalingMode="Linear"
+        RenderOptions.EdgeMode="Unspecified">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="MenuGlass.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        <conv:BoolToVisibilityConverter x:Key="BoolToVis"/>
+        <conv:BoolToVisibilityConverter x:Key="BoolToVisInvert" Invert="True"/>
+        <conv:NullToVisibilityConverter x:Key="NullToVis"/>
+        <conv:NullToVisibilityConverter x:Key="NullToVisInvert" Invert="True"/>
+        <conv:Mdl2GlyphFontConverter x:Key="GlyphFont"/>
+
+        <!-- Icon button (transparent, hover highlight) -->
+        <Style x:Key="IconButton" TargetType="Button">
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Foreground" Value="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{Binding ButtonHoverBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#22FFFFFF}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.35"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Thin progress slider -->
+        <Style x:Key="ThinSlider" TargetType="Slider">
+            <Setter Property="Height" Value="22"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <Border x:Name="Track" Height="4" CornerRadius="2"
+                                    Background="{Binding SliderTrackBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#66FFFFFF}"/>
+                            <Border x:Name="Fill" Height="4" CornerRadius="2" HorizontalAlignment="Left"
+                                    Background="{Binding AccentBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#6C5CE7}"/>
+                            <Track x:Name="PART_Track">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="Slider.DecreaseLarge" Opacity="0"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb x:Name="PART_Thumb" Width="12" Height="12" Margin="0">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Ellipse x:Name="thumb" Fill="{Binding SliderThumbBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}"
+                                                         Stroke="{Binding AccentBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#6C5CE7}" StrokeThickness="2"/>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="Slider.IncreaseLarge" Opacity="0"/>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="PART_Thumb" Property="Opacity" Value="1"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="False">
+                                <Setter TargetName="PART_Thumb" Property="Opacity" Value="0"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 逐句卡拉OK歌词：非当前句淡化，当前句醒目；展开态固定使用参考项目的紧凑 10/12px 字号。 -->
+        <!-- 展开歌词每行样式：字号/行距/行高绑定窗口属性（固定参考布局），当前句动画放大+高亮。 -->
+        <!-- 注意：此样式由 UpdateLyricLineStyle() 按参考字号动态重建；XAML 默认值仅在启动瞬间兜底 -->
+                <Style x:Key="LyricLineText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="{Binding LyricBaseFontSize, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=10}"/>
+            <Setter Property="Foreground" Value="{Binding ExpandedLyricBaseBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+            <Setter Property="TextWrapping" Value="NoWrap"/>
+            <Setter Property="Margin" Value="{Binding LyricLineMargin, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=&quot;0,6&quot;}"/>
+            <Setter Property="LineHeight" Value="{Binding LyricLineHeight, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=15}"/>
+            <Setter Property="Opacity" Value="0.28"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="karaoke:LyricEmphasis.TargetScale" Value="1.2"/>
+            <Setter Property="karaoke:LyricEmphasis.DurationMs" Value="240"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                    <!-- 2.3.2: opacity is driven by the LyricEmphasis normalized-progress spring (sync with scale);
+                         the fixed-duration fade Storyboards were removed so the text never pops in separately -->
+                    <Setter Property="FontWeight" Value="Bold"/>
+                    <Setter Property="Foreground" Value="{Binding ExpandedLyricHighlightBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}"/>
+                    <Setter Property="karaoke:LyricEmphasis.IsCurrent" Value="True"/>
+                    <Setter Property="TextWrapping" Value="Wrap"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="LyricLineBorder" TargetType="Border">
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="2,2"/>
+            <Setter Property="MinHeight" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
+    </ResourceDictionary>
+    </Window.Resources>
+
+    <Grid x:Name="Root" Background="{x:Null}">
+        <!--
+            仿 iOS 灵动岛：透明宿主窗口提供固定画布，仅内部卡片形变。
+            紧凑 = 340x56 胶囊；展开态统一为参考项目的 419×140，不再按内容向下生长。
+            透明区域点击穿透（WPF 按渲染内容命中测试）。
+        -->
+        <Border x:Name="Card" Width="360" Height="72" CornerRadius="28"
+                HorizontalAlignment="Center" VerticalAlignment="Top"
+                ClipToBounds="True"
+                Background="{Binding CardBackground, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#101018}"
+                BorderThickness="0"
+                AllowDrop="True" PreviewMouseWheel="Card_PreviewMouseWheel" PreviewKeyDown="Card_PreviewKeyDown"
+                DragOver="Card_DragOver" DragLeave="Card_DragLeave" Drop="Card_Drop"
+                ContextMenuOpening="Card_ContextMenuOpening">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="28" ShadowDepth="0" Opacity="0.45" Color="#000000" RenderingBias="Performance"/>
+            </Border.Effect>
+            <Border.ContextMenu>
+                <ContextMenu x:Name="IslandMenu">
+                    <MenuItem x:Name="MenuCenterAlign" Header="居中对齐" Click="MenuCenterAlign_Click"/>
+                    <MenuItem x:Name="MenuLock" Header="上锁" Click="MenuLock_Click"/>
+                    <Separator/>
+                    <MenuItem x:Name="MenuOnlineLyrics" Header="在线歌词（免配置）" IsCheckable="True" Click="MenuOnlineLyrics_Click"/>
+                </ContextMenu>
+            </Border.ContextMenu>
+
+            <Grid>
+                <!-- 智能透明度分层（1.2.1）：紧凑态透明、展开态更实。GlassLayer 用主题底色叠加，
+                     展开时平滑升不透明度、收起时回落，配合封面取色（CoverTint）时自动归零不叠加。 -->
+                <Border x:Name="GlassLayer" IsHitTestVisible="False" Opacity="0" ClipToBounds="True" CornerRadius="28"/>
+                <ItemsControl x:Name="ActivityDots" Panel.ZIndex="6"
+                              HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,18,0"
+                              ItemsSource="{Binding SecondaryDots}"
+                              Visibility="{Binding HasSecondaryDots, Converter={StaticResource BoolToVis}}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Ellipse Width="7" Height="7" Margin="3,0" Fill="{Binding Brush}"
+                                     ToolTip="{Binding Title}" RenderTransformOrigin="0.5,0.5">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="RenderTransform">
+                                            <Setter.Value>
+                                                <ScaleTransform ScaleX="1" ScaleY="1"/>
+                                            </Setter.Value>
+                                        </Setter>
+                                        <Style.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter Property="RenderTransform">
+                                                    <Setter.Value>
+                                                        <ScaleTransform ScaleX="1.7" ScaleY="1.7"/>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                    <ItemsControl.ToolTip>
+                        <ToolTip Placement="Bottom" BorderThickness="0" Padding="12,8" Background="#F2141418"
+                                 DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
+                            <ItemsControl ItemsSource="{Binding SecondaryDots}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="0,3">
+                                            <TextBlock Text="{Binding Title}" Foreground="White" FontSize="12" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding Detail}" Foreground="#C8C8D0" FontSize="11" TextWrapping="Wrap" MaxWidth="240"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ToolTip>
+                    </ItemsControl.ToolTip>
+                </ItemsControl>
+                <Grid x:Name="ContentGrid" Margin="10,6,10,6" VerticalAlignment="Center">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- ═══ 胶囊行（始终可见）═══ -->
+                <Grid x:Name="PillRow" VerticalAlignment="Center">
+                    <Grid.RenderTransform>
+                        <TransformGroup>
+                            <ScaleTransform x:Name="PillRowScale" ScaleX="1" ScaleY="1"/>
+                            <TranslateTransform x:Name="PillRowTranslate" Y="0"/>
+                        </TransformGroup>
+                    </Grid.RenderTransform>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center"
+                                Visibility="{Binding HasActivePush, Converter={StaticResource BoolToVisInvert}}">
+                    <!-- 上岛推送（第三方软件推送到灵动岛）：紧凑态即展示全部内容，尺寸自适应 -->
+                    <!-- 上岛推送（第三方软件推送到灵动岛）：紧凑态单行显示（图标 + 标题 + 单行摘要），展开态展示完整详情 -->
+                    <!-- xiaotang-daozai reference notice: fixed 334x44, two-line text, close button, bell + red dot. -->
+                    <Border x:Name="CompactPushCard" Grid.Column="0" Width="334" Height="44"
+                            Margin="-10,-6,-10,-6" HorizontalAlignment="Left" VerticalAlignment="Center"
+                            RenderTransformOrigin="0.5,0.5" ClipToBounds="False"
+                            Visibility="{Binding HasActivePush, Converter={StaticResource BoolToVis}}">
+                        <Border.RenderTransform>
+                            <ScaleTransform x:Name="CompactPushScale" ScaleX="0.94" ScaleY="0.94"/>
+                        </Border.RenderTransform>
+                        <Canvas>
+                            <TextBlock Canvas.Left="16" Canvas.Top="5" Width="198"
+                                       Text="{Binding ActivePushTitle}" FontSize="11" FontWeight="SemiBold" Foreground="White"
+                                       TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Canvas.Left="16" Canvas.Top="21" Width="198"
+                                       Text="{Binding ActivePushSummary}" FontSize="10.5" Foreground="#9E9EA2"
+                                       TextTrimming="CharacterEllipsis"
+                                       Visibility="{Binding ActivePushHasSummary, Converter={StaticResource BoolToVis}}"/>
+                            <Button Canvas.Left="226" Canvas.Top="12" Width="60" Height="20"
+                                    Cursor="Hand" Click="DismissPush_Click">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="NoticeButtonBg" CornerRadius="10" Background="#232323">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="NoticeButtonBg" Property="Background" Value="#3A3A3F"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                                <TextBlock Text="关闭" FontSize="10.5" FontWeight="SemiBold" Foreground="White"/>
+                            </Button>
+                            <TextBlock Canvas.Left="302" Canvas.Top="7" FontFamily="Segoe MDL2 Assets" FontSize="14"
+                                       Text="&#xE7ED;" Foreground="#9E9EA2"/>
+                            <Ellipse Canvas.Left="312" Canvas.Top="15" Width="4" Height="4" Fill="#FF4848"/>
+                        </Canvas>
+                    </Border>
+
+                    <!-- 按「组件顺序」动态渲染：歌曲信息 / 时间 / 天气（播放时含歌曲，空闲时去掉） -->
+                    <!-- 微信/QQ 未读图标栈（岛仔同款：图标 + 红点，点击切回窗口） -->
+                    <ItemsControl ItemsSource="{Binding MessengerUnreads}" VerticalAlignment="Center" Margin="0,0,8,0"
+                                  Visibility="{Binding HasMessengerUnreads, Converter={StaticResource BoolToVis}}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Tag="{Binding}" Click="MessengerUnread_Click" Cursor="Hand"
+                                        Background="Transparent" BorderThickness="0" Padding="0" Margin="0,0,4,0"
+                                        ToolTip="{Binding SourceName}">
+                                    <Grid Width="24" Height="24">
+                                        <Border CornerRadius="12" Background="{Binding AccentBrush}">
+                                            <TextBlock Text="{Binding Glyph}" FontFamily="{Binding GlyphFont}" FontSize="12"
+                                                       Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <Ellipse Width="7" Height="7" Fill="#FF4848"
+                                                 HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-1,-1,0"/>
+                                    </Grid>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <ItemsControl ItemsSource="{Binding CompactItems}" VerticalAlignment="Center">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.Resources>
+                            <DataTemplate x:Key="TimeItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <!-- 岛仔同款：细描边圆环 + 粗体时间 -->
+                                    <Border Width="18" Height="18" CornerRadius="9" Margin="0,0,6,0" VerticalAlignment="Center"
+                                            BorderBrush="{Binding AccentBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#7955B8}"
+                                            BorderThickness="1.5"
+                                            Visibility="{Binding IsDaozai, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="&#xE823;" FontFamily="Segoe MDL2 Assets" FontSize="9"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   Foreground="{Binding AccentBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#7955B8}"/>
+                                    </Border>
+                                    <TextBlock Text="{Binding DataContext.ClockText, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                               FontSize="{Binding DataContext.WidgetTimeFontSize, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                               FontWeight="Bold" VerticalAlignment="Center"
+                                               Foreground="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="WeatherItem">
+                                <TextBlock Text="{Binding DataContext.WeatherText, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                           FontSize="11" VerticalAlignment="Center" Margin="0,0,10,0" TextTrimming="CharacterEllipsis"
+                                           ToolTip="{Binding DataContext.WeatherDetailText, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                           Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                            </DataTemplate>
+                            <DataTemplate x:Key="PluginItem">
+                                <Border Background="Transparent" Cursor="Hand" MouseLeftButtonUp="PluginItem_MouseLeftButtonUp"
+                                        ToolTip="{Binding ToolTip}" Loaded="PluginItem_Loaded">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                        <Image Source="{Binding Image}" Width="14" Height="14" Stretch="Uniform" Margin="0,0,4,0"
+                                               Visibility="{Binding Image, Converter={StaticResource NullToVis}}"/>
+                                        <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}"
+                                                   FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                                   Visibility="{Binding Image, Converter={StaticResource NullToVisInvert}}"
+                                                   Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                        <Ellipse Width="5" Height="5" Fill="{Binding AccentBrush}" Margin="0,0,4,0" VerticalAlignment="Center"
+                                                 Visibility="{Binding AccentBrush, Converter={StaticResource NullToVis}}"/>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Text}" FontSize="10" VerticalAlignment="Center"
+                                                       TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" MaxWidth="200"
+                                                       Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                            <ProgressBar Value="{Binding Progress}" Maximum="1" Height="3" Width="80" HorizontalAlignment="Left"
+                                                         Margin="0,2,0,0" Visibility="{Binding Progress, Converter={StaticResource NullToVis}}"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                            <DataTemplate x:Key="DiskItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.DiskText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="DateItem">
+                                <TextBlock Text="{Binding DataContext.DateText, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                           FontSize="11" VerticalAlignment="Center" Margin="0,0,10,0"
+                                           Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                            </DataTemplate>
+                            <DataTemplate x:Key="CpuItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.CpuText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="GpuItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.GpuText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="MicItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.MicText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="CamItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.CamText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="RamItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.RamText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="NetItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.NetText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.NetTextUp, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center" Margin="3,0,0,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <Polyline Points="{Binding DataContext.NetCurvePoints, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                              Stroke="{Binding AccentBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#6C5CE7}"
+                                              StrokeThickness="1.5" Width="64" Height="14" Stretch="None" Margin="6,0,0,0"
+                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="BatteryItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.BatteryText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="VolumeItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.VolumeText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="CapsLockItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.CapsLockText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="ClipboardItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.ClipboardSummary, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="TodoItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.TodoSummary, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="InputMethodItem">
+                                <Button Style="{StaticResource IconButton}" Width="Auto" Height="Auto" MinWidth="0" Padding="6,3" Margin="0,0,10,0"
+                                        Click="InputMethodItem_Click"
+                                        ToolTip="{Binding DataContext.InputMethodHint, RelativeSource={RelativeSource AncestorType=ItemsControl}}">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                                   Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                        <TextBlock Text="{Binding DataContext.InputMethodText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                                   Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                            <DataTemplate x:Key="QuickTogglesItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0"
+                                            ToolTip="{Binding DataContext.QuickTogglesHint, RelativeSource={RelativeSource AncestorType=Window}}">
+                                    <Button Style="{StaticResource IconButton}" Width="Auto" Height="Auto" MinWidth="0" Padding="6,3" Margin="0,0,4,0" Tag="wifi" Click="QuickToggle_Click">
+                                        <TextBlock Text="{Binding DataContext.QuickWifiText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                                   Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    </Button>
+                                    <Button Style="{StaticResource IconButton}" Width="Auto" Height="Auto" MinWidth="0" Padding="6,3" Margin="0,0,4,0" Tag="bluetooth" Click="QuickToggle_Click">
+                                        <TextBlock Text="{Binding DataContext.QuickBtText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                                   Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    </Button>
+                                    <Button Style="{StaticResource IconButton}" Width="Auto" Height="Auto" MinWidth="0" Padding="6,3" Margin="0,0,4,0" Tag="night" Click="QuickToggle_Click">
+                                        <TextBlock Text="{Binding DataContext.QuickNightText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                                   Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    </Button>
+                                    <Button Style="{StaticResource IconButton}" Width="Auto" Height="Auto" MinWidth="0" Padding="6,3" Margin="0,0,0,0" Tag="mute" Click="QuickToggle_Click">
+                                        <TextBlock Text="{Binding DataContext.QuickMuteText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                                   Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    </Button>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="TimerItem">
+                                <Button Style="{StaticResource IconButton}" Width="Auto" Height="Auto" MinWidth="0" Padding="6,3" Margin="0,0,10,0"
+                                        Click="TimerItem_Click"
+                                        ToolTip="{Binding DataContext.TimerToolTip, RelativeSource={RelativeSource AncestorType=ItemsControl}}">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                                   Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                        <TextBlock Text="{Binding DataContext.TimerText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                                   Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                        <TextBlock Text="&#xE769;" FontFamily="Segoe MDL2 Assets" FontSize="9" VerticalAlignment="Center" Margin="3,0,0,0"
+                                                   Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"
+                                                   Visibility="{Binding DataContext.TimerPaused, RelativeSource={RelativeSource AncestorType=ItemsControl}, Converter={StaticResource BoolToVis}}"/>
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                            <DataTemplate x:Key="ScheduleItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.ScheduleSummary, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="HolidayItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.HolidayText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="MeetingItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.MeetingText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="ScreenCapItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.ScreenshotStatusText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="RecordingItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.RecordingText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="VolumeTempItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0" Opacity="0">
+                                    <StackPanel.RenderTransform>
+                                        <TranslateTransform x:Name="VolumeTempTranslate" Y="6"/>
+                                    </StackPanel.RenderTransform>
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,6,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <ProgressBar Width="58" Height="4" Maximum="1" VerticalAlignment="Center" Margin="0,0,6,0"
+                                                 Value="{Binding DataContext.VolumeTempPercent, RelativeSource={RelativeSource AncestorType=ItemsControl}, Mode=OneWay}">
+                                        <ProgressBar.Template>
+                                            <ControlTemplate TargetType="ProgressBar">
+                                                <Grid>
+                                                    <Border CornerRadius="2" Background="{Binding SliderTrackBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#33FFFFFF}"/>
+                                                    <Border x:Name="PART_Indicator" CornerRadius="2" HorizontalAlignment="Left"
+                                                            Background="{Binding AccentBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#6C5CE7}"/>
+                                                </Grid>
+                                            </ControlTemplate>
+                                        </ProgressBar.Template>
+                                    </ProgressBar>
+                                    <TextBlock Text="{Binding DataContext.VolumeTempText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                                <DataTemplate.Triggers>
+                                    <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                                        <BeginStoryboard>
+                                            <Storyboard Timeline.DesiredFrameRate="120">
+                                                <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.22">
+                                                    <DoubleAnimation.EasingFunction>
+                                                        <CubicEase EasingMode="EaseOut"/>
+                                                    </DoubleAnimation.EasingFunction>
+                                                </DoubleAnimation>
+                                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" From="6" To="0" Duration="0:0:0.22">
+                                                    <DoubleAnimation.EasingFunction>
+                                                        <CubicEase EasingMode="EaseOut"/>
+                                                    </DoubleAnimation.EasingFunction>
+                                                </DoubleAnimation>
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </EventTrigger>
+                                    <DataTrigger Binding="{Binding DataContext.VolumeTempFading, RelativeSource={RelativeSource AncestorType=ItemsControl}}" Value="True">
+                                        <DataTrigger.EnterActions>
+                                            <BeginStoryboard>
+                                                <Storyboard Timeline.DesiredFrameRate="120">
+                                                    <DoubleAnimation Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.26">
+                                                        <DoubleAnimation.EasingFunction>
+                                                            <CubicEase EasingMode="EaseIn"/>
+                                                        </DoubleAnimation.EasingFunction>
+                                                    </DoubleAnimation>
+                                                    <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" To="6" Duration="0:0:0.26">
+                                                        <DoubleAnimation.EasingFunction>
+                                                            <CubicEase EasingMode="EaseIn"/>
+                                                        </DoubleAnimation.EasingFunction>
+                                                    </DoubleAnimation>
+                                                </Storyboard>
+                                            </BeginStoryboard>
+                                        </DataTrigger.EnterActions>
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                            <DataTemplate x:Key="UsageItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.UsageMergeText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="FileCopyItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.FileCopyText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="DownloadItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DataContext.DownloadText, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                            <DataTemplate x:Key="FileTransferItem">
+                                <Border Tag="FileTransfer" CornerRadius="8" Padding="7,3" Margin="0,0,8,0" VerticalAlignment="Center"
+                                        Background="{Binding PushCardBackground, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#221B1B26}"
+                                        BorderBrush="{Binding PushCardBorder, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#59FFFFFF}"
+                                        BorderThickness="1" Cursor="SizeAll"
+                                        ToolTip="{Binding DataContext.FileTransferToolTip, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                        PreviewMouseLeftButtonDown="FileTransferItem_Down"
+                                        PreviewMouseMove="FileTransferItem_Move"
+                                        PreviewMouseLeftButtonUp="FileTransferItem_Up">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="10" VerticalAlignment="Center" Margin="0,0,5,0"
+                                                   Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                        <Grid MaxWidth="180" ClipToBounds="True">
+                                            <TextBlock Text="{Binding DataContext.FileTransferSummary, RelativeSource={RelativeSource AncestorType=ItemsControl}}" FontSize="10" VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis" karaoke:Marquee.IsEnabled="{Binding MarqueeEnabled, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                       Foreground="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}"/>
+                                        </Grid>
+                                        <Button Style="{StaticResource IconButton}" Padding="1,0" Margin="5,0,2,0" VerticalAlignment="Center" Click="FileTransferClear_Click"
+                                                ToolTip="{Binding DataContext.FileTransferRemoveTip, RelativeSource={RelativeSource AncestorType=Window}}">
+                                            <TextBlock Text="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="8"/>
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                            <DataTemplate x:Key="SongItem">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Border Tag="SongCover" Width="40" Height="40" CornerRadius="12" Margin="0,0,10,0"
+                                            Background="{Binding AccentBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#6C5CE7}">
+                                        <Grid>
+                                            <Image Source="{Binding DataContext.Artwork, RelativeSource={RelativeSource AncestorType=Window}}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality"
+                                                   Visibility="{Binding DataContext.Artwork, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource NullToVis}}"/>
+                                            <TextBlock Text="{Binding Icon}" FontFamily="{Binding Icon, Converter={StaticResource GlyphFont}}" FontSize="18" Foreground="White"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       Visibility="{Binding DataContext.Artwork, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource NullToVisInvert}}"/>
+                                        </Grid>
+                                    </Border>
+                                    <!-- 多行模式（默认）：歌名 / 歌手 / 歌词 / 进度条 -->
+                                    <StackPanel x:Name="MultiLineInfo" VerticalAlignment="Center">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Grid MaxWidth="220" ClipToBounds="True">
+                                            <TextBlock Text="{Binding DataContext.Title, RelativeSource={RelativeSource AncestorType=Window}}" FontSize="12" FontWeight="SemiBold"
+                                                       Foreground="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}"
+                                                       karaoke:Marquee.IsEnabled="{Binding MarqueeEnabled, RelativeSource={RelativeSource AncestorType=Window}}" karaoke:FadeOnTextChange.Enabled="True"
+                                                       VerticalAlignment="Center"/>
+                                        </Grid>
+                                            <!-- 播放来源徽标（如 Spotify / 网易云音乐），无来源名时隐藏 -->
+                                            <Border CornerRadius="6" Background="#22FFFFFF" BorderThickness="0" Padding="4,1" Margin="6,0,0,0" VerticalAlignment="Center"
+                                                    Visibility="{Binding DataContext.HasSourceDetail, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                                                <TextBlock Text="{Binding DataContext.SourceDetail, RelativeSource={RelativeSource AncestorType=Window}}" FontSize="9" MaxWidth="70" TextTrimming="CharacterEllipsis"
+                                                           Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                            </Border>
+                                        </StackPanel>
+                                        <TextBlock Text="{Binding DataContext.Artist, RelativeSource={RelativeSource AncestorType=Window}}" FontSize="10" Margin="0,1,0,0" karaoke:FadeOnTextChange.Enabled="True"
+                                                   Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <Grid MaxWidth="300" ClipToBounds="True">
+                                            <karaoke:KaraokeTextBlock
+                                                KaraokeText="{Binding DataContext.CurrentLyricText, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            EntranceFadeEnabled="True"
+                                                HighlightFraction="{Binding DataContext.CompactHighlightFraction, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                Words="{Binding DataContext.CurrentLyricWords, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                PositionSeconds="{Binding DataContext.KaraokePositionSeconds, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                IsPlaying="{Binding DataContext.IsPlaying, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                KaraokeSpeed="{Binding LyricKaraokeSpeed, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=1}"
+                                                HighlightBrush="{Binding CompactLyricHighlightBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}"
+                                                BaseBrush="{Binding CompactLyricBaseBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#80FFFFFF}"
+                                                karaoke:Marquee.IsEnabled="{Binding MarqueeEnabled, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                FontSize="11.5" Margin="0,2,0,0" TextAlignment="Left" FontWeight="SemiBold" Opacity="0.95"/>
+                                        </Grid>
+                                        <ProgressBar Height="3" Maximum="1"
+                                                     Value="{Binding DataContext.Progress, RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Margin="0,4,0,0">
+                                            <ProgressBar.Template>
+                                                <ControlTemplate TargetType="ProgressBar">
+                                                    <Grid>
+                                                        <Border CornerRadius="2" Background="#33FFFFFF"/>
+                                                        <Border x:Name="PART_Indicator" CornerRadius="2" HorizontalAlignment="Left"
+                                                                Background="{Binding AccentBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#6C5CE7}"/>
+                                                    </Grid>
+                                                </ControlTemplate>
+                                            </ProgressBar.Template>
+                                        </ProgressBar>
+                                    </StackPanel>
+                                    <!-- 单行模式：封面 + 歌名 - 歌手（一行） -->
+                                    <StackPanel x:Name="SingleLineInfo" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
+                                        <Grid MaxWidth="140" ClipToBounds="True">
+                                        <TextBlock Text="{Binding DataContext.Title, RelativeSource={RelativeSource AncestorType=Window}}" FontSize="12" FontWeight="SemiBold"
+                                                   Foreground="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}"
+                                                   karaoke:Marquee.IsEnabled="{Binding MarqueeEnabled, RelativeSource={RelativeSource AncestorType=Window}}" karaoke:FadeOnTextChange.Enabled="True"
+                                                   VerticalAlignment="Center"/>
+                                    </Grid>
+                                        <TextBlock Text="{Binding DataContext.Artist, RelativeSource={RelativeSource AncestorType=Window}}" FontSize="10" Margin="6,0,0,0" karaoke:FadeOnTextChange.Enabled="True"
+                                                   Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"
+                                                   TextTrimming="CharacterEllipsis" MaxWidth="100" VerticalAlignment="Center"/>
+                                        <TextBlock Text="&#x00B7;" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"
+                                                   Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"
+                                                   Visibility="{Binding DataContext.HasLyrics, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}"/>
+                                        <Grid MaxWidth="420" ClipToBounds="True" Margin="0,0,14,0"
+                                        Visibility="{Binding DataContext.HasLyrics, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                                        <karaoke:KaraokeTextBlock
+                                            KaraokeText="{Binding DataContext.CurrentLyricText, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            EntranceFadeEnabled="True"
+                                            HighlightFraction="{Binding DataContext.CompactHighlightFraction, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            Words="{Binding DataContext.CurrentLyricWords, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            PositionSeconds="{Binding DataContext.KaraokePositionSeconds, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            IsPlaying="{Binding DataContext.IsPlaying, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            KaraokeSpeed="{Binding LyricKaraokeSpeed, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=1}"
+                                            HighlightBrush="{Binding CompactLyricHighlightBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}"
+                                            BaseBrush="{Binding CompactLyricBaseBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#A0FFFFFF}"
+                                            FontSize="11" Margin="8,0,0,0"
+                                            TextAlignment="Left" FontWeight="SemiBold"
+                                            karaoke:Marquee.IsEnabled="{Binding MarqueeEnabled, RelativeSource={RelativeSource AncestorType=Window}}" karaoke:FadeOnTextChange.Enabled="True"
+                                            VerticalAlignment="Center"/>
+                                    </Grid>
+                                    </StackPanel>
+                                </StackPanel>
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding SingleLineMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                        <Setter TargetName="MultiLineInfo" Property="Visibility" Value="Collapsed"/>
+                                        <Setter TargetName="SingleLineInfo" Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ItemsControl.Resources>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                <ContentControl Focusable="False" Content="{Binding}">
+                                    <ContentControl.Style>
+                                        <Style TargetType="ContentControl">
+                                            <Setter Property="ContentTemplate" Value="{StaticResource SongItem}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsPlugin}" Value="True">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource PluginItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Time">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource TimeItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Weather">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource WeatherItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Date">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource DateItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Disk">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource DiskItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="InputMethod">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource InputMethodItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="QuickToggles">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource QuickTogglesItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Cpu">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource CpuItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Gpu">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource GpuItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Mic">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource MicItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Cam">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource CamItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Ram">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource RamItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Net">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource NetItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Battery">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource BatteryItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Volume">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource VolumeItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="CapsLock">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource CapsLockItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Clipboard">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource ClipboardItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Todo">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource TodoItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Timer">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource TimerItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Schedule">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource ScheduleItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Holiday">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource HolidayItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Meeting">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource MeetingItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="ScreenCap">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource ScreenCapItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Recording">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource RecordingItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="VolumeTemp">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource VolumeTempItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Usage">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource UsageItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="FileCopy">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource FileCopyItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Download">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource DownloadItem}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="FileTransfer">
+                                                    <Setter Property="ContentTemplate" Value="{StaticResource FileTransferItem}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ContentControl.Style>
+                                </ContentControl>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    </StackPanel>
+
+                    <!-- 低电量常驻胶囊 + 媒体控制按钮（靠右） -->
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0"
+                                Visibility="{Binding HasActivePush, Converter={StaticResource BoolToVisInvert}}">
+                        <!-- 低电量常驻指示（1.2.4）：电量低于阈值且未接电源时右上角胶囊常驻显示，随电量变化，不反复弹通知 -->
+                        <Border CornerRadius="9" Padding="8,3" Margin="0,0,8,0" VerticalAlignment="Center"
+                                Background="{Binding LowBatteryBadgeBackground}"
+                                Visibility="{Binding ShowLowBatteryBadge, Converter={StaticResource BoolToVis}}">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="&#xEBA0;" FontFamily="Segoe MDL2 Assets" FontSize="11" Margin="0,0,5,0"
+                                           VerticalAlignment="Center" Foreground="{Binding LowBatteryBadgeBrush}"/>
+                                <TextBlock Text="{Binding LowBatteryBadgeText}" FontSize="11.5" FontWeight="SemiBold"
+                                           VerticalAlignment="Center" Foreground="{Binding LowBatteryBadgeBrush}"/>
+                            </StackPanel>
+                        </Border>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                                    Visibility="{Binding HasMedia, Converter={StaticResource BoolToVis}}">
+                        <!-- 声音波纹：随音量起伏（紧凑行） -->
+                                                <StackPanel x:Name="WaveBoxCompact" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0"
+                                    Visibility="{Binding HasWave, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                                        <StackPanel x:Name="WaveBarsPanelCompact" Orientation="Horizontal">
+                            <Border Width="2.2" Height="12" CornerRadius="1.1" VerticalAlignment="Center" Margin="0,0,1.8,0"
+                                Background="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}">
+                                <Border.RenderTransformOrigin>0.5,0.5</Border.RenderTransformOrigin>
+                                <Border.RenderTransform><ScaleTransform x:Name="WaveBarC1" ScaleY="0.16"/></Border.RenderTransform>
+                            </Border>
+                            <Border Width="2.2" Height="12" CornerRadius="1.1" VerticalAlignment="Center" Margin="0,0,1.8,0"
+                                Background="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}">
+                                <Border.RenderTransformOrigin>0.5,0.5</Border.RenderTransformOrigin>
+                                <Border.RenderTransform><ScaleTransform x:Name="WaveBarC2" ScaleY="0.16"/></Border.RenderTransform>
+                            </Border>
+                            <Border Width="2.2" Height="12" CornerRadius="1.1" VerticalAlignment="Center" Margin="0,0,1.8,0"
+                                Background="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}">
+                                <Border.RenderTransformOrigin>0.5,0.5</Border.RenderTransformOrigin>
+                                <Border.RenderTransform><ScaleTransform x:Name="WaveBarC3" ScaleY="0.16"/></Border.RenderTransform>
+                            </Border>
+                            <Border Width="2.2" Height="12" CornerRadius="1.1" VerticalAlignment="Center" Margin="0,0,1.8,0"
+                                Background="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}">
+                                <Border.RenderTransformOrigin>0.5,0.5</Border.RenderTransformOrigin>
+                                <Border.RenderTransform><ScaleTransform x:Name="WaveBarC4" ScaleY="0.16"/></Border.RenderTransform>
+                            </Border>
+                            <Border Width="2.2" Height="12" CornerRadius="1.1" VerticalAlignment="Center" Margin="0,0,1.8,0"
+                                Background="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}">
+                                <Border.RenderTransformOrigin>0.5,0.5</Border.RenderTransformOrigin>
+                                <Border.RenderTransform><ScaleTransform x:Name="WaveBarC5" ScaleY="0.16"/></Border.RenderTransform>
+                            </Border>
+                            <Border Width="2.2" Height="12" CornerRadius="1.1" VerticalAlignment="Center" Margin="0,0,1.8,0"
+                                Background="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}">
+                                <Border.RenderTransformOrigin>0.5,0.5</Border.RenderTransformOrigin>
+                                <Border.RenderTransform><ScaleTransform x:Name="WaveBarC6" ScaleY="0.16"/></Border.RenderTransform>
+                            </Border>
+                            <Border Width="2.2" Height="12" CornerRadius="1.1" VerticalAlignment="Center" Margin="0,0,1.8,0"
+                                Background="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}">
+                                <Border.RenderTransformOrigin>0.5,0.5</Border.RenderTransformOrigin>
+                                <Border.RenderTransform><ScaleTransform x:Name="WaveBarC7" ScaleY="0.16"/></Border.RenderTransform>
+                            </Border>
+                        </StackPanel>
+                            <Grid x:Name="WaveSpectrumHostCompact" Width="46" Height="13" VerticalAlignment="Center" Visibility="Collapsed"/>
+                            <Grid x:Name="WaveRingHostCompact" Width="18" Height="18" VerticalAlignment="Center" Margin="0,0,6,0" Visibility="Collapsed"/>
+                            <Grid x:Name="WaveParticlesHostCompact" Width="18" Height="18" VerticalAlignment="Center" Margin="0,0,6,0" Visibility="Collapsed"/>
+                        </StackPanel>
+                        <Button Style="{StaticResource IconButton}" Command="{Binding PlayPauseCommand}">
+                            <TextBlock Text="{Binding PlayPauseGlyph}" FontFamily="Segoe MDL2 Assets" FontSize="14"/>
+                        </Button>
+                        <Button Style="{StaticResource IconButton}" Command="{Binding NextCommand}">
+                            <TextBlock Text="&#xE893;" FontFamily="Segoe MDL2 Assets" FontSize="14"/>
+                        </Button>
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+
+                <!-- ═══ 展开内容 ═══ -->
+                <ScrollViewer x:Name="ExpandedContent" Grid.Row="0" Grid.RowSpan="2" Margin="4,0" RenderTransformOrigin="0.5,0.5"
+                              Background="Transparent"
+                              Visibility="Collapsed" Opacity="0" VerticalScrollBarVisibility="Hidden"
+                              PanningMode="VerticalOnly">
+                    <ScrollViewer.RenderTransform>
+                        <TransformGroup>
+                            <ScaleTransform x:Name="ExpandedScale" ScaleX="1" ScaleY="1"/>
+                            <TranslateTransform x:Name="ExpandedTranslate" Y="0"/>
+                        </TransformGroup>
+                    </ScrollViewer.RenderTransform>
+                    <StackPanel>
+                    <!-- 岛仔顶栏：日期/时钟 + 设置齿轮（不显示 WINISLANDS 标题） -->
+                    <Grid x:Name="DaozaiHeader" Height="20" Margin="0,0,0,2"
+                          Visibility="{Binding IsDaozai, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Border Width="18" Height="18" CornerRadius="9" Margin="0,0,6,0" VerticalAlignment="Center"
+                                    BorderBrush="{Binding AccentBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#7955B8}"
+                                    BorderThickness="1.5">
+                                <TextBlock Text="&#xE823;" FontFamily="Segoe MDL2 Assets" FontSize="9"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Foreground="{Binding AccentBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#7955B8}"/>
+                            </Border>
+                            <TextBlock Text="{Binding DateText}" FontSize="11" VerticalAlignment="Center"
+                                       Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#8E8E99}"/>
+                            <TextBlock Text="{Binding ClockText}" FontSize="12.5" FontWeight="Bold" VerticalAlignment="Center" Margin="6,0,0,0"
+                                       Foreground="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}"/>
+                        </StackPanel>
+                        <Button HorizontalAlignment="Right" Style="{StaticResource IconButton}" Command="{Binding OpenSettingsCommand}" ToolTip="设置">
+                            <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="14"/>
+                        </Button>
+                    </Grid>
+                    <!-- 微信/QQ 未读面板（展开时逐个账号/图标，点击直达窗口） -->
+                    <Grid Margin="0,0,0,8" Visibility="{Binding HasMessengerUnreads, Converter={StaticResource BoolToVis}}">
+                        <ItemsControl ItemsSource="{Binding MessengerUnreads}" HorizontalAlignment="Left">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Tag="{Binding}" Click="MessengerUnread_Click" Cursor="Hand"
+                                            Background="Transparent" BorderThickness="0" Padding="0" Margin="0,0,6,0"
+                                            ToolTip="{Binding SourceName}">
+                                        <Grid Width="34" Height="34">
+                                            <Border CornerRadius="17" Background="{Binding AccentBrush}">
+                                                <TextBlock Text="{Binding Glyph}" FontFamily="{Binding GlyphFont}" FontSize="16"
+                                                           Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <Ellipse Width="8" Height="8" Fill="#FF4848"
+                                                     HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-1,-1,0"/>
+                                        </Grid>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button HorizontalAlignment="Right" Padding="10,4" Cursor="Hand" Background="Transparent" BorderThickness="0"
+                                Click="MessengerClearAll_Click">
+                            <TextBlock Text="全部已读" FontSize="10.5"
+                                       Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#8E8E99}"/>
+                        </Button>
+                    </Grid>
+                    <!-- 上岛推送详情（第三方软件推送，展开时优先级最高，置于顶部） -->
+                    <Border x:Name="ExpandedPushCard" Visibility="{Binding HasActivePush, Converter={StaticResource BoolToVis}}"
+                            CornerRadius="14"
+                            Background="{Binding PushCardBackground, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#221B1B26}"
+                            BorderBrush="{Binding PushCardBorder, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#59FFFFFF}"
+                            BorderThickness="1" Padding="12,10" Margin="0,0,0,10">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <Border Width="40" Height="40" CornerRadius="20" Margin="0,0,10,0" ClipToBounds="False"
+                                        Background="{Binding ActivePushBadgeBrush, FallbackValue=#6C5CE7}">
+                                    <Grid>
+                                        <TextBlock Text="{Binding ActivePushBadgeGlyph}" FontFamily="{Binding ActivePushBadgeFont}" FontSize="18"
+                                                   Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   Visibility="{Binding ActivePushHasImage, Converter={StaticResource BoolToVisInvert}}"/>
+                                        <Image Source="{Binding ActivePushImageSource}" Stretch="UniformToFill"
+                                               Visibility="{Binding ActivePushHasImage, Converter={StaticResource BoolToVis}}"/>
+                                        <Ellipse Width="8" Height="8" Fill="#FF4848" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-1,-1,0"
+                                                 Visibility="{Binding ActivePushHasRedDot, Converter={StaticResource BoolToVis}}"/>
+                                    </Grid>
+                                </Border>
+                                <TextBlock Text="{Binding ActivePushTitle}" FontSize="15" FontWeight="SemiBold" MaxWidth="560" VerticalAlignment="Center"
+                                           Foreground="{Binding PushCardForeground, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                            <TextBlock Text="{Binding ActivePushSubtitle}" FontSize="11.5" MaxWidth="560" Margin="0,2,0,0"
+                                       Foreground="{Binding PushCardSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"
+                                       TextTrimming="CharacterEllipsis"
+                                       Visibility="{Binding ActivePushHasSubtitle, Converter={StaticResource BoolToVis}}"/>
+                            <TextBlock Text="{Binding ActivePushBody}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap" MaxWidth="560"
+                                       Foreground="{Binding PushCardSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"
+                                       Visibility="{Binding ActivePushHasBody, Converter={StaticResource BoolToVis}}"/>
+                            <ProgressBar Height="4" Maximum="1" Value="{Binding ActivePushProgress, Mode=OneWay}" Margin="0,8,0,0"
+                                         Visibility="{Binding ActivePushHasProgress, Converter={StaticResource BoolToVis}}">
+                                <ProgressBar.Template>
+                                    <ControlTemplate TargetType="ProgressBar">
+                                        <Grid>
+                                            <Border CornerRadius="2" Background="#33FFFFFF"/>
+                                            <Border x:Name="PART_Indicator" CornerRadius="2" HorizontalAlignment="Left"
+                                                    Background="{Binding AccentBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#6C5CE7}"/>
+                                        </Grid>
+                                    </ControlTemplate>
+                                </ProgressBar.Template>
+                            </ProgressBar>
+                            <ItemsControl ItemsSource="{Binding ActivePushButtons}" Margin="0,8,0,0"
+                                          Visibility="{Binding ActivePushHasButtons, Converter={StaticResource BoolToVis}}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Style="{StaticResource IconButton}" Padding="10,5" Margin="0,0,8,0" Click="PushButton_Click">
+                                            <TextBlock Text="{Binding Label}" FontSize="12"/>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
+                                        Visibility="{Binding HasPushInput, Converter={StaticResource BoolToVis}}">
+                                <Grid Width="300" Height="28">
+                                    <TextBox Text="{Binding PushInputValue, UpdateSourceTrigger=PropertyChanged}" FontSize="12"
+                                             VerticalContentAlignment="Center" Padding="7,0"
+                                             Background="#22FFFFFF" BorderBrush="#44FFFFFF" BorderThickness="1"
+                                             Foreground="{Binding PushCardForeground, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}"/>
+                                    <TextBlock Text="{Binding PushInputPlaceholder}" FontSize="12" Margin="9,0,0,0"
+                                               VerticalAlignment="Center" IsHitTestVisible="False" Opacity="0.55"
+                                               Foreground="{Binding PushCardSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"
+                                               Visibility="{Binding PushInputHasText, Converter={StaticResource BoolToVisInvert}}"/>
+                                </Grid>
+                                <Button Style="{StaticResource IconButton}" Padding="12,5" Margin="8,0,0,0" Click="PushInputSubmit_Click">
+                                    <TextBlock Text="{Binding PushInputSubmitLabel}" FontSize="12"/>
+                                </Button>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Grid x:Name="PageTitleHost">
+                        <TextBlock x:Name="ActivePageTitleText" Text="{Binding ActivePageTitle}" FontSize="12.5" FontWeight="Bold" Margin="2,0,0,0"
+                                   Foreground="{Binding ActivePageAccentBrush}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="{Binding IsDaozai, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsMusicPage}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                            <TextBlock.RenderTransform>
+                                <TranslateTransform x:Name="ActivePageTitleTranslate" X="0"/>
+                            </TextBlock.RenderTransform>
+                        </TextBlock>
+                        <TextBlock x:Name="PageTransitionTitleSnapshot" FontSize="12.5" FontWeight="Bold" Margin="2,0,0,0"
+                                   Opacity="0" IsHitTestVisible="False" Visibility="Collapsed"
+                                   Foreground="{Binding ActivePageAccentBrush}">
+                            <TextBlock.RenderTransform>
+                                <TranslateTransform x:Name="PageTransitionTitleTranslate" X="0"/>
+                            </TextBlock.RenderTransform>
+                        </TextBlock>
+                    </Grid>
+                    <!-- xiaotang-daozai page transition: all pages overlay in one cell. -->
+                    <Grid x:Name="DaozaiPageHost" Width="399" Height="126" ClipToBounds="True">
+                    <StackPanel x:Name="MusicPagePanel" Width="399" Height="126"
+                                Visibility="Collapsed">
+                        <StackPanel.RenderTransform>
+                            <TranslateTransform x:Name="MusicPageTranslate" X="0"/>
+                        </StackPanel.RenderTransform>
+                        <!-- 对齐 xiaotang-daozai 的 419×140 整卡尺寸：内容 126 + 边框/上下边距 14。 -->
+                        <Grid Width="399" Height="126">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="78"/>
+                                <RowDefinition Height="24"/>
+                                <RowDefinition Height="24"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="34"/>
+                                <ColumnDefinition Width="189"/>
+                                <ColumnDefinition Width="1"/>
+                                <ColumnDefinition Width="136"/>
+                                <ColumnDefinition Width="39"/>
+                            </Grid.ColumnDefinitions>
+
+                            <Grid Grid.Row="0" Grid.ColumnSpan="5">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="34"/>
+                                    <ColumnDefinition Width="186"/>
+                                    <ColumnDefinition Width="1"/>
+                                    <ColumnDefinition Width="136"/>
+                                    <ColumnDefinition Width="42"/>
+                                </Grid.ColumnDefinitions>
+
+                                <Border x:Name="HeroCard" Grid.Column="1" Width="177" Height="44" CornerRadius="10"
+                                        Margin="0,23,0,15" HorizontalAlignment="Left" ClipToBounds="True" Cursor="Hand"
+                                        Visibility="{Binding ExpandedHeroCard, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                                    <Border.Background>
+                                        <ImageBrush ImageSource="{Binding Artwork}" Stretch="UniformToFill"
+                                                    AlignmentX="Center" AlignmentY="Center"/>
+                                    </Border.Background>
+                                    <Grid>
+                                        <Border Background="#B3101018"/>
+                                        <StackPanel Margin="50,0,8,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" karaoke:FadeOnTextChange.Enabled="True"
+                                                       Foreground="White" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{Binding Artist}" FontSize="10.5" Margin="0,1,0,0" karaoke:FadeOnTextChange.Enabled="True"
+                                                       Foreground="White" Opacity="0.84" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <Grid x:Name="ArtTitleGrid" Grid.Column="1" Width="177" Height="44" Margin="0,23,0,15" HorizontalAlignment="Left"
+                                      Visibility="{Binding ExpandedShowArtTitle, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border x:Name="BigArt" Width="44" Height="44" CornerRadius="10" Cursor="Hand"
+                                            BorderBrush="{Binding AccentBorderBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#336C5CE7}"
+                                            BorderThickness="1" RenderTransformOrigin="0.5,0.5"
+                                            Background="{Binding AccentBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#6C5CE7}">
+                                        <Border.RenderTransform>
+                                            <ScaleTransform x:Name="BigArtScale" ScaleX="1" ScaleY="1"/>
+                                        </Border.RenderTransform>
+                                        <Grid>
+                                            <Image Source="{Binding Artwork}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality"
+                                                   Visibility="{Binding Artwork, Converter={StaticResource NullToVis}}"/>
+                                            <TextBlock Text="&#xE8D6;" FontFamily="Segoe MDL2 Assets" FontSize="17" Foreground="White"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       Visibility="{Binding Artwork, Converter={StaticResource NullToVisInvert}}"/>
+                                        </Grid>
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Margin="11,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" karaoke:FadeOnTextChange.Enabled="True" karaoke:FadeOnTextChange.SlideUp="True"
+                                                   Foreground="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding Artist}" FontSize="10.5" Margin="0,1,0,0" karaoke:FadeOnTextChange.Enabled="True" karaoke:FadeOnTextChange.SlideUp="True"
+                                                   Foreground="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <Border Grid.Column="2" Width="1" Height="66" Margin="0,4,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Background="#232325"/>
+
+                                <ScrollViewer x:Name="LyricsScroll" Grid.Column="3" Width="136" Height="74" Margin="9,28,0,0"
+                                              HorizontalAlignment="Left" VerticalAlignment="Top"
+                                              VerticalScrollBarVisibility="Hidden"
+                                              Visibility="{Binding ExpandedShowLyrics, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                                    <ScrollViewer.OpacityMask>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                            <GradientStop Color="#00000000" Offset="0"/>
+                                            <GradientStop Color="#FF000000" Offset="0.12"/>
+                                            <GradientStop Color="#FF000000" Offset="0.88"/>
+                                            <GradientStop Color="#00000000" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </ScrollViewer.OpacityMask>
+                                    <ItemsControl x:Name="LyricsList" ItemsSource="{Binding LyricLines}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Style="{StaticResource LyricLineBorder}" HorizontalAlignment="Center">
+                                                    <StackPanel>
+                                                        <karaoke:KaraokeTextBlock
+                                                            KaraokeText="{Binding Text}"
+                                                            HighlightFraction="{Binding HighlightFraction}"
+                                                            Words="{Binding Words}"
+                                                            PositionSeconds="{Binding DataContext.KaraokePositionSeconds, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            IsPlaying="{Binding DataContext.IsPlaying, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=False}"
+                                                            KaraokeSpeed="{Binding LyricKaraokeSpeed, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=1}"
+                                                            HighlightBrush="{Binding ExpandedLyricHighlightBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}"
+                                                            BaseBrush="{Binding ExpandedLyricBaseBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"
+                                                            Style="{DynamicResource LyricLineText}"/>
+                                                        <TextBlock Text="{Binding Translation}" FontSize="{Binding LyricTranslationFontSize, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=8}" Margin="0,1,0,0" Opacity="0.7" HorizontalAlignment="Center"
+                                                                   Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding ShowTranslation}" Value="True">
+                                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding HasTranslation}" Value="False">
+                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                                <TextBlock Grid.Column="3" Text="{Binding LyricsStatus}" FontSize="{Binding LyricsStatusFontSize, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=10}" Width="136" Height="74" Margin="9,28,0,0"
+                                           HorizontalAlignment="Left" VerticalAlignment="Top" TextAlignment="Center" Opacity="0.65"
+                                           Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"
+                                           Visibility="{Binding HasLyrics, Converter={StaticResource BoolToVisInvert}}"/>
+                            </Grid>
+
+                            <Grid x:Name="ProgressGrid" Grid.Row="1" Grid.ColumnSpan="5" Width="176" Margin="34,0,0,0"
+                                  Visibility="{Binding ExpandedShowProgress, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="14"/>
+                                    <RowDefinition Height="10"/>
+                                </Grid.RowDefinitions>
+                                <Slider x:Name="ProgressSlider" Grid.Row="0" Style="{StaticResource ThinSlider}" Height="8" VerticalAlignment="Top" Margin="0,-1,0,0"
+                                        Minimum="0" Maximum="1" Value="{Binding Progress, Mode=OneWay}" IsEnabled="{Binding CanSeek}"/>
+                                <Grid Grid.Row="1">
+                                    <TextBlock Text="{Binding PositionText}" FontSize="9" HorizontalAlignment="Left"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                    <TextBlock Text="{Binding DurationText}" FontSize="9" HorizontalAlignment="Right"
+                                               Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}"/>
+                                </Grid>
+                            </Grid>
+
+                            <Grid x:Name="ControlsGrid" Grid.Row="2" Grid.ColumnSpan="5" Height="24"
+                                  Visibility="{Binding ExpandedShowControls, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <StackPanel x:Name="LyricQuickOpsPanel" Orientation="Horizontal" Height="24"
+                                                Visibility="{Binding HasLyrics, Converter={StaticResource BoolToVis}}">
+                                        <Button Style="{StaticResource IconButton}" Width="24" Height="24" Padding="0" Margin="0,0,3,0" Click="LyricSourceSwitch_Click"
+                                                Visibility="{Binding LyricSourcePickVisible, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Collapsed}"
+                                                ToolTip="{Binding LyricsSourceButtonHint}">
+                                            <TextBlock Text="{Binding LyricsSourceButtonText}" FontSize="8"/>
+                                        </Button>
+                                        <Button Style="{StaticResource IconButton}" Width="24" Height="24" Padding="0" Margin="0,0,3,0" Click="LyricTranslate_Click"
+                                                ToolTip="{Binding LyricTranslateHint}">
+                                            <TextBlock Text="{Binding LyricTranslateText}" FontSize="8"/>
+                                        </Button>
+                                        <Button Style="{StaticResource IconButton}" Width="24" Height="24" Padding="0" Margin="0,0,3,0" Click="CopyCurrentLyric_Click"
+                                                ToolTip="{Binding LyricCopyHint}">
+                                            <TextBlock Text="{Binding LyricCopyText}" FontSize="8"/>
+                                        </Button>
+                                        <Button Style="{StaticResource IconButton}" Width="24" Height="24" Padding="0" Margin="0,0,1,0" Click="LyricOffsetDown_Click"
+                                                ToolTip="{Binding LyricOffsetDownHint}">
+                                            <TextBlock Text="-" FontSize="9"/>
+                                        </Button>
+                                        <Button Style="{StaticResource IconButton}" Width="24" Height="24" Padding="0" Margin="0,0,2,0" Click="LyricOffsetUp_Click"
+                                                ToolTip="{Binding LyricOffsetUpHint}">
+                                            <TextBlock Text="+" FontSize="9"/>
+                                        </Button>
+                                        <TextBlock Text="{Binding LyricOffsetText}" FontSize="8" VerticalAlignment="Center"
+                                                   Foreground="{Binding TextSecondary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=Gray}" Opacity="0.8"/>
+                                    </StackPanel>
+                                    <StackPanel x:Name="QuickActionsPanel" Orientation="Horizontal" Height="24"
+                                                Visibility="{Binding HasQuickActions, Converter={StaticResource BoolToVis}}">
+                                        <ItemsControl ItemsSource="{Binding QuickActions}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Button Style="{StaticResource IconButton}" Width="24" Height="24" Padding="0" Margin="0,0,3,0"
+                                                            ToolTip="{Binding ToolTip}" Tag="{Binding Key}" Click="QuickAction_Click">
+                                                        <TextBlock Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="10"/>
+                                                    </Button>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <Button Style="{StaticResource IconButton}" Width="24" Height="24" Padding="0" Margin="0,0,8,0" Click="MediaSessionCycle_Click"
+                                            ToolTip="{Binding SelectedMediaSessionName}"
+                                            Visibility="{Binding MediaSessionPickerVisible, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="&#xE8D6;" FontFamily="Segoe MDL2 Assets" FontSize="10"/>
+                                    </Button>
+                                    <StackPanel x:Name="WaveBox" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0"
+                                                Visibility="{Binding HasWave, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                                        <StackPanel x:Name="WaveBarsPanelExpanded" Orientation="Horizontal">
+                                            <Border Width="2" Height="10" CornerRadius="1" VerticalAlignment="Center" Margin="0,0,2,0"
+                                                    Background="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}">
+                                                <Border.RenderTransformOrigin>0.5,0.5</Border.RenderTransformOrigin>
+                                                <Border.RenderTransform><ScaleTransform x:Name="WaveBar1" ScaleY="0.16"/></Border.RenderTransform>
+                                            </Border>
+                                            <Border Width="2" Height="10" CornerRadius="1" VerticalAlignment="Center" Margin="0,0,2,0"
+                                                    Background="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}">
+                                                <Border.RenderTransformOrigin>0.5,0.5</Border.RenderTransformOrigin>
+                                                <Border.RenderTransform><ScaleTransform x:Name="WaveBar2" ScaleY="0.16"/></Border.RenderTransform>
+                                            </Border>
+                                            <Border Width="2" Height="10" CornerRadius="1" VerticalAlignment="Center" Margin="0,0,2,0"
+                                                    Background="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}">
+                                                <Border.RenderTransformOrigin>0.5,0.5</Border.RenderTransformOrigin>
+                                                <Border.RenderTransform><ScaleTransform x:Name="WaveBar3" ScaleY="0.16"/></Border.RenderTransform>
+                                            </Border>
+                                            <Border Width="2" Height="10" CornerRadius="1" VerticalAlignment="Center" Margin="0,0,2,0"
+                                                    Background="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}">
+                                                <Border.RenderTransformOrigin>0.5,0.5</Border.RenderTransformOrigin>
+                                                <Border.RenderTransform><ScaleTransform x:Name="WaveBar4" ScaleY="0.16"/></Border.RenderTransform>
+                                            </Border>
+                                            <Border Width="2" Height="10" CornerRadius="1" VerticalAlignment="Center" Margin="0,0,2,0"
+                                                    Background="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}">
+                                                <Border.RenderTransformOrigin>0.5,0.5</Border.RenderTransformOrigin>
+                                                <Border.RenderTransform><ScaleTransform x:Name="WaveBar5" ScaleY="0.16"/></Border.RenderTransform>
+                                            </Border>
+                                            <Border Width="2" Height="10" CornerRadius="1" VerticalAlignment="Center" Margin="0,0,2,0"
+                                                    Background="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}">
+                                                <Border.RenderTransformOrigin>0.5,0.5</Border.RenderTransformOrigin>
+                                                <Border.RenderTransform><ScaleTransform x:Name="WaveBar6" ScaleY="0.16"/></Border.RenderTransform>
+                                            </Border>
+                                            <Border Width="2" Height="10" CornerRadius="1" VerticalAlignment="Center"
+                                                    Background="{Binding TextPrimary, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=White}">
+                                                <Border.RenderTransformOrigin>0.5,0.5</Border.RenderTransformOrigin>
+                                                <Border.RenderTransform><ScaleTransform x:Name="WaveBar7" ScaleY="0.16"/></Border.RenderTransform>
+                                            </Border>
+                                        </StackPanel>
+                                        <Grid x:Name="WaveSpectrumHostExpanded" Width="24" Height="12" VerticalAlignment="Center" Visibility="Collapsed"/>
+                                        <Grid x:Name="WaveRingHostExpanded" Width="16" Height="16" VerticalAlignment="Center" Margin="0,0,6,0" Visibility="Collapsed"/>
+                                        <Grid x:Name="WaveParticlesHostExpanded" Width="16" Height="16" VerticalAlignment="Center" Margin="0,0,6,0" Visibility="Collapsed"/>
+                                    </StackPanel>
+                                    <Button Style="{StaticResource IconButton}" Width="24" Height="24" Padding="0" Command="{Binding PreviousCommand}" IsEnabled="{Binding CanPrevious}">
+                                        <TextBlock Text="&#xE892;" FontFamily="Segoe MDL2 Assets" FontSize="10"/>
+                                    </Button>
+                                    <Button Style="{StaticResource IconButton}" Width="28" Height="24" Padding="0" Command="{Binding PlayPauseCommand}">
+                                        <TextBlock Text="{Binding PlayPauseGlyph}" FontFamily="Segoe MDL2 Assets" FontSize="11"/>
+                                    </Button>
+                                    <Button Style="{StaticResource IconButton}" Width="24" Height="24" Padding="0" Command="{Binding NextCommand}" IsEnabled="{Binding CanNext}">
+                                        <TextBlock Text="&#xE893;" FontFamily="Segoe MDL2 Assets" FontSize="10"/>
+                                    </Button>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"
+                                            Visibility="{Binding HasVolumeControl, Converter={StaticResource BoolToVis}}">
+                                    <Slider x:Name="VolumeSlider" Style="{StaticResource ThinSlider}" Width="52" Height="16" Minimum="0" Maximum="1"
+                                            Value="{Binding Volume, Mode=TwoWay}"/>
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- 岛仔功能页：专注（固定 419×140 展开卡的一部分，底部为控制按钮） -->
+                    <StackPanel x:Name="FocusPagePanel" Width="399" Height="86"
+                                Visibility="Collapsed">
+                        <StackPanel.RenderTransform>
+                            <TranslateTransform x:Name="FocusPageTranslate" X="0"/>
+                        </StackPanel.RenderTransform>
+                        <Grid Width="399" Height="86">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="56"/>
+                                <RowDefinition Height="30"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Width="52" Height="52" Margin="16,2,0,0" CornerRadius="26"
+                                        Background="#1A0E10" BorderBrush="#FD685C" BorderThickness="5">
+                                    <TextBlock Text="&#xE823;" FontFamily="Segoe MDL2 Assets" FontSize="18" Foreground="#FD685C"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <StackPanel Grid.Column="1" Margin="16,0,16,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding PomodoroClockText}" FontSize="20" FontWeight="Bold" Foreground="White"/>
+                                    <TextBlock Text="{Binding PomodoroPhaseText}" FontSize="10" Foreground="#8E8E99" Margin="0,1,0,0"/>
+                                </StackPanel>
+                            </Grid>
+                            <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Bottom">
+                                <Button Style="{StaticResource IconButton}" Command="{Binding PomodoroWorkCommand}" Content="专注"
+                                        Width="54" Height="24" Padding="0" Margin="0,0,5,0" FontSize="10" Background="#2A2A2E"/>
+                                <Button Style="{StaticResource IconButton}" Command="{Binding PomodoroBreakCommand}" Content="休息"
+                                        Width="54" Height="24" Padding="0" Margin="0,0,5,0" FontSize="10" Background="#2A2A2E"/>
+                                <Button Style="{StaticResource IconButton}" Command="{Binding PomodoroToggleCommand}" Content="暂停/继续"
+                                        Width="70" Height="24" Padding="0" Margin="0,0,5,0" FontSize="10" Background="#2A2A2E"/>
+                                <Button Style="{StaticResource IconButton}" Command="{Binding PomodoroStopCommand}" Content="停止"
+                                        Width="54" Height="24" Padding="0" FontSize="10" Background="#2A2A2E"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- 岛仔功能页：待办（固定 419×140，列表最多显示三行，其余可滚动） -->
+                    <StackPanel x:Name="TodoPagePanel" Width="399" Height="86" Visibility="Collapsed">
+                        <StackPanel.RenderTransform>
+                            <TranslateTransform x:Name="TodoPageTranslate" X="0"/>
+                        </StackPanel.RenderTransform>
+                        <Grid Width="399" Height="86">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="20"/>
+                                <RowDefinition Height="66"/>
+                            </Grid.RowDefinitions>
+                            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="16,0,16,0">
+                                <TextBlock Text="{Binding TodoSummary}" FontSize="17" FontWeight="Bold" Foreground="White"/>
+                                <TextBlock Text="已完成" FontSize="9.5" Foreground="#8E8E99" VerticalAlignment="Bottom" Margin="6,0,0,2"/>
+                            </StackPanel>
+                            <ScrollViewer Grid.Row="1" Height="66" VerticalScrollBarVisibility="Hidden" PanningMode="VerticalOnly">
+                                <ItemsControl ItemsSource="{Binding TodoItems}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Height="20" CornerRadius="7" Background="#242427" Padding="8,0" Margin="16,0,16,2">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <CheckBox IsChecked="{Binding Done, Mode=OneWay}" IsHitTestVisible="False"
+                                                              VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                                    <TextBlock Text="{Binding Text}" FontSize="10" Foreground="#E8E8ED"
+                                                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- 岛仔功能页：日程（固定 419×140，列表最多显示三行，其余可滚动） -->
+                    <StackPanel x:Name="SchedulePagePanel" Width="399" Height="86" Visibility="Collapsed">
+                        <StackPanel.RenderTransform>
+                            <TranslateTransform x:Name="SchedulePageTranslate" X="0"/>
+                        </StackPanel.RenderTransform>
+                        <Grid Width="399" Height="86">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="18"/>
+                                <RowDefinition Height="68"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Text="{Binding ScheduleSummary}" FontSize="13" FontWeight="Bold"
+                                       Foreground="White" Margin="16,0,16,0"/>
+                            <ScrollViewer Grid.Row="1" Height="68" VerticalScrollBarVisibility="Hidden" PanningMode="VerticalOnly">
+                                <ItemsControl ItemsSource="{Binding ScheduleItems}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Height="20" CornerRadius="7" Background="#242427" Padding="8,0" Margin="16,0,16,3">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding When, StringFormat={}{0:HH:mm}}" FontSize="10" FontWeight="SemiBold"
+                                                               Foreground="#3EACF8" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                                    <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="10" Foreground="#E8E8ED"
+                                                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+                    </StackPanel>
+                    </Grid>
+                    <!-- 岛仔页码豆：真实页面导航 -->
+                    <ItemsControl x:Name="PageDots" ItemsSource="{Binding Pages}" HorizontalAlignment="Center" Margin="0,1,0,0"
+                                  Visibility="{Binding IsDaozai, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Tag="{Binding}" Click="PageDot_Click" Cursor="Hand" Background="Transparent"
+                                        BorderThickness="0" Padding="0" Height="10">
+                                    <Border x:Name="Dot" Width="4" Height="4" CornerRadius="2"
+                                            Background="{Binding DataContext.DaozaiDotBrush, RelativeSource={RelativeSource AncestorType=ItemsControl}, FallbackValue=#5C5C60}"/>
+                                </Button>
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                        <Setter TargetName="Dot" Property="Background" Value="White"/>
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
+                <Button Style="{StaticResource IconButton}" Command="{Binding PrevPageCommand}" Focusable="False"
+                        HorizontalAlignment="Left" VerticalAlignment="Center" Width="28" Height="28" Opacity="0.8"
+                        Visibility="{Binding PageNavVisible, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="&#xE76B;" FontFamily="Segoe MDL2 Assets" FontSize="13"/>
+                </Button>
+                <Button Style="{StaticResource IconButton}" Command="{Binding NextPageCommand}" Focusable="False"
+                        HorizontalAlignment="Right" VerticalAlignment="Center" Width="28" Height="28" Opacity="0.8"
+                        Visibility="{Binding PageNavVisible, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="&#xE76C;" FontFamily="Segoe MDL2 Assets" FontSize="13"/>
+                </Button>
+                </Grid>
+            </Grid>
+        </Border>
+        <!-- xiaotang-daozai reference copy toast: 2.4s, 160ms fade-in, 300ms fade-out. -->
+        <Border x:Name="CopyToast" Height="22" MaxWidth="310" Padding="13,0"
+                CornerRadius="11" Background="#2C2C30"
+                HorizontalAlignment="Center" VerticalAlignment="Top"
+                Opacity="0" IsHitTestVisible="False"
+                Visibility="{Binding HasCopyToast, Converter={StaticResource BoolToVis}}">
+            <Border.RenderTransform>
+                <TranslateTransform x:Name="CopyToastTranslate" Y="64"/>
+            </Border.RenderTransform>
+            <TextBlock Text="{Binding CopyToastText}" FontSize="11.5" Foreground="White"
+                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+        </Border>
+    </Grid>
+</Window>

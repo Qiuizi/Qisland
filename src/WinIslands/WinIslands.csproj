@@ -1,0 +1,96 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Qisland</AssemblyName>
+    <RootNamespace>WinIslands</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\winislands.ico</ApplicationIcon>
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <InformationalVersion>0.1.0+winislands-3.1.2</InformationalVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+    <Authors>Qiuizi</Authors>
+    <Product>Qisland</Product>
+    <Description>Qisland：基于 WinIslands 的个人 Windows 灵动岛。</Description>
+    <!-- 仅保留中英两种语言资源，减小体积 -->
+    <SatelliteResourceLanguages>en;zh-Hans</SatelliteResourceLanguages>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <NoWarn>;WFAC010;NETSDK1175</NoWarn>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!-- ================================================================
+       Release 发布优化配置
+       仅在 Release 配置下生效，不影响 Debug 开发体验。这些属性在 dotnet build 时是空操作，仅在 dotnet publish 时生效。       ================================================================ -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+
+    <!-- [单文件发布] 将所有托管程序集和 .NET 运行时打包为单个 .exe
+         配合 self-contained true 使用，用户无需额外安装运行时。分发只需一个文件，体验最简洁。-->
+    <PublishSingleFile>true</PublishSingleFile>
+
+    <!-- 原生库（如 WPF 的 native 组件）嵌入单文件内部
+         运行时解压到临时目录，避免在 exe 旁边残留 .dll -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+
+    <!-- 对单文件内容启用 gzip 压缩，进一步减小最终 .exe 体积 -->
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <CompressionAlgorithm>brotli</CompressionAlgorithm>
+
+    <!-- [裁剪优化] 裁剪未使用的框架代码，减小体积。
+         注意: WPF 项目不能完全裁剪（full 模式会运行时崩溃）。
+         TrimMode=partial: 仅裁剪明确标注为可裁剪的程序集，WPF/WinForms 相关代码完整保留，安全且有效 -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <!-- 覆盖 SDK 对 WinForms/WPF + Trimming 的安全检查
+         TrimMode=partial 仅裁剪标注为可裁剪的程序集，WinForms/WPF 代码完整保留 -->
+    <_SuppressWinFormsTrimError>true</_SuppressWinFormsTrimError>
+    <_SuppressWpfTrimError>true</_SuppressWpfTrimError>
+
+    <!-- [ReadyToRun 预编译] 将 IL 预编译为原生机器码，加快冷启动速度
+         代价: 体积增加约 10-15%，但启动时间显著缩短
+         对桌面应用启动体验提升明显。-->
+    <PublishReadyToRun>false</PublishReadyToRun>
+
+    <!-- [调试支持] Release 模式移除调试基础设施
+         不生成 .pdb 符号文件
+         移除调试代理和符号加载逻辑
+         减小体积并提升运行时安全 -->
+    <DebuggerSupport>false</DebuggerSupport>
+    <DebugType>portable</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+
+    <!-- [服务器 GC] 不适合常驻后台应用，减少 GC 停顿。 -->
+    <!-- 桌面客户端使用工作站 GC：降低常驻内存，避免服务端 GC 长期保留大量内存。 -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <RetainVMGarbageCollection>false</RetainVMGarbageCollection>
+
+    <!-- [分层编译] JIT 在运行时逐层优化热点代码
+         冷启动用快速 JIT，热点方法再升级为优化 JIT -->
+    <TieredCompilation>true</TieredCompilation>
+
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\winislands.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Qisland.Core\Qisland.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,13 @@
+{
+  "name": "@qiuizi/dsh-qisland",
+  "version": "0.1.0",
+  "private": true,
+  "description": "把 DeepSeek Harness 的会话状态推到本机 Qisland。草稿，未在已安装的桌面版里验证。",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*"
+  }
+}

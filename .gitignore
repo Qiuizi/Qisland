@@ -1,0 +1,26 @@
+# Build outputs
+bin/
+obj/
+publish/
+*.user
+
+# NuGet / tool caches (kept out of VCS)
+.nuget/
+.dotnet-cli/
+
+# Runtime data
+*.log
+
+# Visual Studio
+.vs/
+*.suo
+
+# Local release artifacts
+releases/
+dist/
+
+# Website (keep HTML out of the repo)
+website/
+
+# Tencent WeType logs written into the source tree
+src/WinIslands/Tencent/

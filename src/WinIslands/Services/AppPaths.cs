@@ -1,0 +1,66 @@
+using System.IO;
+
+namespace WinIslands.Services;
+
+/// <summary>Well-known file/directory locations used by the app.</summary>
+public static class AppPaths
+{
+    /// <summary>
+    /// %APPDATA%\Qisland。测试仍可用 WINISLANDS_APPDATA，个人覆盖用 QISLAND_APPDATA。
+    /// </summary>
+    public static string AppDataDir
+    {
+        get
+        {
+            var overrideDir = Environment.GetEnvironmentVariable("QISLAND_APPDATA");
+            if (string.IsNullOrWhiteSpace(overrideDir))
+                overrideDir = Environment.GetEnvironmentVariable("WINISLANDS_APPDATA");
+            return string.IsNullOrWhiteSpace(overrideDir)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Qisland")
+                : overrideDir;
+        }
+    }
+
+    /// <summary>钩子在 HTTP 失败时丢进来的 JSON。宿主读完即删。</summary>
+    public static string InboxDir => Path.Combine(AppDataDir, "inbox");
+
+    // Note: computed (not cached) so tests/runtime can redirect via WINISLANDS_APPDATA.
+    public static string SettingsFile => Path.Combine(AppDataDir, "settings.json");
+
+    public static string LogsDir => Path.Combine(AppDataDir, "logs");
+
+    public static string ThumbCacheDir => Path.Combine(AppDataDir, "thumbcache");
+
+    public static string LyricsDir => Path.Combine(AppDataDir, "Lyrics");
+
+    /// <summary>用户插件目录：%APPDATA%\WinIslands\plugins。</summary>
+    public static string PluginsDir => Path.Combine(AppDataDir, "plugins");
+
+    /// <summary>便携插件目录：程序 exe 同级的 plugins。</summary>
+    public static string PortablePluginsDir
+    {
+        get
+        {
+            var exeDir = string.IsNullOrWhiteSpace(ExePath) ? AppContext.BaseDirectory : Path.GetDirectoryName(ExePath);
+            return Path.Combine(string.IsNullOrWhiteSpace(exeDir) ? AppContext.BaseDirectory : exeDir!, "plugins");
+        }
+    }
+
+    /// <summary>崩溃自动恢复标记文件：异常退出时写入，下次启动检测到后提示「已恢复」。</summary>
+    public static string CrashMarkerFile => Path.Combine(AppDataDir, "crash-recovery.json");
+
+    /// <summary>崩溃 minidump 输出目录（诊断用，循环保留最近若干份）。</summary>
+    public static string CrashDumpsDir => Path.Combine(AppDataDir, "crashdumps");
+
+    public static string ExePath { get; } = Environment.ProcessPath ?? string.Empty;
+
+    public static void EnsureDirectories()
+    {
+        Directory.CreateDirectory(AppDataDir);
+        Directory.CreateDirectory(InboxDir);
+        Directory.CreateDirectory(LogsDir);
+        Directory.CreateDirectory(ThumbCacheDir);
+        Directory.CreateDirectory(LyricsDir);
+        Directory.CreateDirectory(CrashDumpsDir);
+    }
+}

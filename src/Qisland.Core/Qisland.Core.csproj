@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Qisland.Core</RootNamespace>
+    <AssemblyName>Qisland.Core</AssemblyName>
+    <Description>Qisland 活动提供方：解析与优先级，不依赖 WPF。</Description>
+  </PropertyGroup>
+</Project>
