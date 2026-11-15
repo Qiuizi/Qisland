@@ -14,6 +14,7 @@ public sealed partial class IslandWindow
         Directory.CreateDirectory(dir);
         await Shot(dir, "01-idle", Mode.Idle);
         demo();
+        if (Countdown == null) try { Countdown = new Countdowns(); } catch { }
         if (_weather == null)
         {
             var now = DateTime.Now; var h0 = now.Date.AddHours(now.Hour + 1);

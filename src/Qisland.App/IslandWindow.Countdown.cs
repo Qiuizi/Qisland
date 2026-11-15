@@ -41,7 +41,10 @@ public sealed partial class IslandWindow
         for (var i = 0; i < items.Count; i++)
         {
             var it = items[i];
-            var b = new Border { CornerRadius = new CornerRadius(14), Background = Theme.Fill, Padding = new Thickness(12, 8, 12, 8), Margin = new Thickness(i == 0 ? 0 : 4, 0, i == items.Count - 1 ? 0 : 4, 0), Cursor = Cursors.Hand, ToolTip = $"{it.Name}  {it.At:M月d日 dddd HH:mm}".Replace(" 00:00", "") };
+            var glass = Theme.CardRim != null;
+            var normal = glass ? Theme.Card : Theme.Fill;
+            var hover = glass ? Theme.CardHover : HoverFill;
+            var b = new Border { CornerRadius = new CornerRadius(glass ? 18 : 14), Background = normal, BorderBrush = Theme.CardRim, BorderThickness = new Thickness(glass ? 1 : 0), Padding = new Thickness(12, 8, 12, 8), Margin = new Thickness(i == 0 ? 0 : 4, 0, i == items.Count - 1 ? 0 : 4, 0), Cursor = Cursors.Hand, ToolTip = $"{it.Name}  {it.At:M月d日 dddd HH:mm}".Replace(" 00:00", "") };
             var sp = new StackPanel();
             var name = Txt(11.5, FontWeights.Medium, Theme.Secondary);
             name.Text = it.Name;
@@ -61,8 +64,8 @@ public sealed partial class IslandWindow
             }
             sp.Children.Add(row);
             b.Child = sp;
-            b.MouseEnter += (_, _) => b.Background = HoverFill;
-            b.MouseLeave += (_, _) => b.Background = Theme.Fill;
+            b.MouseEnter += (_, _) => b.Background = hover;
+            b.MouseLeave += (_, _) => b.Background = normal;
             b.MouseLeftButtonUp += (_, e) =>
             {
                 e.Handled = true;
