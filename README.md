@@ -113,3 +113,15 @@ docs/              API 文档、介绍页与截图
 ## 致谢与许可
 
 基于 [JudeKwong/WinIslands](https://github.com/JudeKwong/WinIslands)（MIT）起步，交互参考了 [souverth/dynamic-island-4win](https://github.com/souverth/dynamic-island-4win) 和 [FlorianButz/DynamicWin](https://github.com/FlorianButz/DynamicWin)。MIT 许可，见 [LICENSE](LICENSE)。
+
+## 更新与发版
+
+**用户侧**：Qisland 启动 40 秒后、之后每 6 小时检查一次 GitHub Releases（预览版也会收到预览版）。有新版时岛上出现一条「可以更新了」，点一下自动下载、替换、重启，不需要管理员权限；托盘菜单里可以手动「检查更新」或「跳过这个新版本」。
+
+**作者侧**：一条命令发版——改版本号、编译、打包、打 tag、推送、建 Release 全自动：
+
+```powershell
+.\scripts\release.ps1 1.0.2-preview "这次改了什么"
+.\scripts\release.ps1 1.1.0 -NotesFile notes.md   # 不带 - 的版本号会标成正式版
+.\scripts\release.ps1 1.0.2 -DryRun               # 只编译打包，不推送
+```
