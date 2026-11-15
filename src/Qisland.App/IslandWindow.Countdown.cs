@@ -28,7 +28,7 @@ public sealed partial class IslandWindow
             // 课优先：上课中显示下课时间，快上课显示开课时间
             var now = DateTime.Now;
             var nm = cls.Name.Length > 4 ? cls.Name[..4] : cls.Name;
-            _idleCountdown.Text = cls.Start <= now ? $"{nm} 上课中" : $"{nm} {cls.Start:H:mm}";
+            _idleCountdown.Text = cls.Start <= now ? nm : $"{nm} {cls.Start:H:mm}";
             _idleCountdown.ToolTip = $"{cls.Name}  {cls.Start:HH:mm}–{cls.End:HH:mm}  {cls.Location}";
             _idleCountdown.Foreground = cls.Start <= now ? Theme.Freeze(new SolidColorBrush(Color.FromRgb(0x34, 0x7A, 0xF0)))
                 : cls.Start - now <= TimeSpan.FromMinutes(10) ? Theme.Orange : Theme.Secondary;
