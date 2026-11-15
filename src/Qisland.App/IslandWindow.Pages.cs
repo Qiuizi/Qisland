@@ -167,6 +167,11 @@ public sealed partial class IslandWindow
             handled = true;
             return new IntPtr(1);
         }
+        if (msg == 0x0218) // WM_POWERBROADCAST
+        {
+            var b = BrightnessWatcher.Parse(wParam, lParam);
+            if (b >= 0) OnBrightness(b);
+        }
         return IntPtr.Zero;
     }
 

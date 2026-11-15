@@ -254,16 +254,22 @@ public sealed class FocusTimer
     public bool Active { get; private set; }
     public FocusTimer(ActivityStore store) { _store = store; }
 
-    public void Start(int minutes, string label)
+    /// <summary>正在专注的待办（可为空）。</summary>
+    public string? Task { get; private set; }
+    /// <summary>计时结束：(标签, 待办)。</summary>
+    public event Action<string, string?>? Finished;
+
+    public void Start(int minutes, string label, string? task = null)
     {
         _start = DateTime.Now;
         _end = _start.AddMinutes(minutes);
         _label = label;
+        Task = task;
         Active = true;
         Tick();
     }
 
-    public void Cancel() { Active = false; _store.Remove(Id); }
+    public void Cancel() { Active = false; Task = null; _store.Remove(Id); }
     public TimeSpan Remaining => Active ? _end - DateTime.Now : TimeSpan.Zero;
     public TimeSpan Total => _end - _start;
     public string Label => _label;
@@ -276,14 +282,20 @@ public sealed class FocusTimer
         {
             Active = false;
             _store.Remove(Id);
-            _store.Upsert(new IslandActivity("timer:done", "timer", _label + "结束", "休息一下", ActivityKind.Done, 95, DurationSeconds: 60, ResetTtl: true));
+            var task = Task;
+            Task = null;
+            if (task == null)
+                _store.Upsert(new IslandActivity("timer:done", "timer", _label + "结束", "休息一下", ActivityKind.Done, 95, DurationSeconds: 60, ResetTtl: true));
             System.Media.SystemSounds.Asterisk.Play();
+            Finished?.Invoke(_label, task);
             return;
         }
         var total = (_end - _start).TotalSeconds;
         var p = 1 - left.TotalSeconds / total;
         var text = left.TotalHours >= 1 ? left.ToString(@"h\:mm\:ss") : left.ToString(@"mm\:ss");
-        _store.Upsert(new IslandActivity(Id, "timer", $"{_label} · {text}", $"{_end:HH:mm} 结束", ActivityKind.Running, 58), sticky: true, progress: p);
+        var title = Task != null ? $"{Task} · {text}" : $"{_label} · {text}";
+        var sub = Task != null ? $"{_label}中 · {_end:HH:mm} 结束" : $"{_end:HH:mm} 结束";
+        _store.Upsert(new IslandActivity(Id, "timer", title, sub, ActivityKind.Running, 58), sticky: true, progress: p);
     }
 }
 

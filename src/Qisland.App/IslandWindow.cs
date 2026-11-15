@@ -175,6 +175,7 @@ public sealed partial class IslandWindow : Window
         _hwnd = new WindowInteropHelper(this).Handle;
         Native.SetExStyle(_hwnd, Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE | Native.WS_EX_TRANSPARENT, true);
         HwndSource.FromHwnd(_hwnd)?.AddHook(WndProc);
+        BrightnessWatcher.Register(_hwnd);
         if (_layered) return;
 
         var src = HwndSource.FromHwnd(_hwnd);
@@ -198,7 +199,7 @@ public sealed partial class IslandWindow : Window
 
     // ───────────────────────────── 状态 ─────────────────────────────
 
-    private Mode DesiredRestMode() => _store.Ranked().Count > 0 || MusicPlaying ? Mode.Compact : Mode.Idle;
+    private Mode DesiredRestMode() => OsdActive ? Mode.Compact : _store.Ranked().Count > 0 || MusicPlaying ? Mode.Compact : Mode.Idle;
 
     public void OnMediaChanged()
     {
@@ -535,6 +536,7 @@ public sealed partial class IslandWindow : Window
     {
         _compact.Children.Clear();
         _compact.ColumnDefinitions.Clear();
+        if (OsdActive) { BuildOsd(); return; }
         var ranked = _store.Ranked();
         if (ranked.Count == 0) { if (MusicPlaying) CompactMusic(Media!.Current!); return; }
         var a = ranked[0];
@@ -638,9 +640,12 @@ public sealed partial class IslandWindow : Window
         var ranked = _store.Ranked();
         var music = Media?.Current;
 
+        var cd = CountdownStrip();
+        if (FocusDoneCard() is { } fd) stack.Children.Add(fd);
         if (ranked.Count == 0)
         {
             stack.Children.Add(HeroClock());
+            if (cd != null) stack.Children.Add(cd);
             if (_wx != null) stack.Children.Add(WeatherStrip());
             if (music != null) stack.Children.Add(MusicCard(music));
             if (_todos.Count > 0) stack.Children.Add(TodoBlock());
@@ -657,6 +662,7 @@ public sealed partial class IslandWindow : Window
                 stack.Children.Add(more);
             }
             if (_todos.Count > 0) stack.Children.Add(TodoBlock());
+            if (cd != null) { cd.Margin = new Thickness(0, 8, 0, 2); stack.Children.Add(cd); }
             stack.Children.Add(Footer());
             if (_wx != null) stack.Children.Add(WeatherStrip());
         }

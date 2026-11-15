@@ -1,0 +1,75 @@
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+
+namespace Qisland.App;
+
+/// <summary>考试倒计时：主页一排胶囊；3 天内收起的岛上也常驻显示。</summary>
+public sealed partial class IslandWindow
+{
+    public Countdowns? Countdown { get; set; }
+    private readonly TextBlock _idleCountdown = new() { FontSize = 11.5, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 1) };
+
+    private static Brush CountdownBrush(int days) => days <= 2 ? Theme.Red : days <= 7 ? Theme.Orange : Theme.Secondary;
+
+    public void OnCountdownChanged()
+    {
+        if (_idleCountdown.Parent == null)
+        {
+            _idleCountdown.FontFamily = Theme.Text;
+            Grid.SetColumn(_idleCountdown, 1);
+            _idle.Children.Add(_idleCountdown);
+        }
+        var near = Countdown?.Items.FirstOrDefault();
+        if (near != null && near.Days <= 3)
+        {
+            _idleCountdown.Text = $"{near.Short} {near.Left}";
+            _idleCountdown.Foreground = CountdownBrush(near.Days);
+            _idleCountdown.Visibility = Visibility.Visible;
+        }
+        else _idleCountdown.Visibility = Visibility.Collapsed;
+        _expDirty = true;
+        if (_mode == Mode.Expanded && !_animating && _page == Page.Home) RebuildExpanded();
+    }
+
+    private FrameworkElement? CountdownStrip()
+    {
+        var items = Countdown?.Items.Take(3).ToList();
+        if (items is not { Count: > 0 }) return null;
+        var g = new System.Windows.Controls.Primitives.UniformGrid { Rows = 1, Columns = items.Count, Margin = new Thickness(0, 2, 0, 10) };
+        for (var i = 0; i < items.Count; i++)
+        {
+            var it = items[i];
+            var b = new Border { CornerRadius = new CornerRadius(14), Background = Theme.Fill, Padding = new Thickness(12, 8, 12, 8), Margin = new Thickness(i == 0 ? 0 : 4, 0, i == items.Count - 1 ? 0 : 4, 0), Cursor = Cursors.Hand, ToolTip = $"{it.Name}  {it.At:M月d日 dddd HH:mm}".Replace(" 00:00", "") };
+            var sp = new StackPanel();
+            var name = Txt(11.5, FontWeights.Medium, Theme.Secondary);
+            name.Text = it.Name;
+            sp.Children.Add(name);
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 1, 0, 0) };
+            if (it.Days > 2)
+            {
+                var n = new TextBlock { Text = it.Days.ToString(), FontFamily = Theme.Display, FontSize = 22, FontWeight = FontWeights.SemiBold, Foreground = CountdownBrush(it.Days) };
+                row.Children.Add(n);
+                var unit = Txt(12, FontWeights.Medium, Theme.Secondary); unit.Text = " 天"; unit.VerticalAlignment = VerticalAlignment.Bottom; unit.Margin = new Thickness(0, 0, 0, 4);
+                row.Children.Add(unit);
+            }
+            else
+            {
+                var n = new TextBlock { Text = it.Left, FontFamily = Theme.Display, FontSize = 20, FontWeight = FontWeights.SemiBold, Foreground = CountdownBrush(it.Days) };
+                row.Children.Add(n);
+            }
+            sp.Children.Add(row);
+            b.Child = sp;
+            b.MouseEnter += (_, _) => b.Background = HoverFill;
+            b.MouseLeave += (_, _) => b.Background = Theme.Fill;
+            b.MouseLeftButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("notepad.exe", "\"" + Countdowns.PathName + "\"") { UseShellExecute = true });
+            };
+            g.Children.Add(b);
+        }
+        return g;
+    }
+}

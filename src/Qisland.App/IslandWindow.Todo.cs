@@ -15,6 +15,62 @@ public sealed partial class IslandWindow
     private TextBlock? _todoHint;
     private bool _editing;
 
+    private string? _focusDone;
+    private DateTime _focusDoneAt;
+
+    /// <summary>专注结束：岛自动展开 12 秒，问一句做完没有。</summary>
+    public void OnFocusFinished(string label, string? task)
+    {
+        if (task == null) return;
+        _focusDone = task;
+        _focusDoneAt = DateTime.Now;
+        _page = Page.Home;
+        _expDirty = true;
+        _peekUntil = DateTime.Now.AddSeconds(12);
+        if (_mode == Mode.Expanded) RebuildExpanded();
+        SetMode(Mode.Expanded);
+        Kick();
+    }
+
+    private FrameworkElement? FocusDoneCard()
+    {
+        if (_focusDone == null) return null;
+        if (DateTime.Now - _focusDoneAt > TimeSpan.FromMinutes(15)) { _focusDone = null; return null; }
+        var task = _focusDone;
+        var b = new Border { CornerRadius = new CornerRadius(18), Background = Theme.Fill, Padding = new Thickness(14, 12, 12, 12), Margin = new Thickness(0, 0, 0, 10) };
+        var g = new Grid();
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var left = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        var h = Txt(11.5, FontWeights.SemiBold, Theme.Orange); h.Text = "专注 25 分钟结束"; left.Children.Add(h);
+        var t = Txt(14, FontWeights.SemiBold, Theme.Primary); t.Text = task; t.Margin = new Thickness(0, 2, 0, 0); left.Children.Add(t);
+        g.Children.Add(left);
+        var btns = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        btns.Children.Add(Pill("做完了", Theme.Blue, Brushes.White, () =>
+        {
+            var it = Todo?.Items.FirstOrDefault(i => !i.Done && i.Text == task);
+            if (it != null) Todo!.SetDone(it, true);
+            _focusDone = null; RebuildExpanded();
+        }));
+        btns.Children.Add(Pill("再来 25′", Theme.Fill, Theme.Primary, () => { Timer?.Start(25, "专注", task); _focusDone = null; RebuildExpanded(); }));
+        btns.Children.Add(Pill("休息 5′", Theme.Fill, Theme.Primary, () => { Timer?.Start(5, "休息"); _focusDone = null; RebuildExpanded(); }));
+        Grid.SetColumn(btns, 1);
+        g.Children.Add(btns);
+        b.Child = g;
+        return b;
+    }
+
+    private static Border Pill(string text, Brush bg, Brush fg, Action act)
+    {
+        var b = new Border { CornerRadius = new CornerRadius(13), Background = bg, Padding = new Thickness(11, 5, 11, 6), Margin = new Thickness(6, 0, 0, 0), Cursor = Cursors.Hand };
+        var t = Txt(12, FontWeights.SemiBold, fg); t.Text = text; b.Child = t;
+        b.MouseEnter += (_, _) => b.Opacity = 0.85;
+        b.MouseLeave += (_, _) => b.Opacity = 1;
+        b.MouseLeftButtonDown += (_, e) => e.Handled = true;
+        b.MouseLeftButtonUp += (_, e) => { e.Handled = true; act(); };
+        return b;
+    }
+
     private void BuildTodo(StackPanel stack)
     {
         var items = Todo?.Items ?? [];
@@ -149,6 +205,41 @@ public sealed partial class IslandWindow
         if (it.Done) tx.TextDecorations = TextDecorations.Strikethrough;
         Grid.SetColumn(tx, 1);
         g.Children.Add(tx);
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        if (!it.Done)
+        {
+            var focusing = Timer?.Active == true && Timer.Task == it.Text;
+            FrameworkElement right;
+            if (focusing)
+            {
+                // 正在专注这一条：显示剩余时间，点一下取消
+                var t = Txt(12, FontWeights.SemiBold, Theme.Orange);
+                t.Text = "专注中";
+                t.VerticalAlignment = VerticalAlignment.Center;
+                t.ToolTip = "点击取消专注";
+                t.MouseLeftButtonUp += (_, e) => { e.Handled = true; Timer?.Cancel(); RebuildExpanded(); };
+                right = t;
+                tx.Foreground = Theme.Orange;
+            }
+            else
+            {
+                // 悬停才出现的「专注 25 分钟」按钮
+                var b = new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(8, 2, 9, 3), Background = Theme.Fill, Opacity = 0, VerticalAlignment = VerticalAlignment.Center, ToolTip = "专注 25 分钟做这件事" };
+                var sp = new StackPanel { Orientation = Orientation.Horizontal };
+                sp.Children.Add(Glyph("\uE768", 9, Theme.Primary));
+                var l = Txt(11, FontWeights.SemiBold, Theme.Primary); l.Text = " 25′"; sp.Children.Add(l);
+                b.Child = sp;
+                g.MouseEnter += (_, _) => b.Opacity = 1;
+                g.MouseLeave += (_, _) => b.Opacity = 0;
+                b.MouseEnter += (_, _) => b.Background = HoverFill;
+                b.MouseLeave += (_, _) => b.Background = Theme.Fill;
+                b.MouseLeftButtonDown += (_, e) => e.Handled = true;
+                b.MouseLeftButtonUp += (_, e) => { e.Handled = true; Timer?.Start(25, "专注", it.Text); RebuildExpanded(); };
+                right = b;
+            }
+            Grid.SetColumn(right, 2);
+            g.Children.Add(right);
+        }
         AddHover(g);
 
         g.MouseLeftButtonUp += (_, e) =>

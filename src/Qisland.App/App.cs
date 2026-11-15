@@ -24,6 +24,9 @@ public sealed class App : Application
     private FocusTimer? _timer;
     private MediaWatcher? _media;
     private TodoFile? _todo;
+    private Countdowns? _countdown;
+    private VolumeWatcher? _volume;
+    private DateTime _day = DateTime.Today;
     private readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromSeconds(1) };
     private int _tickN;
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
@@ -36,7 +39,13 @@ public sealed class App : Application
     {
         if (args.Length >= 2 && args[0] == "hook") return HookRelay.Run(args[1]);
         using var mutex = new Mutex(true, @"Local\Qisland.Island", out var first);
-        if (!first) return 0;
+        if (!first)
+        {
+            // 自动重启时旧进程可能还没完全退出：最多等 10 秒拿到单实例锁
+            if (!args.Contains("--restarted")) return 0;
+            try { if (!mutex.WaitOne(TimeSpan.FromSeconds(10))) return 0; }
+            catch (AbandonedMutexException) { }
+        }
         var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         _self = app;
         app.Startup += (_, _) => app.Boot(args);
@@ -50,6 +59,10 @@ public sealed class App : Application
         Directory.CreateDirectory(InboxDir);
         Http.DefaultRequestHeaders.UserAgent.ParseAdd("Qisland/0.2 (+https://github.com/Qiuizi)");
         DispatcherUnhandledException += (_, e) => { Log(e.Exception.ToString()); e.Handled = true; };
+        TaskScheduler.UnobservedTaskException += (_, e) => { Log("后台任务: " + e.Exception.GetBaseException().Message); e.SetObserved(); };
+        Autostart.InstallCrashRestart();
+        Autostart.EnsureDefault();
+        if (args.Contains("--restarted")) Log("已自动重启");
 
         // WPF 默认按 60 fps 出帧；这台屏是 120 Hz，60 帧的弹簧动画看起来就是「有点卡」。
         // 把动画默认帧率提到屏幕刷新率（频谱条、转圈这些显式写了低帧率的不受影响）。
@@ -85,8 +98,12 @@ public sealed class App : Application
         _window.ApplyLook(LoadLook());
         _timer = new FocusTimer(_store);
         _window.Timer = _timer;
+        _timer.Finished += (label, task) => _window.OnFocusFinished(label, task);
         _harness = new HarnessWatcher(_store);
         try { _flash = new MessengerFlash(_store); _flash.Start(); } catch (Exception ex) { Log("ShellHook: " + ex.Message); }
+        try { _volume = new VolumeWatcher(); _volume.Changed += _window.ShowVolume; } catch (Exception ex) { Log("音量: " + ex.Message); }
+        try { _countdown = new Countdowns(); _window.Countdown = _countdown; _countdown.Changed += _window.OnCountdownChanged; _window.OnCountdownChanged(); }
+        catch (Exception ex) { Log("倒计时: " + ex.Message); }
         try { _todo = new TodoFile(_store); _window.Todo = _todo; _todo.Changed += () => _window.SetTodos(_todo.Open); _window.SetTodos(_todo.Open); }
         catch (Exception ex) { Log("待办: " + ex.Message); }
         _toasts = new ToastMirror(_store);
@@ -103,6 +120,7 @@ public sealed class App : Application
             _flash?.OnForeground(Native.GetForegroundWindow());
             if (_tickN % 3 == 0) { try { _harness.Tick(); } catch (Exception ex) { Log("DSH: " + ex.Message); } }
             if (_tickN % 5 == 0) _store.Expire();
+            if (DateTime.Today != _day) { _day = DateTime.Today; _countdown?.Refresh(); }
         };
         _tick.Start();
         Log("providers started");
@@ -193,6 +211,14 @@ public sealed class App : Application
             foreach (System.Windows.Forms.ToolStripMenuItem i in look.DropDownItems) i.Checked = i.Text == Theme.LookName(Theme.Current);
         };
         menu.Items.Add(look);
+        menu.Items.Add("编辑倒计时", null, (_, _) => Process.Start(new ProcessStartInfo("notepad.exe", "\"" + Countdowns.PathName + "\"") { UseShellExecute = true }));
+        var keys = new System.Windows.Forms.ToolStripMenuItem("接管音量键") { CheckOnClick = true, Checked = !File.Exists(VolumeWatcher.OffFlag), ToolTipText = "音量键改由灵动岛显示，不再弹出系统音量浮窗" };
+        keys.CheckedChanged += (_, _) => _volume?.HookKeys(keys.Checked);
+        menu.Items.Add(keys);
+        var auto = new System.Windows.Forms.ToolStripMenuItem("开机自启");
+        auto.Click += (_, _) => Autostart.Set(!Autostart.Enabled);
+        menu.Opening += (_, _) => auto.Checked = Autostart.Enabled;
+        menu.Items.Add(auto);
         menu.Items.Add("编辑待办", null, (_, _) => Process.Start(new ProcessStartInfo("notepad.exe", "\"" + TodoFile.PathName + "\"") { UseShellExecute = true }));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("发送测试卡片", null, (_, _) => Dispatcher.BeginInvoke(Demo));
@@ -213,6 +239,7 @@ public sealed class App : Application
     {
         if (_tray != null) { _tray.Visible = false; _tray.Dispose(); }
         _api?.Dispose();
+        _volume?.Dispose();
         _inboxWatcher?.Dispose();
         Shutdown();
     }
