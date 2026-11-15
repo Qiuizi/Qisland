@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Qisland · Windows 灵动岛 V1 前瞻</title>
+<meta name="description" content="给 Windows 做的灵动岛：顺滑、安静，不挡事。">
+<meta property="og:image" content="assets/shots/03-home.png">
+<style>
+:root{--bg:#000;--fg:#f5f5f7;--mute:#86868b;--card:#111114;--line:rgba(255,255,255,.08);--accent:#ff9f0a;--blue:#2997ff}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--fg);font-family:-apple-system,"SF Pro Display","Segoe UI Variable","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;line-height:1.5;overflow-x:hidden}
+a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+nav{position:fixed;top:0;left:0;right:0;z-index:10;display:flex;justify-content:space-between;align-items:center;padding:14px 28px;background:rgba(0,0,0,.6);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);font-size:14px}
+nav b{font-weight:600;letter-spacing:.2px}nav div a{color:var(--fg);opacity:.8;margin-left:24px}
+.tag{display:inline-block;font-size:13px;font-weight:600;color:var(--accent);border:1px solid rgba(255,159,10,.4);padding:3px 12px;border-radius:99px;margin-bottom:22px}
+section{padding:120px 24px;max-width:1080px;margin:0 auto;text-align:center}
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;padding-top:140px}
+h1{font-size:clamp(56px,10vw,112px);font-weight:700;letter-spacing:-.04em;line-height:1}
+h2{font-size:clamp(36px,5.5vw,64px);font-weight:700;letter-spacing:-.03em;line-height:1.08}
+.sub{font-size:clamp(20px,2.6vw,28px);color:var(--mute);margin-top:18px;font-weight:500}
+.grad{background:linear-gradient(90deg,#ff9f0a,#ff375f 45%,#bf5af2);-webkit-background-clip:text;background-clip:text;color:transparent}
+.island{margin-top:72px;position:relative;width:min(560px,90vw)}
+.island img{width:100%;display:block;filter:drop-shadow(0 30px 60px rgba(255,159,10,.12))}
+.cta{margin-top:44px;display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
+.btn{background:var(--blue);color:#fff;padding:12px 26px;border-radius:99px;font-size:17px;font-weight:500}
+.btn.ghost{background:transparent;color:var(--blue);border:1px solid var(--blue)}.btn:hover{text-decoration:none;opacity:.9}
+video{width:100%;border-radius:28px;margin-top:56px;background:#0a0a0c}
+.pains{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;margin-top:64px;text-align:left}
+.pain{background:var(--card);border-radius:28px;padding:34px 30px}
+.pain .q{color:var(--mute);font-size:15px}
+.pain h3{font-size:24px;margin:8px 0 12px;letter-spacing:-.01em}
+.pain p{color:#c7c7cc;font-size:16px}
+.pain .n{font-size:44px;font-weight:700;letter-spacing:-.03em;margin-top:18px}
+.pain .n small{font-size:15px;color:var(--mute);font-weight:500;margin-left:6px}
+.shot{margin-top:56px}.shot img{width:min(100%,560px);filter:drop-shadow(0 40px 80px rgba(0,0,0,.6))}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center;text-align:left;margin-top:40px}
+.two img{width:100%}
+.two p{color:#c7c7cc;font-size:18px;margin-top:14px}
+@media(max-width:760px){.two{grid-template-columns:1fr}nav div a:not(:last-child){display:none}}
+.feat{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:36px 28px;margin-top:64px;text-align:left}
+.feat h4{font-size:19px;margin-bottom:6px}.feat p{color:var(--mute);font-size:15px}
+.feat i{font-style:normal;display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:10px}
+code{font-family:"SF Mono","Cascadia Code",Consolas,monospace;font-size:.9em;background:#1c1c1f;padding:2px 7px;border-radius:6px}
+footer{border-top:1px solid var(--line);color:var(--mute);font-size:13px;padding:36px 24px;text-align:center}
+.reveal{opacity:0;transform:translateY(40px);transition:opacity 1s cubic-bezier(.2,.8,.2,1),transform 1s cubic-bezier(.2,.8,.2,1)}
+.reveal.on{opacity:1;transform:none}
+</style>
+</head>
+<body>
+<nav><b>Qisland</b><div><a href="#pain">痛点</a><a href="#look">界面</a><a href="#start">开始使用</a><a href="https://github.com/Qiuizi/Qisland">GitHub</a></div></nav>
+
+<section class="hero">
+  <span class="tag">V1 前瞻</span>
+  <h1>Qisland</h1>
+  <p class="sub">给 Windows 做的灵动岛。<span class="grad">顺滑、安静，不挡事。</span></p>
+  <div class="island"><img src="assets/shots/02-compact.png" alt="Qisland 紧凑态"></div>
+  <div class="cta">
+    <a class="btn" href="https://github.com/Qiuizi/Qisland/releases/tag/v1.0.0-preview">下载 V1 前瞻</a>
+    <a class="btn ghost" href="#film">观看宣传片</a>
+  </div>
+</section>
+
+<section id="film" class="reveal">
+  <h2>一条胶囊，<br>装下你正在等的事。</h2>
+  <p class="sub">AI 助手要确认、作业要截止、群里有新消息。它们按轻重排好，只在需要时展开。</p>
+  <video src="assets/qisland-v1-preview.mp4" poster="assets/poster.png" controls playsinline muted loop preload="metadata"></video>
+</section>
+
+<section id="pain">
+  <h2 class="reveal">先把地基打牢。</h2>
+  <p class="sub reveal">Windows 灵动岛用一天就会遇到的问题，V1 前瞻先解决。</p>
+  <div class="pains">
+    <div class="pain reveal"><div class="q">岛下面的按钮点不到？</div><h3>只占岛那么大</h3><p>透明大窗口会吞掉点击。Qisland 把可点击区域收紧到岛本身，其余像素全部穿透给下面的程序。</p></div>
+    <div class="pain reveal"><div class="q">游戏和全屏视频被挡住？</div><h3>全屏自动让路</h3><p>识别全屏游戏和演示模式自动隐藏，<code>Ctrl+Alt+Q</code> 随时叫回。按进程名配置白名单和黑名单。</p></div>
+    <div class="pain reveal"><div class="q">闲着也在耗电？</div><h3>不动就不画</h3><p>只有动画在跑时才启动帧循环，其余时间几乎不占资源。</p><div class="n">≈0.5%<small>闲置 CPU（作者机器实测）</small></div></div>
+    <div class="pain reveal"><div class="q">动画发涩？</div><h3>跟上屏幕刷新率</h3><p>读取显示器刷新率驱动弹簧动画，页面预热缓存，滑动不重建。</p><div class="n">116 fps<small>120 Hz 屏实测</small></div></div>
+    <div class="pain reveal"><div class="q">玻璃效果留下黑块？</div><h3>不靠系统模糊</h3><p>Win11 24H2 的亚克力无法裁切。Qisland 用磨砂填充、高光和分层阴影做出质感，不再出黑块。</p></div>
+    <div class="pain reveal"><div class="q">崩了就没了？</div><h3>自己爬起来</h3><p>开机自启，崩溃后自动重启；一分钟内重复崩溃就停下，不会死循环。</p></div>
+  </div>
+</section>
+
+<section id="look">
+  <h2 class="reveal">展开，是五个页面。</h2>
+  <p class="sub reveal">滚轮切换，收起时自动回到主页。</p>
+  <div class="two reveal"><img src="assets/shots/03-home.png" alt="主页"><div><h3 style="font-size:30px">主页</h3><p>编程助手等你确认的命令、刚跑完的测试、快截止的作业、群消息，一屏看完。点一下直接跳到对应窗口。</p></div></div>
+  <div class="two reveal"><div><h3 style="font-size:30px">组件</h3><p>CPU、内存、电池和网速，月历，以及 25 / 50 分钟专注和 5 分钟休息。</p></div><img src="assets/shots/04-widgets.png" alt="组件"></div>
+  <div class="two reveal"><img src="assets/shots/05-clipboard.png" alt="剪贴板"><div><h3 style="font-size:30px">剪贴板</h3><p>最近 30 条文字和文件，点一下重新复制。只存在内存里，并尊重密码管理器的“不进历史”标记。</p></div></div>
+  <div class="shot reveal"><img src="assets/shots/06-volume.png" alt="音量" style="width:min(100%,460px)"><p class="sub" style="font-size:18px">音量键接管：岛上显示音量条，插上耳机会告诉你。</p></div>
+</section>
+
+<section>
+  <h2 class="reveal">还有这些。</h2>
+  <div class="feat">
+    <div class="reveal"><h4><i style="background:#30d158"></i>电量与充电</h4><p>插拔电源、20% 和 10% 低电量、充满提醒。</p></div>
+    <div class="reveal"><h4><i style="background:#0a84ff"></i>多显示器</h4><p>跟随前台窗口所在的屏幕，按每块屏的 DPI 居中。</p></div>
+    <div class="reveal"><h4><i style="background:#ff9f0a"></i>复制与下载进度</h4><p>资源管理器复制和浏览器下载显示进度，完成后一键定位文件。</p></div>
+    <div class="reveal"><h4><i style="background:#bf5af2"></i>媒体</h4><p>QQ 音乐、Spotify、酷狗、酷我和浏览器视频，拖动即可跳转。</p></div>
+    <div class="reveal"><h4><i style="background:#ff375f"></i>考试倒计时</h4><p>三天内的考试直接显示在胶囊上。</p></div>
+    <div class="reveal"><h4><i style="background:#64d2ff"></i>本机上岛 API</h4><p><code>127.0.0.1:9840</code>，兼容 WinIslands 协议，脚本一行推送。</p></div>
+  </div>
+</section>
+
+<section id="start" class="reveal">
+  <h2>三十秒开始。</h2>
+  <p class="sub">需要 Windows 10/11 和 .NET 8 桌面运行时。下载、解压、运行 <code>Qisland.exe</code>。</p>
+  <div class="cta"><a class="btn" href="https://github.com/Qiuizi/Qisland/releases/tag/v1.0.0-preview">下载 V1 前瞻</a><a class="btn ghost" href="https://github.com/Qiuizi/Qisland#readme">阅读文档</a></div>
+</section>
+
+<footer>Qisland V1 前瞻 · MIT · 基于 <a href="https://github.com/JudeKwong/WinIslands">WinIslands</a> 起步 · 由 <a href="https://github.com/Qiuizi">Qiuizi</a> 制作</footer>
+<script>
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('on');io.unobserve(e.target)}}),{threshold:.15});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+</script>
+</body>
+</html>

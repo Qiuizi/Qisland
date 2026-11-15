@@ -1,74 +1,115 @@
+<div align="center">
+
+<img src="docs/assets/shots/02-compact.png" width="520" alt="Qisland 紧凑态">
+
 # Qisland
 
-给自己用的 Windows 10/11 灵动岛。界面是一条连续的胶囊，在紧凑、展开和多条活动之间用弹簧动画过渡。内容靠间距和字重分开，不靠分割线。
+**给 Windows 做的灵动岛：顺滑、安静，不挡事。**
 
-它是在 [WinIslands](https://github.com/JudeKwong/WinIslands) v3.1.2（JudeKwong，MIT）上继续做的，没有把原来的上岛 API、SMTC 媒体和进程外插件换掉。本仓库保留同一份 MIT 许可证。
+![version](https://img.shields.io/badge/version-V1%20前瞻-ff9f0a?style=flat-square)
+![platform](https://img.shields.io/badge/Windows-10%20%7C%2011-0a84ff?style=flat-square)
+![.NET](https://img.shields.io/badge/.NET-8-512bd4?style=flat-square)
+![license](https://img.shields.io/badge/license-MIT-30d158?style=flat-square)
 
-## 岛上会显示什么
+[介绍页](https://qiuizi.github.io/Qisland/) · [宣传片](docs/assets/qisland-v1-preview.mp4) · [下载 V1 前瞻](https://github.com/Qiuizi/Qisland/releases/tag/v1.0.0-preview)
 
-| 来源 | 现在怎么接 |
+</div>
+
+---
+
+Windows 上的“灵动岛”项目不少，但真正用一天就会碰到同一批问题：岛下面的东西点不到、打游戏时它浮在画面上、闲着也吃 CPU、动画只有 60 帧、换个显示器就跑偏。Qisland 的 V1 前瞻版先把这些地基打牢，再往上放功能。
+
+## 它解决了哪些痛点
+
+| 痛点 | 常见做法的问题 | Qisland 的做法 |
+|---|---|---|
+| **岛下面点不到东西** | 透明大窗口盖在屏幕顶上，`WS_EX_TRANSPARENT` 在非分层 DWM 窗口上并不放行点击 | 用 `SetWindowRgn` 把可点击区域收紧到岛本身加一圈阴影，其余像素直接穿透；动画中只扩不缩，停稳再收回，避免逐帧改区域造成闪烁 |
+| **打游戏、看全屏视频时挡画面** | 一直置顶，只能手动退出 | 通过 `SHQueryUserNotificationState` 识别全屏 D3D 和演示模式自动隐藏；`Ctrl+Alt+Q` 临时叫回或一键隐藏；`fullscreen.txt` 按进程名写白名单和黑名单 |
+| **闲着也耗电** | 每帧轮询、常驻动画 | 闲置时不跑渲染循环，只有弹簧在动时才拉起帧计时。作者机器上实测：闲置约 0.5% CPU，转圈动画约 2.6%，托管堆约 3.4 MB |
+| **动画发涩、只有 60 帧** | WPF 默认 60 fps | 读显示器刷新率并覆盖 `Timeline.DesiredFrameRate`，120 Hz 屏上实测约 116 fps；所有尺寸变化走弹簧，页面预热并缓存，滑动不重建 |
+| **玻璃效果留下黑块** | Win11 24H2 上亚克力和模糊无法被窗口区域裁切 | 不用系统模糊，改为半透明磨砂填充、边缘高光和分层假阴影，三种外观（深色、白色、液态玻璃）都不会出黑块 |
+| **系统音量弹窗又大又丑** | 只能忍 | 接管音量键，在岛上显示音量条，随耳机切换显示设备名；托盘里一键还给系统 |
+| **多显示器乱跑** | 固定在主屏，或在高 DPI 副屏上偏移 | 有两块以上屏幕时跟随前台窗口所在的屏，按每块屏自己的 DPI 居中 |
+| **程序挂了就没了** | 需要手动重开 | 开机自启，崩溃后自动重启；60 秒内重复崩溃不再拉起，防止死循环 |
+| **想看的信息散在各处** | 来回切窗口 | AI 编程助手的确认请求、课程截止、微信和 QQ 消息、媒体、天气、倒计时、待办，按重要程度排进一条胶囊 |
+
+## 截图
+
+| 主页 | 组件 |
 |---|---|
-| Claude Code、Codex | 官方 hook 把事件 POST 到本机 API |
-| DeepSeek Harness 桌面版 | 看进程和主窗口标题，并镜像它的系统通知。不读 LevelDB |
-| 信息站 Info Station | 轮询它自己的本地 HTTP API |
-| CourseDesk | 读它写出的快照，或让它直接推送。补丁在 `docs/coursedesk-patch.md` |
-| JARVIS | 只定义了推送约定，等那边以后来调 |
-| 微信、QQ | 系统通知镜像，可按应用开关，可隐藏内容 |
-| 天气、计时、待办 | Open-Meteo（默认成都）、原有番茄钟、本地 JSON 待办 |
-| 媒体 | 原来的 SMTC / Cider |
+| <img src="docs/assets/shots/03-home.png" width="420"> | <img src="docs/assets/shots/04-widgets.png" width="420"> |
+| **剪贴板** | **音量** |
+| <img src="docs/assets/shots/05-clipboard.png" width="420"> | <img src="docs/assets/shots/06-volume.png" width="420"><br><br><img src="docs/assets/shots/01-idle.png" width="220"> |
 
-多条活动同时出现时，最重要的一条留在胶囊里，其余收成右侧的小圆点，悬停能看到标题。
+截图由程序自己的 `--snapshot` 模式渲染，内容是演示数据。
 
-## 在 Windows 上构建和运行
+## 功能一览
 
-需要 .NET 8 SDK。
+- **五个页面**：主页、组件、待办、剪贴板、文件架，滚轮或圆点切换，收起时回到主页。
+- **活动来源**：Claude Code / Codex（官方 hook）、DeepSeek Harness、信息站、CourseDesk、微信和 QQ 通知、媒体（QQ 音乐、Spotify、酷狗、酷我、Apple Music、PotPlayer、VLC、浏览器视频）、天气。
+- **系统提示**：插拔电源、电量 20% 和 10% 提醒、充满提醒；耳机连接和输出切换；资源管理器复制、移动、删除进度；浏览器下载进度和速度，完成后点一下在文件夹里定位。
+- **剪贴板历史**：最近 30 条文字和文件，只存在内存里，不写硬盘；尊重密码管理器设置的“不进历史”标记。
+- **专注计时**：待办旁边点 25′ 开始，结束时岛会展开，问你做完了、再来一轮还是休息。
+- **考试倒计时**：三天内的考试会出现在收起状态的胶囊上。
+- **上岛 API**：`http://127.0.0.1:9840`，只监听本机，兼容 WinIslands 的 `/v1/island/push`。协议见 [docs/push-api.md](docs/push-api.md)。
+
+## 安装
+
+需要 Windows 10/11 和 [.NET 8 桌面运行时](https://dotnet.microsoft.com/download/dotnet/8.0)。从 [Releases](https://github.com/Qiuizi/Qisland/releases) 下载压缩包，解压后运行 `Qisland.exe`。
+
+自己构建：
 
 ```powershell
-git clone <这个仓库>
-cd <仓库>
-powershell -ExecutionPolicy Bypass -File scripts\build.ps1
-powershell -ExecutionPolicy Bypass -File scripts\publish.ps1
-.\dist\Qisland.exe
+git clone https://github.com/Qiuizi/Qisland.git
+cd Qisland
+dotnet publish src\Qisland.App\Qisland.App.csproj -c Release -r win-x64 --self-contained false -p:PublishReadyToRun=true -o app
+.\app\Qisland.exe
 ```
 
-`build.ps1` 成功时打印 `BUILD_OK`。`publish.ps1` 打出一个自包含的 win-x64 目录 `dist\`，成功时打印 `PUBLISH_OK`。
+## 快捷键与配置
 
-第一次启动会把天气城市设为成都，并让岛在没有音乐时也留在屏幕上。设置在 `%APPDATA%\Qisland\settings.json`。托盘图标里可以打开设置。来源页能单独关掉每一类。
+| 操作 | 方式 |
+|---|---|
+| 展开 / 收起 | 鼠标移到岛上 / 移开 |
+| 换页 | 滚轮，或点下方圆点 |
+| 全屏时叫回、平时隐藏 | `Ctrl+Alt+Q` |
+| 切换外观、自启、音量键接管 | 托盘图标右键 |
 
-上岛 API 默认开着：`http://127.0.0.1:9840`。协议见 [docs/push-api.md](docs/push-api.md)。
+数据都在 `%APPDATA%\Qisland\`，纯文本，可以直接改：
 
-## 接上三个编程助手
+| 文件 | 内容 |
+|---|---|
+| `todo.md` | 待办，Markdown 复选框格式 |
+| `countdown.txt` | 每行一场考试，例如 `2026-12-12 六级笔试 \| 笔试`（竖线后是胶囊上的短标签） |
+| `fullscreen.txt` | `show 进程名` 全屏时也显示，`hide 进程名` 前台时总是隐藏 |
+| `shelf.txt` | 文件架上的文件 |
+| `look.txt` | 外观，建议从托盘菜单切换 |
 
-在 Windows 上：
+## 接上编程助手
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install-claude-hooks.ps1
 powershell -ExecutionPolicy Bypass -File scripts\install-codex-hooks.ps1
 ```
 
-Claude Code 写的是 `%USERPROFILE%\.claude\settings.json` 里的 hooks。Codex 写的是 `%USERPROFILE%\.codex\config.toml` 的 `notify`。如果 Codex 里已经有 `notify`，脚本不会覆盖，会把要加的命令打印出来。
+Codex 写的是 `%USERPROFILE%\.codex\config.toml` 的 `notify`，已有配置不会被覆盖。Claude Code 的脚本 `scripts\install-claude-hooks.ps1` 也在仓库里，需要时自己运行。WSL2 里的助手可以用 `scripts/qisland-push`。DeepSeek Harness 不需要装任何东西，Qisland 会看它的窗口和系统通知。
 
-DeepSeek Harness 是安装在本机的 Electron 应用（`DeepSeek Harness.exe`），不是命令行。不要给它装 CLI hook。Qisland 会自己看进程和通知。可选的 Cordis 插件草稿在 `plugins/dsh-qisland/`，说明见 [docs/deepseek-harness.md](docs/deepseek-harness.md)。
+## 已知限制
 
-助手如果跑在 WSL2 Ubuntu 里，用 `scripts/qisland-push`。镜像网络可以直接打 `127.0.0.1`。NAT 模式打不到只监听回环的 API，脚本会改把 JSON 写到 Windows 的收件箱。两种模式都写在 [docs/push-api.md](docs/push-api.md) 里。
+- 笔记本的亮度键由固件处理，系统亮度弹窗无法屏蔽；Qisland 只会在岛上同步显示亮度。
+- 复制进度依赖资源管理器对话框标题，下载进度依赖浏览器的临时文件扩展名（`.crdownload`、`.part` 等），非中文系统或小众下载器可能识别不到。
+- 液态玻璃外观没有真正的背景模糊，原因见上表。
+- 这是 V1 前瞻版，作者每天在用，但只在少数几台机器上测过。欢迎提 Issue。
 
-## 信息站和 CourseDesk
+## 结构
 
-信息站后端默认 `http://127.0.0.1:8765`。Qisland 读高分未读、今日简报和临近截止。如果设了 `INFO_STATION_TOKEN`，把同一个值填进设置里的 Token。可选的推送补丁在 [docs/info-station.md](docs/info-station.md)。
-
-CourseDesk 目前没有本地 HTTP。补丁让它在通知和快照变化时推过来，见 [docs/coursedesk-patch.md](docs/coursedesk-patch.md)。
-
-## 开发
-
-提供方的解析在 `src/Qisland.Core`，不依赖 WPF，Linux 上也能测：
-
-```bash
-dotnet test tests/Qisland.Core.Tests/Qisland.Core.Tests.csproj
-dotnet build Qisland.sln -p:EnableWindowsTargeting=true
+```
+src/Qisland.App    新的 WPF 岛（本仓库的主程序，手写，轻量）
+src/Qisland.Core   不依赖 WPF 的解析与数据模型，可在 Linux 上测试
+src/WinIslands     上游 WinIslands v3.1.2，保留作参考
+tests/             Core 的单元测试
+docs/              API 文档、介绍页与截图
 ```
 
-界面工程仍是原来的 `src/WinIslands`（程序集名叫 Qisland）。WPF 窗口要在 Windows 上看。
+## 致谢与许可
 
-## 许可
-
-MIT。上游版权属于 WinIslands 的贡献者，个人改动属于 Qiuizi。见 `LICENSE`。
+基于 [JudeKwong/WinIslands](https://github.com/JudeKwong/WinIslands)（MIT）起步，交互参考了 [souverth/dynamic-island-4win](https://github.com/souverth/dynamic-island-4win) 和 [FlorianButz/DynamicWin](https://github.com/FlorianButz/DynamicWin)。MIT 许可，见 [LICENSE](LICENSE)。
