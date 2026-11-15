@@ -243,6 +243,17 @@ public sealed class IslandWindow : Window
         if (full != _hidden) { _hidden = full; _show.Target = full ? 0 : 1; Kick(); }
     }
 
+    /// <summary>点一行：返回 true 表示已经打开了对应软件。</summary>
+    public Func<LiveActivity, bool>? OpenRequested;
+    private IReadOnlyList<string> _todos = Array.Empty<string>();
+
+    public void SetTodos(IReadOnlyList<string> todos)
+    {
+        _todos = todos;
+        _expDirty = true;
+        if (_mode == Mode.Expanded && !_animating) RebuildExpanded();
+    }
+
     public void SetWeather(WeatherSnapshot w)
     {
         _weather = w;
@@ -455,6 +466,7 @@ public sealed class IslandWindow : Window
         if (ranked.Count == 0)
         {
             stack.Children.Add(HeroClock());
+            if (_todos.Count > 0) stack.Children.Add(TodoBlock());
         }
         else
         {
@@ -466,6 +478,7 @@ public sealed class IslandWindow : Window
                 more.Margin = new Thickness(46, 0, 0, 2);
                 stack.Children.Add(more);
             }
+            if (_todos.Count > 0) stack.Children.Add(TodoBlock());
             stack.Children.Add(Footer());
         }
         _expanded.Children.Add(stack);
@@ -549,13 +562,45 @@ public sealed class IslandWindow : Window
         Grid.SetColumn(right, 2);
         g.Children.Add(right);
 
-        if (!a.Sticky)
+        g.Cursor = Cursors.Hand;
+        g.MouseLeftButtonUp += (_, e) =>
         {
-            g.Cursor = Cursors.Hand;
-            g.ToolTip = null;
+            if (OpenRequested?.Invoke(a) != true) return;
+            e.Handled = true;
+            _pinned = false;
+            SetMode(DesiredRestMode());
+        };
+        if (!a.Sticky)
             g.MouseRightButtonUp += (_, e) => { _store.Remove(a.Id); e.Handled = true; };
-        }
         return g;
+    }
+
+    private FrameworkElement TodoBlock()
+    {
+        var sp = new StackPanel { Margin = new Thickness(2, 6, 0, 0) };
+        foreach (var t in _todos.Take(3))
+        {
+            var line = new StackPanel { Orientation = Orientation.Horizontal, Height = 24 };
+            line.Children.Add(new Border
+            {
+                Width = 13, Height = 13, CornerRadius = new CornerRadius(6.5), BorderThickness = new Thickness(1.4),
+                BorderBrush = Theme.Tertiary, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0),
+            });
+            var tx = Txt(13, FontWeights.Normal, Theme.Primary);
+            tx.Text = t;
+            tx.VerticalAlignment = VerticalAlignment.Center;
+            tx.MaxWidth = ExpandedW - 70;
+            line.Children.Add(tx);
+            sp.Children.Add(line);
+        }
+        if (_todos.Count > 3)
+        {
+            var more = Txt(11.5, FontWeights.Medium, Theme.Tertiary);
+            more.Text = $"还有 {_todos.Count - 3} 件待办";
+            more.Margin = new Thickness(23, 0, 0, 0);
+            sp.Children.Add(more);
+        }
+        return sp;
     }
 
     private FrameworkElement Footer()

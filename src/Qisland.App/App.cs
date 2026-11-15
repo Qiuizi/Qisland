@@ -18,6 +18,13 @@ public sealed class App : Application
     private System.Windows.Forms.NotifyIcon? _tray;
     private FileSystemWatcher? _inboxWatcher;
     private readonly DispatcherTimer _trim = new() { Interval = TimeSpan.FromSeconds(30) };
+    private ToastMirror? _toasts;
+    private MessengerFlash? _flash;
+    private HarnessWatcher? _harness;
+    private FocusTimer? _timer;
+    private TodoFile? _todo;
+    private readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromSeconds(1) };
+    private int _tickN;
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
 
     public static string DataDir { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Qisland");
@@ -55,8 +62,33 @@ public sealed class App : Application
         _trim.Tick += (_, _) => { _trim.Stop(); Trim(); };
         _ = WeatherLoop();
 
+        StartProviders();
         if (args.Contains("--demo")) Demo();
         TrimSoon();
+    }
+
+    // ───────────── 常用软件 ─────────────
+    private void StartProviders()
+    {
+        _window!.OpenRequested = Launcher.Open;
+        _timer = new FocusTimer(_store);
+        _harness = new HarnessWatcher(_store);
+        try { _flash = new MessengerFlash(_store); _flash.Start(); } catch (Exception ex) { Log("ShellHook: " + ex.Message); }
+        try { _todo = new TodoFile(_store); _todo.Changed += () => _window.SetTodos(_todo.Open); _window.SetTodos(_todo.Open); }
+        catch (Exception ex) { Log("待办: " + ex.Message); }
+        _toasts = new ToastMirror(_store);
+        _ = _toasts.StartAsync();
+        _ = new InfoStationWatcher(_store, Http).Loop();
+        _tick.Tick += (_, _) =>
+        {
+            _tickN++;
+            _timer.Tick();
+            _flash?.OnForeground(Native.GetForegroundWindow());
+            if (_tickN % 3 == 0) { try { _harness.Tick(); } catch (Exception ex) { Log("DSH: " + ex.Message); } }
+            if (_tickN % 5 == 0) _store.Expire();
+        };
+        _tick.Start();
+        Log("providers started");
     }
 
     // ───────────── 收件箱：给 WSL NAT 模式等连不上 localhost 的场景 ─────────────
@@ -135,6 +167,14 @@ public sealed class App : Application
     private void SetupTray()
     {
         var menu = new System.Windows.Forms.ContextMenuStrip();
+        var focus = new System.Windows.Forms.ToolStripMenuItem("计时");
+        foreach (var (m, label) in new[] { (25, "专注 25 分钟"), (50, "专注 50 分钟"), (5, "计时 5 分钟"), (10, "计时 10 分钟") })
+            focus.DropDownItems.Add(label, null, (_, _) => Dispatcher.BeginInvoke(() => _timer?.Start(m, label.StartsWith("专注") ? "专注" : "计时")));
+        focus.DropDownItems.Add(new System.Windows.Forms.ToolStripSeparator());
+        focus.DropDownItems.Add("取消计时", null, (_, _) => Dispatcher.BeginInvoke(() => _timer?.Cancel()));
+        menu.Items.Add(focus);
+        menu.Items.Add("编辑待办", null, (_, _) => Process.Start(new ProcessStartInfo("notepad.exe", "\"" + TodoFile.PathName + "\"") { UseShellExecute = true }));
+        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("发送测试卡片", null, (_, _) => Dispatcher.BeginInvoke(Demo));
         menu.Items.Add("清空活动", null, (_, _) => Dispatcher.BeginInvoke(() => { foreach (var a in _store.Ranked().ToList()) _store.Remove(a.Id); }));
         menu.Items.Add("打开数据目录", null, (_, _) => Process.Start(new ProcessStartInfo("explorer.exe", DataDir) { UseShellExecute = true }));
