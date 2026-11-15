@@ -174,6 +174,7 @@ public sealed partial class IslandWindow : Window
     {
         _hwnd = new WindowInteropHelper(this).Handle;
         Native.SetExStyle(_hwnd, Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE | Native.WS_EX_TRANSPARENT, true);
+        HwndSource.FromHwnd(_hwnd)?.AddHook(WndProc);
         if (_layered) return;
 
         var src = HwndSource.FromHwnd(_hwnd);
@@ -322,7 +323,7 @@ public sealed partial class IslandWindow : Window
         {
             _hoverSince = DateTime.MaxValue;
             if (_outsideSince == DateTime.MinValue) _outsideSince = now;
-            if (_mode == Mode.Expanded && !_pinned && now > _peekUntil && (now - _outsideSince).TotalMilliseconds > 420)
+            if (_mode == Mode.Expanded && !_pinned && !_swiping && now > _peekUntil && (now - _outsideSince).TotalMilliseconds > 420)
                 SetMode(DesiredRestMode());
         }
 

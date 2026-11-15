@@ -33,7 +33,11 @@ public sealed partial class IslandWindow
     private void SetupPages()
     {
         AllowDrop = true;
-        PreviewMouseWheel += (_, e) => { OnWheel(e.Delta); e.Handled = true; };
+        PreviewMouseWheel += (_, e) => { OnScroll(-e.Delta); e.Handled = true; };
+        _root.PreviewMouseLeftButtonDown += (_, e) => { _swipeStart = e.GetPosition(this); _swipeDx = 0; };
+        _root.PreviewMouseMove += OnSwipeMove;
+        _root.PreviewMouseLeftButtonUp += OnSwipeUp;
+        _root.LostMouseCapture += (_, _) => { if (_swiping) EndSwipe(); };
         DragEnter += OnDragOver;
         DragOver += OnDragOver;
         DragLeave += (_, _) => { _dragging = false; HighlightDrop(false); };
@@ -43,16 +47,106 @@ public sealed partial class IslandWindow
 
     // ───────────── 页面切换 ─────────────
 
-    private void OnWheel(int delta)
+    private double _scrollAcc;
+    private DateTime _scrollLast = DateTime.MinValue, _scrollSwitched = DateTime.MinValue;
+    private bool _scrollLocked;
+
+    /// <summary>
+    /// 滚轮和触控板统一走这里，delta 为正表示往下一页。
+    /// 触控板一次滑动会连发几十个小增量，还带惯性：累计到阈值翻一页，然后锁住直到这次手势停下，
+    /// 保证"滑一下 = 翻一页"；鼠标滚轮每格 120，直接翻。
+    /// </summary>
+    private void OnScroll(int delta)
     {
-        if (_mode != Mode.Expanded) { SetMode(Mode.Expanded); return; }
         var now = DateTime.Now;
-        if ((now - _lastWheel).TotalMilliseconds < 320) return; // 触控板一次会连发很多下，只认第一下
-        _lastWheel = now;
-        var dir = delta < 0 ? 1 : -1;
+        var quiet = (now - _scrollLast).TotalMilliseconds > 200;
+        _scrollLast = now;
+        if (quiet) { _scrollLocked = false; _scrollAcc = 0; }
+        if (_mode != Mode.Expanded) { SetMode(Mode.Expanded); _scrollLocked = true; return; }
+        if (_scrollLocked)
+        {
+            // 鼠标滚轮一格一格拨时，隔开一点就允许连续翻
+            if (Math.Abs(delta) >= 120 && (now - _scrollSwitched).TotalMilliseconds > 420) { _scrollLocked = false; _scrollAcc = 0; }
+            else return;
+        }
+        _scrollAcc += delta;
+        if (Math.Abs(_scrollAcc) < 40) return;
+        var dir = _scrollAcc > 0 ? 1 : -1;
+        _scrollAcc = 0;
+        _scrollLocked = true;
+        _scrollSwitched = now;
+        Step(dir);
+    }
+
+    private void Step(int dir)
+    {
         var next = (int)_page + dir;
         if (next < 0 || next > 2) { Nudge(-dir); return; }
         GoTo((Page)next, dir);
+    }
+
+    // 水平滚动（触控板左右滑、鼠标侧滚轮）WPF 不发事件，从窗口消息里接
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == 0x020E) // WM_MOUSEHWHEEL
+        {
+            var delta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+            OnScroll(delta);
+            handled = true;
+            return new IntPtr(1);
+        }
+        return IntPtr.Zero;
+    }
+
+    // ───────────── 鼠标按住左右拖动翻页 ─────────────
+
+    private Point? _swipeStart;
+    private double _swipeDx;
+    private bool _swiping;
+
+    private void OnSwipeMove(object sender, MouseEventArgs e)
+    {
+        if (_swipeStart is not Point s0 || e.LeftButton != MouseButtonState.Pressed || _mode != Mode.Expanded) { if (!_swiping) _swipeStart = null; return; }
+        var p = e.GetPosition(this);
+        var dx = p.X - s0.X;
+        if (!_swiping)
+        {
+            if (Math.Abs(dx) < 10 || Math.Abs(dx) < Math.Abs(p.Y - s0.Y) * 1.5) return;
+            _swiping = true;
+            _root.CaptureMouse();
+        }
+        _swipeDx = dx;
+        if (_expStack != null)
+        {
+            // 到头时阻尼更大，像拉橡皮筋
+            var edge = ((int)_page == 0 && dx > 0) || ((int)_page == 2 && dx < 0);
+            var tt = _expStack.RenderTransform as TranslateTransform ?? new TranslateTransform();
+            tt.BeginAnimation(TranslateTransform.XProperty, null);
+            tt.X = dx * (edge ? 0.2 : 0.55);
+            _expStack.RenderTransform = tt;
+        }
+        e.Handled = true;
+    }
+
+    private void OnSwipeUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_swiping) { _swipeStart = null; return; }
+        e.Handled = true; // 拖动松手不算点击
+        EndSwipe();
+    }
+
+    private void EndSwipe()
+    {
+        var dx = _swipeDx;
+        _swiping = false;
+        _swipeStart = null;
+        _swipeDx = 0;
+        if (_root.IsMouseCaptured) _root.ReleaseMouseCapture();
+        var dir = dx < 0 ? 1 : -1;
+        var next = (int)_page + dir;
+        if (Math.Abs(dx) > 50 && next >= 0 && next <= 2) { GoTo((Page)next, dir); return; }
+        if (_expStack?.RenderTransform is TranslateTransform tt)
+            tt.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(tt.X, 0, TimeSpan.FromMilliseconds(320)) { EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.25 } });
     }
 
     private void GoTo(Page p, int dir)
