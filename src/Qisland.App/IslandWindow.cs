@@ -17,7 +17,7 @@ namespace Qisland.App;
 /// 灵动岛窗口。窗口本身固定尺寸、永不移动，所有形变只发生在里面的胶囊上：
 /// 用 GPU 合成（DWM 玻璃 + 透明背景），不走 AllowsTransparency 的软件分层窗口。
 /// </summary>
-public sealed class IslandWindow : Window
+public sealed partial class IslandWindow : Window
 {
     private enum Mode { Idle, Compact, Expanded }
 
@@ -106,6 +106,7 @@ public sealed class IslandWindow : Window
         _poll.Tick += (_, _) => Poll();
         _tick.Tick += (_, _) => OnSecond();
         SourceInitialized += (_, _) => SetupHwnd();
+        SetupPages();
         Loaded += (_, _) => { App.Log($"render tier {RenderCapability.Tier >> 16}, layered={_layered}"); PlaceOnScreen(); OnSecond(); RebuildIdle(); ApplyFrame(); _poll.Start(); _tick.Start(); };
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) => Dispatcher.BeginInvoke(PlaceOnScreen);
     }
@@ -207,8 +208,11 @@ public sealed class IslandWindow : Window
 
     private void SetMode(Mode m)
     {
+        var opening = m == Mode.Expanded && _mode != Mode.Expanded;
+        if (m != Mode.Expanded && _mode == Mode.Expanded) OnCollapsed();
         if (m == Mode.Expanded && _expDirty) RebuildExpanded();
         _mode = m;
+        if (opening) StaggerIn();
         var top = _store.Ranked();
         (_w.Target, _h.Target, _r.Target) = m switch
         {
@@ -256,6 +260,7 @@ public sealed class IslandWindow : Window
         if (text != _clockText) { _clockText = text; _idleClock.Text = text; _expDirty = true; }
         if (_expDirty && !_animating) RebuildExpanded();
         UpdateMediaProgress();
+        OnPageSecond();
         if (now.Second % 5 == 0) _store.Expire();
         if (_peekUntil != DateTime.MinValue && now > _peekUntil && !_pinned && _hoverSince == DateTime.MaxValue)
         {
@@ -552,8 +557,19 @@ public sealed class IslandWindow : Window
         Place(_expanded, ExpandedW);
         _expDirty = false;
         var stack = new StackPanel { Margin = new Thickness(16, 14, 16, 0) };
-        var ranked = _store.Ranked();
         _mediaFill = null; _mediaTime = null;
+        BuildPage(stack);
+        _expStack = stack;
+        _expanded.Children.Add(stack);
+        stack.Measure(new Size(ExpandedW, double.PositiveInfinity));
+        _expandedH = Math.Ceiling(stack.DesiredSize.Height + 14 + 10);
+        _expanded.Height = _expandedH;
+        if (_mode == Mode.Expanded) _h.Target = _expandedH;
+    }
+
+    private void BuildHome(StackPanel stack)
+    {
+        var ranked = _store.Ranked();
         var music = Media?.Current;
 
         if (ranked.Count == 0)
@@ -578,11 +594,6 @@ public sealed class IslandWindow : Window
             stack.Children.Add(Footer());
             if (_wx != null) stack.Children.Add(WeatherStrip());
         }
-        _expanded.Children.Add(stack);
-        stack.Measure(new Size(ExpandedW, double.PositiveInfinity));
-        _expandedH = Math.Ceiling(stack.DesiredSize.Height + 14 + 10);
-        _expanded.Height = _expandedH;
-        if (_mode == Mode.Expanded) _h.Target = _expandedH;
     }
 
     private FrameworkElement HeroClock()

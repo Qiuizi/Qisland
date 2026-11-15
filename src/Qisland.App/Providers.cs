@@ -264,6 +264,9 @@ public sealed class FocusTimer
     }
 
     public void Cancel() { Active = false; _store.Remove(Id); }
+    public TimeSpan Remaining => Active ? _end - DateTime.Now : TimeSpan.Zero;
+    public TimeSpan Total => _end - _start;
+    public string Label => _label;
 
     public void Tick()
     {

@@ -86,7 +86,7 @@ public static class Launcher
     }
 
     // 岛本身不抢焦点，系统会拦后台进程改前台：合成一次 Alt 让前台锁放开，再允许任何进程（包括刚启动的）拿前台
-    private static void UnlockForeground()
+    public static void UnlockForeground()
     {
         keybd_event(0x12, 0, 0, UIntPtr.Zero);
         keybd_event(0x12, 0, 2, UIntPtr.Zero);

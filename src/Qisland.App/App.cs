@@ -75,6 +75,7 @@ public sealed class App : Application
         _window!.OpenRequested = Launcher.Open;
         _window.ApplyLook(LoadLook());
         _timer = new FocusTimer(_store);
+        _window.Timer = _timer;
         _harness = new HarnessWatcher(_store);
         try { _flash = new MessengerFlash(_store); _flash.Start(); } catch (Exception ex) { Log("ShellHook: " + ex.Message); }
         try { _todo = new TodoFile(_store); _todo.Changed += () => _window.SetTodos(_todo.Open); _window.SetTodos(_todo.Open); }
