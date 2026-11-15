@@ -424,6 +424,8 @@ public sealed partial class IslandWindow
         var big = T(today.Day.ToString(CultureInfo.InvariantCulture), 44, FontWeights.Light, Theme.Primary, display: true); big.Margin = new Thickness(-2, -8, 0, -4);
         left.Children.Add(big);
         left.Children.Add(T($"{today.Month}月", 11, FontWeights.SemiBold, Theme.Secondary));
+        var lunar = Lunar.Festival(today) ?? Lunar.Text(today);
+        if (lunar.Length > 0) left.Children.Add(T(lunar, 10.5, FontWeights.Medium, Lunar.Festival(today) != null ? Theme.Red : Theme.Tertiary));
         var next = (Countdown?.Items ?? []).Where(c => c.At.Date >= today).OrderBy(c => c.At).FirstOrDefault();
         if (next != null)
         {
@@ -488,11 +490,16 @@ public sealed partial class IslandWindow
                 Foreground = isToday ? Brushes.White : date < today ? Theme.Tertiary : weekend ? Theme.Secondary : Theme.Primary,
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
             });
+            var fest = Lunar.Festival(date);
+            var lunarTip = (fest != null ? fest + " · " : "") + "农历" + Lunar.Text(date);
+            cell.ToolTip = lunarTip; cell.Background = Brushes.Transparent;
+            if (fest != null && !isToday)
+                cell.Children.Add(new System.Windows.Shapes.Ellipse { Width = 3, Height = 3, Fill = Theme.Red, VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 1, 3, 0) });
             if (events.TryGetValue(d, out var name))
             {
                 cell.Children.Add(new System.Windows.Shapes.Ellipse { Width = 4, Height = 4, Fill = isToday ? Brushes.White : Theme.Orange, VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, -3) });
                 var left = (date - today).Days;
-                cell.ToolTip = left > 0 ? $"{name} · 还有 {left} 天" : left == 0 ? $"{name} · 今天" : name;
+                cell.ToolTip = (left > 0 ? $"{name} · 还有 {left} 天" : left == 0 ? $"{name} · 今天" : name) + "\n" + lunarTip;
                 cell.Background = Brushes.Transparent;
             }
             grid.Children.Add(cell);

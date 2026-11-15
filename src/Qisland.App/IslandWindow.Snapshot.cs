@@ -40,7 +40,10 @@ public sealed partial class IslandWindow
                 _clips.Add(new ClipItem("https://github.com/Qiuizi/Qisland", null, DateTime.Now.AddMinutes(-1)));
                 _clips.Add(new ClipItem("dotnet publish -c Release -r win-x64", null, DateTime.Now.AddMinutes(-6)));
                 _clips.Add(new ClipItem("实验报告-离散数学.docx", [@"C:\demo\实验报告-离散数学.docx"], DateTime.Now.AddMinutes(-18)));
-                _clips.Add(new ClipItem("The quick brown fox jumps over the lazy dog.", null, DateTime.Now.AddHours(-2)));
+                var fox = new ClipItem("The quick brown fox jumps over the lazy dog.", null, DateTime.Now.AddHours(-2));
+                _clips.Add(fox);
+                _translated[fox] = "敏捷的棕色狐狸跳过了那只懒狗。";
+                _clips.Insert(0, new ClipItem("图片 1920×1080", null, DateTime.Now.AddSeconds(-20), DemoImage()));
             }
             _page = p; _expDirty = true;
             await Shot(dir, name, Mode.Expanded);
@@ -141,5 +144,18 @@ public sealed partial class IslandWindow
         enc.Frames.Add(BitmapFrame.Create(crop));
         await using var f = File.Create(Path.Combine(dir, name + ".png"));
         enc.Save(f);
+    }
+
+    private static System.Windows.Media.Imaging.BitmapSource DemoImage()
+    {
+        var dv = new DrawingVisual();
+        using (var dc = dv.RenderOpen())
+        {
+            dc.DrawRectangle(new LinearGradientBrush(Color.FromRgb(0x5E, 0x5C, 0xE6), Color.FromRgb(0xFF, 0x9F, 0x0A), 30), null, new Rect(0, 0, 192, 108));
+            dc.DrawEllipse(new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)), null, new Point(140, 34), 18, 18);
+        }
+        var bmp = new System.Windows.Media.Imaging.RenderTargetBitmap(192, 108, 96, 96, PixelFormats.Pbgra32);
+        bmp.Render(dv); bmp.Freeze();
+        return bmp;
     }
 }
