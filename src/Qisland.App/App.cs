@@ -28,6 +28,7 @@ public sealed class App : Application
     private Countdowns? _countdown;
     private VolumeWatcher? _volume;
     private SystemWatch _sys = null!;
+    private Updater _upd = null!;
     private DateTime _day = DateTime.Today;
     private readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromSeconds(1) };
     private int _tickN;
@@ -60,7 +61,7 @@ public sealed class App : Application
     private void Boot(string[] args)
     {
         Directory.CreateDirectory(InboxDir);
-        Http.DefaultRequestHeaders.UserAgent.ParseAdd("Qisland/1.0-preview (+https://github.com/Qiuizi/Qisland)");
+        Http.DefaultRequestHeaders.UserAgent.ParseAdd($"Qisland/{Updater.Current} (+https://github.com/Qiuizi/Qisland)");
         DispatcherUnhandledException += (_, e) => { Log(e.Exception.ToString()); e.Handled = true; };
         TaskScheduler.UnobservedTaskException += (_, e) => { Log("后台任务: " + e.Exception.GetBaseException().Message); e.SetObserved(); };
         var snap = Array.IndexOf(args, "--snapshot");
@@ -114,7 +115,9 @@ public sealed class App : Application
     private void StartProviders()
     {
         _sys = new SystemWatch(_store);
-        _window!.OpenRequested = a => _sys.Open(a) || Launcher.Open(a);
+        _upd = new Updater(_store, Http, Quit);
+        _ = _upd.Loop();
+        _window!.OpenRequested = a => _upd.Open(a) || _sys.Open(a) || Launcher.Open(a);
         _window.ApplyLook(LoadLook());
         _timer = new FocusTimer(_store);
         _window.Timer = _timer;
@@ -248,12 +251,14 @@ public sealed class App : Application
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("发送测试卡片", null, (_, _) => Dispatcher.BeginInvoke(Demo));
         menu.Items.Add("清空活动", null, (_, _) => Dispatcher.BeginInvoke(() => { foreach (var a in _store.Ranked().ToList()) _store.Remove(a.Id); }));
+        menu.Items.Add($"检查更新（当前 v{Updater.Current}）", null, (_, _) => Dispatcher.BeginInvoke(() => _ = _upd.Check(manual: true)));
+        menu.Items.Add("跳过这个新版本", null, (_, _) => Dispatcher.BeginInvoke(() => _upd.Skip()));
         menu.Items.Add("打开数据目录", null, (_, _) => Process.Start(new ProcessStartInfo("explorer.exe", DataDir) { UseShellExecute = true }));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("退出 Qisland", null, (_, _) => Dispatcher.BeginInvoke(Quit));
         _tray = new System.Windows.Forms.NotifyIcon
         {
-            Text = "Qisland V1 Preview",
+            Text = $"Qisland v{Updater.Current}",
             Icon = System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? System.Drawing.SystemIcons.Application,
             ContextMenuStrip = menu,
             Visible = true,

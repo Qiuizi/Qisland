@@ -247,8 +247,7 @@ public sealed partial class IslandWindow : Window
         RebuildBubble(ranked);
         RebuildExpanded(); // 数据变化时就预先建好展开视图，悬停展开那一帧不再临时造控件
         if (_mode == Mode.Expanded) SetMode(Mode.Expanded);
-        else if (fresh && !_hidden) { _peekUntil = DateTime.Now.AddSeconds(4); SetMode(Mode.Expanded); }
-        else SetMode(DesiredRestMode());
+        else if (!(fresh && Attend(top!))) SetMode(DesiredRestMode());
     }
 
     private void OnSecond()
@@ -259,6 +258,7 @@ public sealed partial class IslandWindow : Window
         if (_expDirty && !_animating) RebuildExpanded();
         UpdateMediaProgress();
         OnPageSecond();
+        CheckFocusDigest();
         if (now.Second % 5 == 0) _store.Expire();
         if (_peekUntil != DateTime.MinValue && now > _peekUntil && !_pinned && _hoverSince == DateTime.MaxValue)
         {
@@ -608,7 +608,7 @@ public sealed partial class IslandWindow : Window
         _expandedH = Math.Ceiling(stack.DesiredSize.Height + 14 + 10);
         _expanded.Height = _expandedH;
         if (_mode == Mode.Expanded) _h.Target = _expandedH;
-        if (_page != Page.Widgets) _pageCache[_page] = (stack, _expandedH, _mediaFill, _mediaTime);
+        _pageCache[_page] = (stack, _expandedH, _mediaFill, _mediaTime);
         if (sw.Elapsed.TotalMilliseconds > 6) App.Log($"rebuild {_page}: {sw.Elapsed.TotalMilliseconds:0.0} ms");
     }
 

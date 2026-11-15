@@ -269,14 +269,43 @@ public sealed class FocusTimer
         Tick();
     }
 
-    public void Cancel() { Active = false; Task = null; _store.Remove(Id); }
-    public TimeSpan Remaining => Active ? _end - DateTime.Now : TimeSpan.Zero;
+    public void Cancel() { Active = false; Paused = false; Task = null; _store.Remove(Id); }
+    public TimeSpan Remaining => !Active ? TimeSpan.Zero : Paused ? _pausedLeft : _end - DateTime.Now;
+    public bool Paused { get; private set; }
+    private TimeSpan _pausedLeft;
+
+    public void Pause()
+    {
+        if (!Active || Paused) return;
+        _pausedLeft = _end - DateTime.Now;
+        Paused = true;
+        var text = _pausedLeft.TotalHours >= 1 ? _pausedLeft.ToString(@"h\:mm\:ss") : _pausedLeft.ToString(@"mm\:ss");
+        _store.Upsert(new IslandActivity(Id, "timer", $"{Task ?? _label} · 已暂停", $"还剩 {text}", ActivityKind.Info, 50), sticky: true, progress: 1 - _pausedLeft.TotalSeconds / Math.Max(1, Total.TotalSeconds));
+    }
+
+    public void Resume()
+    {
+        if (!Active || !Paused) return;
+        var now = DateTime.Now;
+        _start += now - (_end - _pausedLeft);   // 暂停的这段不算进总时长
+        _end = now + _pausedLeft;
+        Paused = false;
+        Tick();
+    }
+
+    /// <summary>再加几分钟（暂停中也可以）。</summary>
+    public void Extend(int minutes)
+    {
+        if (!Active) return;
+        _end = _end.AddMinutes(minutes);
+        if (Paused) _pausedLeft += TimeSpan.FromMinutes(minutes); else Tick();
+    }
     public TimeSpan Total => _end - _start;
     public string Label => _label;
 
     public void Tick()
     {
-        if (!Active) return;
+        if (!Active || Paused) return;
         var left = _end - DateTime.Now;
         if (left <= TimeSpan.Zero)
         {

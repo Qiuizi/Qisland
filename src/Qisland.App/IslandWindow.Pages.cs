@@ -50,7 +50,7 @@ public sealed partial class IslandWindow
             }
             // 预热完把每页都放进缓存（RebuildExpanded 会清缓存，所以逐页建完再按顺序留存）
             var built = new Dictionary<Page, (StackPanel, double, Border?, TextBlock?)>();
-            foreach (var p in Enum.GetValues<Page>()) { _page = p; RebuildExpanded(); if (p != Page.Widgets) built[p] = (_expStack!, _expandedH, _mediaFill, _mediaTime); }
+            foreach (var p in Enum.GetValues<Page>()) { _page = p; RebuildExpanded(); built[p] = (_expStack!, _expandedH, _mediaFill, _mediaTime); }
             _page = keep;
             RebuildExpanded();
             foreach (var kv in built) if (kv.Key != keep) _pageCache[kv.Key] = kv.Value;
@@ -182,7 +182,7 @@ public sealed partial class IslandWindow
         if (p == _page) return;
         _page = p;
         ShowPage();
-        if (p == Page.Widgets) RefreshWidgets();
+        if (p == Page.Widgets) EnterWidgets();
         // 新页从运动方向那一侧滑进来，弹簧收尾时会轻轻过冲一下再停住
         _pageX.Value = dir * 110;
         _pageX.Velocity = 0;
@@ -319,171 +319,10 @@ public sealed partial class IslandWindow
         if (_page != Page.Home && !_dragging) { _page = Page.Home; _expDirty = true; }
     }
 
-    // ───────────── 组件页 ─────────────
-
-    private void BuildWidgets(StackPanel stack)
-    {
-        _gaugeHost = new Border { Height = 104 };
-        stack.Children.Add(_gaugeHost);
-
-        var row = new Grid { Margin = new Thickness(0, 10, 0, 0) };
-        row.ColumnDefinitions.Add(new ColumnDefinition());
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
-        row.ColumnDefinitions.Add(new ColumnDefinition());
-        var cal = Card(Calendar());
-        row.Children.Add(cal);
-        _timerHost = Card(null);
-        Grid.SetColumn(_timerHost, 2);
-        row.Children.Add(_timerHost);
-        stack.Children.Add(row);
-        RefreshWidgets(sample: false);
-    }
-
     private static Border Card(UIElement? child) => new()
     {
         Background = Theme.Fill, CornerRadius = new CornerRadius(18), Padding = new Thickness(14, 12, 14, 12), Child = child,
     };
-
-    private void RefreshWidgets(bool sample = true)
-    {
-        if (sample) _stats.Sample();
-        if (_gaugeHost != null) _gaugeHost.Child = Gauges();
-        // 计时卡片只在计时中或状态变化时重建，免得按钮悬停色每秒被冲掉
-        var active = Timer?.Active == true;
-        if (_timerHost != null && (!sample || active || active != _timerShown)) { _timerHost.Child = TimerWidget(); _timerShown = active; }
-    }
-    private bool _timerShown;
-
-    private FrameworkElement Gauges()
-    {
-        var g = new UniformGrid { Columns = 4, Rows = 1 };
-        g.Children.Add(Gauge(_stats.Cpu, $"{_stats.Cpu * 100:0}%", "CPU", "处理器", Theme.Blue));
-        g.Children.Add(Gauge(_stats.MemFraction, $"{_stats.MemFraction * 100:0}%", "内存", $"{_stats.MemUsedGb:0.0}/{_stats.MemTotalGb:0} GB", Purple));
-        if (_stats.Battery is int b)
-            g.Children.Add(Gauge(b / 100.0, $"{b}", "电池", _stats.Charging ? "充电中" : "使用电池", b <= 20 ? Theme.Red : Theme.Green));
-        else
-            g.Children.Add(Gauge(1, "AC", "电源", "外接电源", Theme.Green));
-        g.Children.Add(NetGauge());
-        return g;
-    }
-
-    private FrameworkElement Gauge(double p, string value, string label, string sub, Brush color)
-    {
-        var card = new Border { Background = Theme.Fill, CornerRadius = new CornerRadius(18), Margin = new Thickness(0, 0, 8, 0) };
-        var sp = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var ring = new Grid { Width = 50, Height = 50, HorizontalAlignment = HorizontalAlignment.Center };
-        ring.Children.Add(new Ellipse { Stroke = Theme.Fill, StrokeThickness = 5 });
-        if (p > 0.005) ring.Children.Add(ArcPath(50, Math.Clamp(p, 0.01, 0.999), color, 5));
-        ring.Children.Add(new TextBlock { Text = value, FontFamily = Theme.Display, FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = Theme.Primary, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
-        sp.Children.Add(ring);
-        var l = Txt(12, FontWeights.SemiBold, Theme.Primary); l.Text = label; l.HorizontalAlignment = HorizontalAlignment.Center; l.Margin = new Thickness(0, 6, 0, 0);
-        var s = Txt(10.5, FontWeights.Normal, Theme.Tertiary); s.Text = sub; s.HorizontalAlignment = HorizontalAlignment.Center;
-        sp.Children.Add(l); sp.Children.Add(s);
-        card.Child = sp;
-        return card;
-    }
-
-    private FrameworkElement NetGauge()
-    {
-        var card = new Border { Background = Theme.Fill, CornerRadius = new CornerRadius(18) };
-        var sp = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        FrameworkElement Line(string glyph, double bps, Brush c)
-        {
-            var r = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 2, 0, 2) };
-            r.Children.Add(Glyph(glyph, 11, c));
-            var t = new TextBlock { Text = SystemStats.Speed(bps), FontFamily = Theme.Display, FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = Theme.Primary, Margin = new Thickness(5, 0, 0, 0) };
-            r.Children.Add(t);
-            return r;
-        }
-        sp.Children.Add(Line("\uE74B", _stats.DownBps, Teal));
-        sp.Children.Add(Line("\uE74A", _stats.UpBps, Theme.Orange));
-        var l = Txt(12, FontWeights.SemiBold, Theme.Primary); l.Text = "网络"; l.HorizontalAlignment = HorizontalAlignment.Center; l.Margin = new Thickness(0, 8, 0, 0);
-        var s = Txt(10.5, FontWeights.Normal, Theme.Tertiary); s.Text = "下载 / 上传"; s.HorizontalAlignment = HorizontalAlignment.Center;
-        sp.Children.Add(l); sp.Children.Add(s);
-        card.Child = sp;
-        return card;
-    }
-
-    private FrameworkElement Calendar()
-    {
-        var today = DateTime.Today;
-        var sp = new StackPanel();
-        var head = new Grid();
-        var m = Txt(13, FontWeights.SemiBold, Theme.Primary); m.Text = $"{today.Month}月";
-        var y = Txt(11.5, FontWeights.Normal, Theme.Tertiary); y.Text = $"{today:yyyy} · 周{"日一二三四五六"[(int)today.DayOfWeek]}"; y.HorizontalAlignment = HorizontalAlignment.Right; y.VerticalAlignment = VerticalAlignment.Center;
-        head.Children.Add(m); head.Children.Add(y);
-        sp.Children.Add(head);
-
-        var grid = new UniformGrid { Columns = 7, Margin = new Thickness(0, 6, 0, 0) };
-        foreach (var d in "一二三四五六日")
-        {
-            var t = Txt(10, FontWeights.Medium, Theme.Tertiary); t.Text = d.ToString(); t.HorizontalAlignment = HorizontalAlignment.Center; t.Margin = new Thickness(0, 0, 0, 2);
-            grid.Children.Add(t);
-        }
-        var first = new DateTime(today.Year, today.Month, 1);
-        var lead = ((int)first.DayOfWeek + 6) % 7;
-        for (var i = 0; i < lead; i++) grid.Children.Add(new Border());
-        var days = DateTime.DaysInMonth(today.Year, today.Month);
-        for (var d = 1; d <= days; d++)
-        {
-            var isToday = d == today.Day;
-            var weekend = ((lead + d - 1) % 7) >= 5;
-            var cell = new Grid { Height = 21 };
-            if (isToday) cell.Children.Add(new Ellipse { Width = 21, Height = 21, Fill = Theme.Red });
-            cell.Children.Add(new TextBlock
-            {
-                Text = d.ToString(CultureInfo.InvariantCulture), FontFamily = Theme.Text, FontSize = 11,
-                FontWeight = isToday ? FontWeights.Bold : FontWeights.Normal,
-                Foreground = isToday ? Brushes.White : weekend ? Theme.Secondary : Theme.Primary,
-                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-            });
-            grid.Children.Add(cell);
-        }
-        sp.Children.Add(grid);
-        return sp;
-    }
-
-    private FrameworkElement TimerWidget()
-    {
-        var sp = new StackPanel();
-        var t = Timer;
-        var head = new StackPanel { Orientation = Orientation.Horizontal };
-        head.Children.Add(Glyph("\uE916", 13, Theme.Orange));
-        var title = Txt(13, FontWeights.SemiBold, Theme.Primary); title.Margin = new Thickness(6, 0, 0, 0);
-        head.Children.Add(title);
-        sp.Children.Add(head);
-
-        if (t is { Active: true })
-        {
-            title.Text = t.Label + "中";
-            var left = t.Remaining;
-            var total = Math.Max(1, t.Total.TotalSeconds);
-            var big = new TextBlock
-            {
-                Text = $"{(int)left.TotalMinutes:00}:{left.Seconds:00}", FontFamily = Theme.Display, FontSize = 34, FontWeight = FontWeights.SemiBold,
-                Foreground = Theme.Primary, Margin = new Thickness(0, 10, 0, 6),
-            };
-            sp.Children.Add(big);
-            var bar = new Grid { Height = 5, Margin = new Thickness(0, 0, 0, 12) };
-            bar.Children.Add(new Border { CornerRadius = new CornerRadius(2.5), Background = Theme.Fill });
-            bar.Children.Add(new Border
-            {
-                CornerRadius = new CornerRadius(2.5), Background = Theme.Orange, HorizontalAlignment = HorizontalAlignment.Left,
-                Width = Math.Max(5, 160 * (1 - left.TotalSeconds / total)),
-            });
-            sp.Children.Add(bar);
-            sp.Children.Add(PillButton("结束计时", Theme.Red, () => { Timer?.Cancel(); RefreshWidgets(false); }));
-        }
-        else
-        {
-            title.Text = "专注计时";
-            var sub = Txt(11, FontWeights.Normal, Theme.Tertiary); sub.Text = "结束时岛上会提醒你"; sub.Margin = new Thickness(0, 2, 0, 8);
-            sp.Children.Add(sub);
-            foreach (var (min, label, kind) in new[] { (25, "专注 25 分钟", "专注"), (50, "专注 50 分钟", "专注"), (5, "休息 5 分钟", "休息") })
-                sp.Children.Add(PillButton(label, kind == "休息" ? Theme.Green : Theme.Blue, () => { Timer?.Start(min, kind); RefreshWidgets(false); }));
-        }
-        return sp;
-    }
 
     private static FrameworkElement PillButton(string text, Brush accent, Action click)
     {

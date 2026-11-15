@@ -1,3 +1,4 @@
+using Qisland.Core;
 using System.IO;
 using System.Windows;
 using System.Windows.Media;
@@ -13,6 +14,18 @@ public sealed partial class IslandWindow
         Directory.CreateDirectory(dir);
         await Shot(dir, "01-idle", Mode.Idle);
         demo();
+        if (_weather == null)
+        {
+            var now = DateTime.Now; var h0 = now.Date.AddHours(now.Hour + 1);
+            _weather = new WeatherSnapshot(18, 2, 17, 64, 9, 0, 21, 12);
+            _wx = new WeatherDetail(_weather, 20, 3, "东北", 10, "07:31", "18:06",
+                Enumerable.Range(0, 8).Select(i => new HourSlot(h0.AddHours(i), 18 - i * 0.8, i is 3 or 4 ? 61 : 2, i is 3 or 4 ? 45 : 10)).ToList(),
+                20, 11, 61, 60)
+            {
+                Days = [new(now.Date, 2, 21, 12, 20), new(now.Date.AddDays(1), 61, 20, 11, 60), new(now.Date.AddDays(2), 1, 23, 13, 0)],
+                Pressure = 1018, MoonPhase = "盈凸月", MoonIllum = 72,
+            };
+        }
         await Task.Delay(300);
         await Shot(dir, "02-compact", Mode.Compact);
         _peekUntil = DateTime.MinValue;
@@ -30,6 +43,12 @@ public sealed partial class IslandWindow
             }
             _page = p; _expDirty = true;
             await Shot(dir, name, Mode.Expanded);
+            if (p == Page.Widgets)
+            {
+                _wxView = 1; _pageCache.Clear(); await Shot(dir, "07-widgets-detail", Mode.Expanded);
+                _wxView = 2; _pageCache.Clear(); await Shot(dir, "08-widgets-days", Mode.Expanded);
+                _wxView = 0; _pageCache.Clear();
+            }
         }
         _page = Page.Home;
         SetMode(Mode.Compact);

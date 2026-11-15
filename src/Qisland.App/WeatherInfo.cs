@@ -5,10 +5,18 @@ using Qisland.Core;
 namespace Qisland.App;
 
 public sealed record HourSlot(DateTime At, double Temp, int Code, int Rain);
+public sealed record DaySlot(DateTime Date, int Code, double High, double Low, int Rain);
 public sealed record WeatherDetail(
     WeatherSnapshot Now, int RainChance, double Uv, string WindDir, double Visibility,
     string Sunrise, string Sunset, IReadOnlyList<HourSlot> Hours,
-    double TomorrowHigh, double TomorrowLow, int TomorrowCode, int TomorrowRain);
+    double TomorrowHigh, double TomorrowLow, int TomorrowCode, int TomorrowRain)
+{
+    public IReadOnlyList<DaySlot> Days { get; init; } = [];
+    public double Pressure { get; init; }
+    public string MoonPhase { get; init; } = "";
+    public int MoonIllum { get; init; }
+    public DateTime Fetched { get; init; } = DateTime.Now;
+}
 
 public static class WttrParser
 {
@@ -37,6 +45,12 @@ public static class WttrParser
     {
         "N" => "北风", "NNE" or "NE" or "ENE" => "东北风", "E" => "东风", "ESE" or "SE" or "SSE" => "东南风",
         "S" => "南风", "SSW" or "SW" or "WSW" => "西南风", "W" => "西风", "WNW" or "NW" or "NNW" => "西北风", _ => "风",
+    };
+
+    private static string Moon(string p) => p switch
+    {
+        "New Moon" => "新月", "Waxing Crescent" => "蛾眉月", "First Quarter" => "上弦月", "Waxing Gibbous" => "盈凸月",
+        "Full Moon" => "满月", "Waning Gibbous" => "亏凸月", "Last Quarter" => "下弦月", "Waning Crescent" => "残月", _ => p,
     };
 
     public static WeatherDetail? Parse(string json, DateTime now)
@@ -76,8 +90,23 @@ public static class WttrParser
             tr = hs.EnumerateArray().Select(h => (int)D(h, "chanceofrain")).DefaultIfEmpty(0).Max();
         }
         var dir = cur.TryGetProperty("winddir16Point", out var wd) ? Dir(wd.GetString() ?? "") : "风";
+        var dayList = new List<DaySlot>();
+        for (var i = 0; i < days.GetArrayLength(); i++)
+        {
+            var day = days[i];
+            var date = DateTime.TryParse(day.GetProperty("date").GetString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var dd) ? dd : now.Date.AddDays(i);
+            var hs = day.GetProperty("hourly");
+            var noon = hs.GetArrayLength() > 4 ? hs[4] : hs[0];
+            dayList.Add(new DaySlot(date, Wmo((int)D(noon, "weatherCode")), D(day, "maxtempC"), D(day, "mintempC"),
+                hs.EnumerateArray().Select(h => (int)D(h, "chanceofrain")).DefaultIfEmpty(0).Max()));
+        }
         return new WeatherDetail(snap, rainNow, D(cur, "uvIndex"), dir, D(cur, "visibility"),
             Clock(astro.GetProperty("sunrise").GetString() ?? ""), Clock(astro.GetProperty("sunset").GetString() ?? ""),
-            hours.Take(6).ToList(), th, tl, tc, tr);
+            hours.Take(8).ToList(), th, tl, tc, tr)
+        {
+            Days = dayList, Pressure = D(cur, "pressure"),
+            MoonPhase = Moon(astro.TryGetProperty("moon_phase", out var mp) ? mp.GetString() ?? "" : ""),
+            MoonIllum = (int)D(astro, "moon_illumination"),
+        };
     }
 }
