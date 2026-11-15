@@ -32,7 +32,9 @@ public sealed partial class IslandWindow
 
     private void ShowOsd(OsdKind kind, double level, bool muted)
     {
-        if (_mode == Mode.Expanded || _hidden) return;   // 展开时不打扰
+        if (_mode == Mode.Expanded) return;   // 展开时不打扰
+        if (_hidden && !_manualHide) { _hidden = false; _show.Target = 1; Kick(); }   // 全屏中按音量键也给反馈，结束后下一秒自动再藏
+        else if (_manualHide) return;
         var same = _osd == kind && _mode == Mode.Compact && _osdFill != null;
         _osd = kind; _osdLevel = level; _osdMuted = muted;
         _osdTimer ??= MakeOsdTimer();

@@ -12,6 +12,9 @@ namespace Qisland.App;
 public sealed class VolumeWatcher : IDisposable
 {
     public event Action<float, bool>? Changed;   // (0..1, 静音)
+    /// <summary>默认播放设备换了（插上耳机 / 连上蓝牙）：设备名。</summary>
+    public event Action<string>? DeviceChanged;
+    public string DeviceName { get; private set; } = "";
     public float Level { get; private set; }
     public bool Muted { get; private set; }
 
@@ -51,6 +54,7 @@ public sealed class VolumeWatcher : IDisposable
             _enum!.GetDefaultAudioEndpoint(0 /*eRender*/, 1 /*eMultimedia*/, out var dev);
             var iid = typeof(IAudioEndpointVolume).GUID;
             dev.Activate(ref iid, 23 /*CLSCTX_ALL*/, IntPtr.Zero, out var o);
+            DeviceName = FriendlyName(dev);
             Marshal.ReleaseComObject(dev);
             _vol = (IAudioEndpointVolume)o;
             _vol.GetMasterVolumeLevelScalar(out var l); _vol.GetMute(out var m);
@@ -70,7 +74,45 @@ public sealed class VolumeWatcher : IDisposable
         });
     }
 
-    internal void OnDefaultChanged() => _ui.BeginInvoke(() => { _quietUntil = DateTime.Now.AddSeconds(1); Bind(); });
+    internal void OnDefaultChanged() => _ui.BeginInvoke(() =>
+    {
+        var before = DeviceName;
+        _quietUntil = DateTime.Now.AddSeconds(1);
+        Bind();
+        if (DeviceName.Length > 0 && DeviceName != before && DateTime.Now - _lastDevice > TimeSpan.FromSeconds(1.5))
+        {
+            _lastDevice = DateTime.Now;
+            DeviceChanged?.Invoke(DeviceName);
+        }
+    });
+    private DateTime _lastDevice = DateTime.MinValue;
+
+    private static string FriendlyName(IMMDevice dev)
+    {
+        try
+        {
+            dev.OpenPropertyStore(0, out var store);
+            var key = new PropertyKey { Fmt = new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"), Pid = 14 };
+            var pv = new PropVariant();
+            store.GetValue(ref key, ref pv);
+            var s = pv.vt == 31 ? Marshal.PtrToStringUni(pv.p) ?? "" : "";
+            PropVariantClear(ref pv);
+            Marshal.ReleaseComObject(store);
+            return s;
+        }
+        catch { return ""; }
+    }
+
+    [StructLayout(LayoutKind.Sequential)] private struct PropVariant { public ushort vt, r1, r2, r3; public IntPtr p, p2; }
+    [DllImport("ole32.dll")] private static extern int PropVariantClear(ref PropVariant pv);
+
+    [ComImport, Guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IPropertyStore
+    {
+        int GetCount(out uint n);
+        int GetAt(uint i, out PropertyKey key);
+        int GetValue(ref PropertyKey key, ref PropVariant pv);
+    }
 
     public void Step(int dir)
     {
@@ -146,6 +188,7 @@ public sealed class VolumeWatcher : IDisposable
     private interface IMMDevice
     {
         int Activate(ref Guid iid, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object o);
+        int OpenPropertyStore(int access, out IPropertyStore store);
     }
 
     [ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

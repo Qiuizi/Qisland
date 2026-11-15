@@ -176,6 +176,8 @@ public sealed partial class IslandWindow : Window
         Native.SetExStyle(_hwnd, Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE | Native.WS_EX_TRANSPARENT, true);
         HwndSource.FromHwnd(_hwnd)?.AddHook(WndProc);
         BrightnessWatcher.Register(_hwnd);
+        SetupScreen();
+        SetupClipboard();
         if (_layered) return;
 
         var src = HwndSource.FromHwnd(_hwnd);
@@ -190,12 +192,6 @@ public sealed partial class IslandWindow : Window
         Native.DwmSetWindowAttribute(_hwnd, Native.DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
     }
 
-    private void PlaceOnScreen()
-    {
-        var wa = SystemParameters.WorkArea;
-        Left = Math.Round((SystemParameters.PrimaryScreenWidth - WinW) / 2);
-        Top = wa.Top > 1 ? wa.Top : 0;
-    }
 
     // ───────────────────────────── 状态 ─────────────────────────────
 
@@ -269,8 +265,7 @@ public sealed partial class IslandWindow : Window
             _peekUntil = DateTime.MinValue;
             SetMode(DesiredRestMode());
         }
-        var full = Native.ForegroundIsFullscreen();
-        if (full != _hidden) { _hidden = full; _show.Target = full ? 0 : 1; Kick(); }
+        UpdateVisibility();
     }
 
     /// <summary>点一行：返回 true 表示已经打开了对应软件。</summary>

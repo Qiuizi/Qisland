@@ -14,9 +14,9 @@ namespace Qisland.App;
 /// <summary>展开后的多页：滚轮切换 主页 / 组件 / 文件架，拖文件进岛自动跳到文件架。</summary>
 public sealed partial class IslandWindow
 {
-    private enum Page { Home, Widgets, Todo, Shelf }
-    private static readonly string[] PageNames = ["主页", "组件", "待办", "文件架"];
-    private const int LastPage = 3;
+    private enum Page { Home, Widgets, Todo, Clip, Shelf }
+    private static readonly string[] PageNames = ["主页", "组件", "待办", "剪贴板", "文件架"];
+    private const int LastPage = 4;
 
     private Page _page = Page.Home;
     private StackPanel? _expStack;
@@ -167,6 +167,8 @@ public sealed partial class IslandWindow
             handled = true;
             return new IntPtr(1);
         }
+        if (msg == 0x031D) { OnClipboardUpdate(); return IntPtr.Zero; }   // WM_CLIPBOARDUPDATE
+        if (msg == 0x0312 && wParam.ToInt32() == HotkeyId) { OnHotkey(); handled = true; return IntPtr.Zero; }
         if (msg == 0x0218) // WM_POWERBROADCAST
         {
             var b = BrightnessWatcher.Parse(wParam, lParam);
@@ -280,6 +282,7 @@ public sealed partial class IslandWindow
             case Page.Widgets: BuildWidgets(stack); break;
             case Page.Shelf: BuildShelf(stack); break;
             case Page.Todo: BuildTodo(stack); break;
+            case Page.Clip: BuildClip(stack); break;
             default: BuildHome(stack); break;
         }
         stack.Children.Add(PageDots());

@@ -5,6 +5,7 @@ using System.Runtime;
 using System.Windows;
 using System.Windows.Threading;
 using Qisland.Core;
+using ActivityKind = Qisland.Core.ActivityKind;
 
 namespace Qisland.App;
 
@@ -26,6 +27,7 @@ public sealed class App : Application
     private TodoFile? _todo;
     private Countdowns? _countdown;
     private VolumeWatcher? _volume;
+    private SystemWatch _sys = null!;
     private DateTime _day = DateTime.Today;
     private readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromSeconds(1) };
     private int _tickN;
@@ -38,7 +40,8 @@ public sealed class App : Application
     public static int Main(string[] args)
     {
         if (args.Length >= 2 && args[0] == "hook") return HookRelay.Run(args[1]);
-        using var mutex = new Mutex(true, @"Local\Qisland.Island", out var first);
+        var snapshot = args.Contains("--snapshot");
+        using var mutex = new Mutex(true, snapshot ? @"Local\Qisland.Snapshot" : @"Local\Qisland.Island", out var first);
         if (!first)
         {
             // 自动重启时旧进程可能还没完全退出：最多等 10 秒拿到单实例锁
@@ -57,9 +60,25 @@ public sealed class App : Application
     private void Boot(string[] args)
     {
         Directory.CreateDirectory(InboxDir);
-        Http.DefaultRequestHeaders.UserAgent.ParseAdd("Qisland/0.2 (+https://github.com/Qiuizi)");
+        Http.DefaultRequestHeaders.UserAgent.ParseAdd("Qisland/1.0-preview (+https://github.com/Qiuizi/Qisland)");
         DispatcherUnhandledException += (_, e) => { Log(e.Exception.ToString()); e.Handled = true; };
         TaskScheduler.UnobservedTaskException += (_, e) => { Log("后台任务: " + e.Exception.GetBaseException().Message); e.SetObserved(); };
+        var snap = Array.IndexOf(args, "--snapshot");
+        if (snap >= 0)
+        {
+            var dir = snap + 1 < args.Length ? args[snap + 1] : Path.Combine(DataDir, "snapshot");
+            Hz = Native.RefreshRate();
+            _window = new IslandWindow(_store) { SnapshotMode = true, Left = -4000, Top = -4000, ShowActivated = false };
+            _window.Loaded += async (_, _) =>
+            {
+                _window.Left = -4000; _window.Top = -4000;
+                _window.ApplyLook(Theme.Look.Dark);
+                try { await _window.Snapshot(dir, Demo); } catch (Exception ex) { Log("snapshot: " + ex); }
+                Shutdown();
+            };
+            _window.Show();
+            return;
+        }
         Autostart.InstallCrashRestart();
         Autostart.EnsureDefault();
         if (args.Contains("--restarted")) Log("已自动重启");
@@ -94,14 +113,19 @@ public sealed class App : Application
     // ───────────── 常用软件 ─────────────
     private void StartProviders()
     {
-        _window!.OpenRequested = Launcher.Open;
+        _sys = new SystemWatch(_store);
+        _window!.OpenRequested = a => _sys.Open(a) || Launcher.Open(a);
         _window.ApplyLook(LoadLook());
         _timer = new FocusTimer(_store);
         _window.Timer = _timer;
         _timer.Finished += (label, task) => _window.OnFocusFinished(label, task);
         _harness = new HarnessWatcher(_store);
         try { _flash = new MessengerFlash(_store); _flash.Start(); } catch (Exception ex) { Log("ShellHook: " + ex.Message); }
-        try { _volume = new VolumeWatcher(); _volume.Changed += _window.ShowVolume; } catch (Exception ex) { Log("音量: " + ex.Message); }
+        try { _volume = new VolumeWatcher(); _volume.Changed += _window.ShowVolume; _volume.DeviceChanged += name =>
+            {
+                var icon = name.Contains("耳机") || name.Contains("Headphone", StringComparison.OrdinalIgnoreCase) || name.Contains("Buds", StringComparison.OrdinalIgnoreCase) || name.Contains("AirPods", StringComparison.OrdinalIgnoreCase) || name.Contains("Hands-Free", StringComparison.OrdinalIgnoreCase) ? "已连接耳机" : "声音输出已切换";
+                _store.Upsert(new IslandActivity("audio:device", "audio", icon, $"{name} · 音量 {(int)Math.Round(_volume.Level * 100)}%", ActivityKind.Done, 72, DurationSeconds: 4, ResetTtl: true), progress: _volume.Level);
+            }; } catch (Exception ex) { Log("音量: " + ex.Message); }
         try { _countdown = new Countdowns(); _window.Countdown = _countdown; _countdown.Changed += _window.OnCountdownChanged; _window.OnCountdownChanged(); }
         catch (Exception ex) { Log("倒计时: " + ex.Message); }
         try { _todo = new TodoFile(_store); _window.Todo = _todo; _todo.Changed += () => _window.SetTodos(_todo.Open); _window.SetTodos(_todo.Open); }
@@ -117,6 +141,7 @@ public sealed class App : Application
         {
             _tickN++;
             _timer.Tick();
+            _sys.Tick(_tickN);
             _flash?.OnForeground(Native.GetForegroundWindow());
             if (_tickN % 3 == 0) { try { _harness.Tick(); } catch (Exception ex) { Log("DSH: " + ex.Message); } }
             if (_tickN % 5 == 0) _store.Expire();
@@ -228,7 +253,7 @@ public sealed class App : Application
         menu.Items.Add("退出 Qisland", null, (_, _) => Dispatcher.BeginInvoke(Quit));
         _tray = new System.Windows.Forms.NotifyIcon
         {
-            Text = "Qisland",
+            Text = "Qisland V1 Preview",
             Icon = System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? System.Drawing.SystemIcons.Application,
             ContextMenuStrip = menu,
             Visible = true,
