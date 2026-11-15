@@ -26,6 +26,13 @@ internal static class Theme
     public static Brush? Rim { get; private set; }
     /// <summary>玻璃内部从上往下的一层柔光。</summary>
     public static Brush? Sheen { get; private set; }
+    /// <summary>卡片底：深色/白色主题就是 Fill；玻璃主题是一层半透明白，像 iOS 小组件叠在毛玻璃上。</summary>
+    public static Brush Card { get; private set; } = null!;
+    public static Brush CardHover { get; private set; } = null!;
+    /// <summary>卡片 1px 高光边（只玻璃主题有）。</summary>
+    public static Brush? CardRim { get; private set; }
+    /// <summary>分段控件里选中那一格。</summary>
+    public static Brush SegOn { get; private set; } = null!;
     public static byte ShadowAlpha { get; private set; } = 0x22;
     public static readonly Brush Green = Freeze(new SolidColorBrush(Color.FromRgb(0x30, 0xD1, 0x58)));
     public static readonly Brush Orange = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x9F, 0x0A)));
@@ -39,7 +46,7 @@ internal static class Theme
     public static void Apply(Look look)
     {
         Current = look;
-        Rim = null; Sheen = null;
+        Rim = null; Sheen = null; CardRim = null;
         switch (look)
         {
             case Look.Light:
@@ -52,6 +59,7 @@ internal static class Theme
                 Pill = Freeze(new LinearGradientBrush(Color.FromRgb(0xFF, 0xFF, 0xFF), Color.FromRgb(0xF2, 0xF2, 0xF5), 90));
                 Rim = Freeze(new LinearGradientBrush(Color.FromArgb(0x14, 0, 0, 0), Color.FromArgb(0x1F, 0, 0, 0), 90));
                 ShadowAlpha = 0x26;
+                Card = Fill; CardHover = S(0x22, 0x00, 0x00, 0x00); SegOn = S(0xFF, 0xFF, 0xFF, 0xFF);
                 break;
             case Look.Glass:
                 Primary = S(0xFF, 0x12, 0x12, 0x14);
@@ -73,6 +81,12 @@ internal static class Theme
                 sheen.GradientStops.Add(new GradientStop(Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF), 0.45));
                 Sheen = Freeze(sheen);
                 ShadowAlpha = 0x18;
+                Card = S(0x48, 0xFF, 0xFF, 0xFF); CardHover = S(0x70, 0xFF, 0xFF, 0xFF); SegOn = S(0xE0, 0xFF, 0xFF, 0xFF);
+                var cr = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0.3, 1) };
+                cr.GradientStops.Add(new GradientStop(Color.FromArgb(0xB0, 0xFF, 0xFF, 0xFF), 0));
+                cr.GradientStops.Add(new GradientStop(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF), 0.5));
+                cr.GradientStops.Add(new GradientStop(Color.FromArgb(0x60, 0xFF, 0xFF, 0xFF), 1));
+                CardRim = Freeze(cr);
                 break;
             default:
                 Primary = S(0xFF, 0xF5, 0xF5, 0xF7);
@@ -83,6 +97,7 @@ internal static class Theme
                 Press = S(0x24, 0xFF, 0xFF, 0xFF);
                 Pill = Freeze(new LinearGradientBrush(Color.FromRgb(0x12, 0x12, 0x14), Color.FromRgb(0x02, 0x02, 0x03), 90));
                 ShadowAlpha = 0x22;
+                Card = Fill; CardHover = Hover; SegOn = S(0x38, 0xFF, 0xFF, 0xFF);
                 break;
         }
     }

@@ -452,7 +452,7 @@ public sealed partial class IslandWindow : Window
     // 系统模糊（亚克力/背景模糊）在这台 Win11 24H2 上不吃窗口区域裁剪：要么糊满整块窗口，要么关掉透明扩展后露出黑块。
     // 所以玻璃外观不用系统模糊，只用半透明白 + 高光描边 + 顶部反光，窗口始终保持透明扩展。
     private GlassBackdrop _glass = null!;
-    private void SetGlass(bool on) { if (!_layered) _glass.Enable(_hwnd, on); }
+    private void SetGlass(bool on) { if (!_layered && !SnapshotMode) _glass.Enable(_hwnd, on); }
 
     /// <summary>要截的那块：当前尺寸和弹簧目标尺寸里更大的那个，再外扩一点，动画途中边缘也有底。</summary>
     private Rect? GlassArea()

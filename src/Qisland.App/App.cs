@@ -73,7 +73,8 @@ public sealed class App : Application
             _window.Loaded += async (_, _) =>
             {
                 _window.Left = -4000; _window.Top = -4000;
-                _window.ApplyLook(Theme.Look.Dark);
+                var lk = Array.IndexOf(args, "--look");
+                _window.ApplyLook(lk >= 0 && lk + 1 < args.Length && Enum.TryParse<Theme.Look>(args[lk + 1], true, out var look) ? look : Theme.Look.Dark);
                 try { await _window.Snapshot(dir, Demo); } catch (Exception ex) { Log("snapshot: " + ex); }
                 Shutdown();
             };

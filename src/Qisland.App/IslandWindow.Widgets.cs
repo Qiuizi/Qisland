@@ -52,7 +52,9 @@ public sealed partial class IslandWindow
         var sheen = new LinearGradientBrush(Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF), Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF), 90);
         sheen.Freeze();
         var inner = new Border { CornerRadius = new CornerRadius(22), Background = sheen, Padding = new Thickness(14, 12, 14, 12), Child = child };
-        return new Border { CornerRadius = new CornerRadius(22), Background = bg ?? Theme.Fill, Child = inner };
+        var outer = new Border { CornerRadius = new CornerRadius(22), Background = bg ?? Theme.Card, Child = inner };
+        if (Theme.CardRim != null) { outer.BorderBrush = Theme.CardRim; outer.BorderThickness = new Thickness(1); inner.CornerRadius = new CornerRadius(21); }
+        return outer;
     }
 
     private static void SetBody(Border card, UIElement? child) => ((Border)card.Child).Child = child;
@@ -94,7 +96,7 @@ public sealed partial class IslandWindow
     {
         if (sample) _stats.Sample();
         if (_cpuT is { } c) { c.ring.AnimateTo(_stats.Cpu); c.value.Text = $"{_stats.Cpu * 100:0}%"; }
-        if (_memT is { } m) { m.ring.AnimateTo(_stats.MemFraction); m.value.Text = $"{_stats.MemFraction * 100:0}%"; m.sub.Text = $"{_stats.MemUsedGb:0}/{_stats.MemTotalGb:0}G"; }
+        if (_memT is { } m) { m.ring.AnimateTo(_stats.MemFraction); m.value.Text = $"{_stats.MemFraction * 100:0}%"; m.sub.Text = $"{_stats.MemUsedGb:0}G 已用"; }
         if (_batT is { } b)
         {
             if (_stats.Battery is int pct)
@@ -134,7 +136,10 @@ public sealed partial class IslandWindow
         var rise = x != null ? HhMm.Parse(x.Sunrise, new(6, 30, 0)) : new(6, 30, 0);
         var set = x != null ? HhMm.Parse(x.Sunset, new(18, 30, 0)) : new(18, 30, 0);
         var golden = Math.Abs((now.TimeOfDay - set).TotalMinutes) < 50 || Math.Abs((now.TimeOfDay - rise).TotalMinutes) < 40;
-        var card = WCard(null, w == null ? Theme.Fill : Sky.For(w.Code, night, golden));
+        Brush sky = w == null ? Theme.Card : Sky.For(w.Code, night, golden);
+        // 玻璃主题：天空色也变成半透明的染色玻璃，底下的模糊能透上来
+        if (Theme.IsGlass && w != null) { sky = sky.CloneCurrentValue(); sky.Opacity = 0.74; sky.Freeze(); }
+        var card = WCard(null, sky);
         ((Border)card.Child).Padding = new Thickness(18, 14, 18, 12);
         var sp = new StackPanel();
         SetBody(card, sp);
@@ -343,8 +348,8 @@ public sealed partial class IslandWindow
         var scale = new ScaleTransform(1, 1);
         card.RenderTransform = scale; card.RenderTransformOrigin = new Point(0.5, 0.5);
         void Press(double to) { var a = new DoubleAnimation(to, TimeSpan.FromMilliseconds(to < 1 ? 90 : 280)) { EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 } }; scale.BeginAnimation(ScaleTransform.ScaleXProperty, a); scale.BeginAnimation(ScaleTransform.ScaleYProperty, a); }
-        card.MouseEnter += (_, _) => card.Background = Theme.Hover;
-        card.MouseLeave += (_, _) => { card.Background = Theme.Fill; Press(1); };
+        card.MouseEnter += (_, _) => card.Background = Theme.CardHover;
+        card.MouseLeave += (_, _) => { card.Background = Theme.Card; Press(1); };
         card.MouseLeftButtonDown += (_, e) => { Press(0.94); e.Handled = true; };
         card.MouseLeftButtonUp += (_, e) =>
         {
@@ -594,7 +599,7 @@ public sealed partial class IslandWindow
         {
             var on = min == _timerPick;
             var b = new Border { Padding = new Thickness(10, 3, 10, 3), CornerRadius = new CornerRadius(8), Cursor = Cursors.Hand, Background = on ? Theme.Hover : Brushes.Transparent, Child = T(label, 11, FontWeights.SemiBold, on ? Theme.Primary : Theme.Tertiary) };
-            if (on) b.Background = Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x38, 0xFF, 0xFF, 0xFF)));
+            if (on) b.Background = Theme.SegOn;
             b.MouseLeftButtonUp += (_, e) => { e.Handled = true; _timerPick = min; UpdateTimerCard(); };
             row.Children.Add(b);
         }

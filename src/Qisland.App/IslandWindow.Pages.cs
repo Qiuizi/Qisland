@@ -321,7 +321,7 @@ public sealed partial class IslandWindow
 
     private static Border Card(UIElement? child) => new()
     {
-        Background = Theme.Fill, CornerRadius = new CornerRadius(18), Padding = new Thickness(14, 12, 14, 12), Child = child,
+        Background = Theme.Card, BorderBrush = Theme.CardRim, BorderThickness = new Thickness(Theme.CardRim == null ? 0 : 1), CornerRadius = new CornerRadius(18), Padding = new Thickness(14, 12, 14, 12), Child = child,
     };
 
     private static FrameworkElement PillButton(string text, Brush accent, Action click)

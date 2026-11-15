@@ -37,7 +37,7 @@ public sealed partial class IslandWindow
         if (_focusDone == null) return null;
         if (DateTime.Now - _focusDoneAt > TimeSpan.FromMinutes(15)) { _focusDone = null; return null; }
         var task = _focusDone;
-        var b = new Border { CornerRadius = new CornerRadius(18), Background = Theme.Fill, Padding = new Thickness(14, 12, 12, 12), Margin = new Thickness(0, 0, 0, 10) };
+        var b = new Border { CornerRadius = new CornerRadius(18), Background = Theme.Card, BorderBrush = Theme.CardRim, BorderThickness = new Thickness(Theme.CardRim == null ? 0 : 1), Padding = new Thickness(14, 12, 12, 12), Margin = new Thickness(0, 0, 0, 10) };
         var g = new Grid();
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -158,7 +158,7 @@ public sealed partial class IslandWindow
         cell.Children.Add(_todoBox);
         Grid.SetColumn(cell, 1);
         g.Children.Add(cell);
-        var border = new Border { Height = 38, CornerRadius = new CornerRadius(14), Background = Theme.Fill, Padding = new Thickness(13, 0, 12, 0), Child = g, Cursor = Cursors.IBeam };
+        var border = new Border { Height = 38, CornerRadius = new CornerRadius(14), Background = Theme.Card, BorderBrush = Theme.CardRim, BorderThickness = new Thickness(Theme.CardRim == null ? 0 : 1), Padding = new Thickness(13, 0, 12, 0), Child = g, Cursor = Cursors.IBeam };
         border.MouseLeftButtonDown += (_, e) => { BeginEditing(); e.Handled = true; };
         if (_editing) Dispatcher.BeginInvoke(() => _todoBox?.Focus(), System.Windows.Threading.DispatcherPriority.Input);
         return border;
