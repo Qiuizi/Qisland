@@ -739,7 +739,7 @@ public sealed partial class IslandWindow : Window
         Grid.SetColumn(right, 2);
         g.Children.Add(right);
 
-        var canOpen = Launcher.CanOpen(a.Source);
+        var canOpen = Launcher.CanOpen(a.Source) || a.Source is "update" or "system" or "battery" or "device" or "copy" or "download";
         if (canOpen) g.Cursor = Cursors.Hand;
         AddHover(g);
         g.MouseLeftButtonUp += (_, e) =>

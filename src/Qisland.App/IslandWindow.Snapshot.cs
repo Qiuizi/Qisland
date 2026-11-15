@@ -48,6 +48,7 @@ public sealed partial class IslandWindow
                 _wxView = 1; _pageCache.Clear(); await Shot(dir, "07-widgets-detail", Mode.Expanded);
                 _wxView = 2; _pageCache.Clear(); await Shot(dir, "08-widgets-days", Mode.Expanded);
                 _wxView = 0; _pageCache.Clear();
+                if (Timer != null) { Timer.Start(25, "专注"); _pageCache.Clear(); await Shot(dir, "09-widgets-focus", Mode.Expanded); Timer.Cancel(); _pageCache.Clear(); }
             }
         }
         _page = Page.Home;

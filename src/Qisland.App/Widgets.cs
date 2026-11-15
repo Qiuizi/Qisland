@@ -16,6 +16,8 @@ public sealed class RingArc : FrameworkElement
     public double Progress { get => (double)GetValue(ProgressProperty); set => SetValue(ProgressProperty, value); }
 
     public Brush Stroke { get; set; } = Brushes.White;
+    /// <summary>设了就用沿圆环从上到下的渐变代替纯色。</summary>
+    public (Color a, Color b)? Gradient { get; set; }
     public Brush? Track { get; set; }
     public double Thickness { get; set; } = 4;
     private double _target = -1;
@@ -41,7 +43,10 @@ public sealed class RingArc : FrameworkElement
         if (Track != null) dc.DrawEllipse(null, new Pen(Track, t), c, r, r);
         var p = Math.Clamp(Progress, 0, 1);
         if (p < 0.004) return;
-        var pen = new Pen(Stroke, t) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
+        Brush stroke = Stroke;
+        if (Gradient is { } gr)
+            stroke = new LinearGradientBrush(gr.a, gr.b, new Point(ActualWidth, 0), new Point(0, ActualHeight)) { MappingMode = BrushMappingMode.Absolute };
+        var pen = new Pen(stroke, t) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
         if (p > 0.998) { dc.DrawEllipse(null, pen, c, r, r); return; }
         var a = p * 2 * Math.PI;
         var g = new StreamGeometry();
@@ -185,4 +190,128 @@ public static class HhMm
 {
     public static TimeSpan Parse(string hhmm, TimeSpan fallback) =>
         TimeSpan.TryParseExact(hhmm, @"hh\:mm", CultureInfo.InvariantCulture, out var t) ? t : fallback;
+}
+
+/// <summary>
+/// 彩色天气图标（WPF 不支持彩色 emoji，所以自己画）：太阳是暖色渐变带光芒，云是带体积感的白色渐变，
+/// 雨滴是蓝色，雷是黄色闪电。按 WMO 天气代码组合。
+/// </summary>
+public sealed class WeatherIcon : FrameworkElement
+{
+    public int Code { get; set; }
+    public bool Night { get; set; }
+
+    private static Brush F(Brush b) { b.Freeze(); return b; }
+    private static readonly Brush SunCore = F(new RadialGradientBrush(Color.FromRgb(0xFF, 0xEB, 0x8A), Color.FromRgb(0xFF, 0xA8, 0x1F)) { GradientOrigin = new Point(0.35, 0.3) });
+    private static readonly Brush SunRay = F(new SolidColorBrush(Color.FromRgb(0xFF, 0xC2, 0x3D)));
+    private static readonly Brush MoonFill = F(new LinearGradientBrush(Color.FromRgb(0xFF, 0xF6, 0xD2), Color.FromRgb(0xE6, 0xCF, 0x7C), 60));
+    private static readonly Brush CloudLight = F(new LinearGradientBrush(Color.FromRgb(0xFF, 0xFF, 0xFF), Color.FromRgb(0xD3, 0xDB, 0xE6), 90));
+    private static readonly Brush CloudBack = F(new LinearGradientBrush(Color.FromRgb(0xC9, 0xD2, 0xDE), Color.FromRgb(0x9A, 0xA6, 0xB6), 90));
+    private static readonly Brush CloudDark = F(new LinearGradientBrush(Color.FromRgb(0xC2, 0xCB, 0xD6), Color.FromRgb(0x84, 0x90, 0xA2), 90));
+    private static readonly Brush Drop = F(new SolidColorBrush(Color.FromRgb(0x4F, 0xB8, 0xFF)));
+    private static readonly Brush Bolt = F(new LinearGradientBrush(Color.FromRgb(0xFF, 0xE6, 0x5C), Color.FromRgb(0xFF, 0xAA, 0x00), 90));
+    private static readonly Brush Fog = F(new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0xFF, 0xFF)));
+
+    protected override void OnRender(DrawingContext dc)
+    {
+        var s = Math.Min(ActualWidth, ActualHeight);
+        if (s <= 0) return;
+        var ox = (ActualWidth - s) / 2; var oy = (ActualHeight - s) / 2;
+        dc.PushTransform(new TranslateTransform(ox, oy));
+        var c = Code;
+        if (c is 0) Celestial(dc, s * 0.5, s * 0.5, s * 0.25, rays: true);
+        else if (c is 1 or 2) { Celestial(dc, s * 0.36, s * 0.36, s * 0.19, rays: c == 1 || !Night); Cloud(dc, s * 0.22, s * 0.40, s * 0.74, CloudLight); }
+        else if (c is 3) { Cloud(dc, s * 0.30, s * 0.18, s * 0.62, CloudBack); Cloud(dc, s * 0.08, s * 0.36, s * 0.78, CloudLight); }
+        else if (c is 45 or 48)
+        {
+            Cloud(dc, s * 0.12, s * 0.14, s * 0.76, CloudLight);
+            for (var i = 0; i < 3; i++) Line(dc, Fog, s * (0.16 + i * 0.06), s * (0.70 + i * 0.1), s * (0.84 - i * 0.06), s * (0.70 + i * 0.1), s * 0.055);
+        }
+        else if (c is >= 71 and <= 77 or 85 or 86)
+        {
+            Cloud(dc, s * 0.12, s * 0.10, s * 0.76, CloudLight);
+            foreach (var (x, y) in new[] { (0.32, 0.74), (0.52, 0.84), (0.70, 0.72), (0.42, 0.95) }) dc.DrawEllipse(Brushes.White, null, new Point(s * x, s * y), s * 0.045, s * 0.045);
+        }
+        else if (c >= 95)
+        {
+            Cloud(dc, s * 0.12, s * 0.08, s * 0.76, CloudDark);
+            var g = new StreamGeometry();
+            using (var x = g.Open())
+            {
+                x.BeginFigure(new Point(s * 0.54, s * 0.52), true, true);
+                x.PolyLineTo([new(s * 0.38, s * 0.76), new(s * 0.50, s * 0.76), new(s * 0.42, s * 0.97), new(s * 0.66, s * 0.68), new(s * 0.53, s * 0.68), new(s * 0.62, s * 0.52)], true, true);
+            }
+            g.Freeze();
+            dc.DrawGeometry(Bolt, null, g);
+        }
+        else
+        {
+            var heavy = c is 63 or 65 or 81 or 82 or 67;
+            Cloud(dc, s * 0.12, s * 0.08, s * 0.76, CloudDark);
+            var n = heavy ? 4 : 3;
+            for (var i = 0; i < n; i++)
+            {
+                var x = s * (0.30 + i * (0.42 / (n - 1)));
+                Line(dc, Drop, x, s * 0.66, x - s * 0.07, s * 0.86, s * 0.06);
+            }
+        }
+        dc.Pop();
+    }
+
+    private static void Line(DrawingContext dc, Brush b, double x0, double y0, double x1, double y1, double t) =>
+        dc.DrawLine(new Pen(b, t) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }, new Point(x0, y0), new Point(x1, y1));
+
+    private void Celestial(DrawingContext dc, double cx, double cy, double r, bool rays)
+    {
+        if (Night)
+        {
+            var moon = new CombinedGeometry(GeometryCombineMode.Exclude, new EllipseGeometry(new Point(cx, cy), r, r), new EllipseGeometry(new Point(cx + r * 0.55, cy - r * 0.35), r * 0.85, r * 0.85));
+            moon.Freeze();
+            dc.DrawGeometry(MoonFill, null, moon);
+            return;
+        }
+        if (rays)
+            for (var i = 0; i < 8; i++)
+            {
+                var a = i * Math.PI / 4;
+                Line(dc, SunRay, cx + Math.Cos(a) * r * 1.38, cy + Math.Sin(a) * r * 1.38, cx + Math.Cos(a) * r * 1.75, cy + Math.Sin(a) * r * 1.75, r * 0.26);
+            }
+        dc.DrawEllipse(SunCore, null, new Point(cx, cy), r, r);
+    }
+
+    private static void Cloud(DrawingContext dc, double x, double y, double w, Brush fill)
+    {
+        var h = w * 0.62;
+        var g = new GeometryGroup { FillRule = FillRule.Nonzero };
+        g.Children.Add(new EllipseGeometry(new Point(x + 0.30 * w, y + 0.64 * h), 0.21 * w, 0.21 * w));
+        g.Children.Add(new EllipseGeometry(new Point(x + 0.56 * w, y + 0.46 * h), 0.28 * w, 0.28 * w));
+        g.Children.Add(new EllipseGeometry(new Point(x + 0.78 * w, y + 0.70 * h), 0.18 * w, 0.18 * w));
+        g.Children.Add(new RectangleGeometry(new Rect(x + 0.12 * w, y + 0.62 * h, 0.80 * w, 0.38 * h), 0.19 * h, 0.19 * h));
+        g.Freeze();
+        dc.DrawGeometry(fill, null, g);
+    }
+}
+
+public static class Sky
+{
+    /// <summary>天气卡片的天空：按天气和昼夜（以及日出日落前后一小时的霞光）给出背景渐变。</summary>
+    public static Brush For(int code, bool night, bool golden)
+    {
+        (string a, string b) = (code, night, golden) switch
+        {
+            (>= 95, _, _) => ("#2B3240", "#4B5568"),
+            (>= 51 and < 95 and not (>= 71 and <= 77) and not (85 or 86), true, _) => ("#151C29", "#2D3748"),
+            (>= 51 and < 95 and not (>= 71 and <= 77) and not (85 or 86), false, _) => ("#3D5066", "#6A7F96"),
+            (>= 71 and <= 77 or 85 or 86, _, _) => night ? ("#1F2A3D", "#46536B") : ("#7C8FA8", "#A9B9CC"),
+            (45 or 48, _, _) => night ? ("#232833", "#434A58") : ("#77808C", "#A3ABB5"),
+            (_, _, true) when code <= 2 => ("#3A4A8F", "#D98366"),
+            (3, true, _) => ("#1A2030", "#353D50"),
+            (3, false, _) => ("#56708C", "#879DB4"),
+            (_, true, _) => ("#0A1633", "#24376A"),
+            _ => ("#1E6FD0", "#5FAEF2"),
+        };
+        var g = new LinearGradientBrush((Color)ColorConverter.ConvertFromString(a), (Color)ColorConverter.ConvertFromString(b), new Point(0.2, 0), new Point(0.8, 1));
+        g.Freeze();
+        return g;
+    }
 }
