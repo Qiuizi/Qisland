@@ -33,6 +33,25 @@ public sealed partial class IslandWindow
 
     private void SetupPages()
     {
+        // 启动 3 秒后在后台把每一页各建一次，记下耗时（也顺便把字体、图标缓存预热好，第一次翻页不再卡）
+        var warm = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        warm.Tick += (_, _) =>
+        {
+            warm.Stop();
+            if (_mode == Mode.Expanded) return;
+            var keep = _page;
+            foreach (var p in Enum.GetValues<Page>())
+            {
+                _page = p;
+                var t = System.Diagnostics.Stopwatch.StartNew();
+                RebuildExpanded();
+                _expanded.UpdateLayout();
+                App.Log($"warm {p}: {t.Elapsed.TotalMilliseconds:0.0} ms");
+            }
+            _page = keep;
+            RebuildExpanded();
+        };
+        warm.Start();
         Deactivated += (_, _) => EndEditing();
         AllowDrop = true;
         PreviewMouseWheel += (_, e) => { OnScroll(-e.Delta); e.Handled = true; };

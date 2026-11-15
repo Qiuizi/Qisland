@@ -68,6 +68,18 @@ internal static class Native
         return r.Left <= m.Left && r.Top <= m.Top && r.Right >= m.Right && r.Bottom >= m.Bottom;
     }
 
+    [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr h);
+    [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr h, IntPtr dc);
+    [DllImport("gdi32.dll")] private static extern int GetDeviceCaps(IntPtr dc, int index);
+
+    /// <summary>主屏刷新率（Hz），读不到时返回 60。</summary>
+    public static int RefreshRate()
+    {
+        var dc = GetDC(IntPtr.Zero);
+        try { var hz = GetDeviceCaps(dc, 116 /* VREFRESH */); return hz is > 30 and < 500 ? hz : 60; }
+        finally { ReleaseDC(IntPtr.Zero, dc); }
+    }
+
     [DllImport("gdi32.dll")] public static extern IntPtr CreateRectRgn(int l, int t, int r, int b);
     [DllImport("gdi32.dll")] public static extern IntPtr CreateRoundRectRgn(int l, int t, int r, int b, int w, int h);
     [DllImport("gdi32.dll")] public static extern int CombineRgn(IntPtr dst, IntPtr a, IntPtr b, int mode);

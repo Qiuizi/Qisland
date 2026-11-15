@@ -43,11 +43,20 @@ public sealed class App : Application
         return app.Run();
     }
 
+    public static int Hz { get; private set; } = 60;
+
     private void Boot(string[] args)
     {
         Directory.CreateDirectory(InboxDir);
         Http.DefaultRequestHeaders.UserAgent.ParseAdd("Qisland/0.2 (+https://github.com/Qiuizi)");
         DispatcherUnhandledException += (_, e) => { Log(e.Exception.ToString()); e.Handled = true; };
+
+        // WPF 默认按 60 fps 出帧；这台屏是 120 Hz，60 帧的弹簧动画看起来就是「有点卡」。
+        // 把动画默认帧率提到屏幕刷新率（频谱条、转圈这些显式写了低帧率的不受影响）。
+        Hz = Native.RefreshRate();
+        try { System.Windows.Media.Animation.Timeline.DesiredFrameRateProperty.OverrideMetadata(typeof(System.Windows.Media.Animation.Timeline), new FrameworkPropertyMetadata(Hz)); }
+        catch (Exception ex) { Log("帧率设置: " + ex.Message); }
+        Log($"屏幕刷新率 {Hz} Hz");
 
         _window = new IslandWindow(_store);
         _window.Show();

@@ -335,12 +335,27 @@ public sealed partial class IslandWindow : Window
 
     // ───────────────────────────── 动画 ─────────────────────────────
 
+    private TimeSpan _animStart;
+
+    // 弹簧是在 CompositionTarget.Rendering 里手动推的，WPF 只有在有动画要跑时才会按高帧率出帧。
+    // 动画期间挂一个看不见的「节拍器」动画，DesiredFrameRate = 屏幕刷新率，让渲染线程跟上 120 Hz。
+    private readonly System.Windows.Shapes.Rectangle _pacer = new() { Width = 1, Height = 1, Opacity = 0, IsHitTestVisible = false };
+    private void StartPacer()
+    {
+        if (_pacer.Parent == null) _root.Children.Add(_pacer);
+        var a = new DoubleAnimation(0, 1, TimeSpan.FromSeconds(1)) { RepeatBehavior = RepeatBehavior.Forever };
+        Timeline.SetDesiredFrameRate(a, App.Hz);
+        _pacer.BeginAnimation(WidthProperty, a);
+    }
+    private void StopPacer() => _pacer.BeginAnimation(WidthProperty, null);
+
     private void Kick()
     {
         if (_animating) return;
         _animating = true;
         _lastRender = TimeSpan.Zero;
         CompositionTarget.Rendering += OnRendering;
+        StartPacer();
     }
 
     private void OnRendering(object? sender, EventArgs e)
@@ -348,8 +363,9 @@ public sealed partial class IslandWindow : Window
         var t = ((RenderingEventArgs)e).RenderingTime;
         if (t == _lastRender) return;
         var dt = _lastRender == TimeSpan.Zero ? 1.0 / 60 : (t - _lastRender).TotalSeconds;
+        if (_frames == 0) _animStart = t;
         _lastRender = t;
-        _frames++; _maxDt = Math.Max(_maxDt, dt); if (dt > 0.025) _slowFrames++;
+        _frames++; _maxDt = Math.Max(_maxDt, dt); if (dt > Math.Max(1.6 / App.Hz, 0.0125)) _slowFrames++;
         var settled = true;
         foreach (var s in Springs) { s.Step(dt); settled &= s.IsSettled; }
         ApplyFrame();
@@ -357,8 +373,9 @@ public sealed partial class IslandWindow : Window
         {
             CompositionTarget.Rendering -= OnRendering;
             _animating = false;
+            StopPacer();
             ApplyFrame(); // 停稳后把窗口区域收回到最终大小
-            App.Log($"anim → {_mode}: {_frames} 帧, 掉帧 {_slowFrames}, 最长 {_maxDt * 1000:0} ms");
+            App.Log($"anim → {_mode}: {_frames} 帧 / {(_lastRender - _animStart).TotalSeconds:0.00}s, 掉帧 {_slowFrames}, 最长 {_maxDt * 1000:0} ms");
             _frames = 0; _slowFrames = 0; _maxDt = 0;
             if (_mode != Mode.Expanded) App.TrimSoon();
         }
@@ -578,6 +595,7 @@ public sealed partial class IslandWindow : Window
 
     private void RebuildExpanded()
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         _expanded.Children.Clear();
         _expanded.Width = ExpandedW;
         Place(_expanded, ExpandedW);
@@ -592,6 +610,7 @@ public sealed partial class IslandWindow : Window
         _expandedH = Math.Ceiling(stack.DesiredSize.Height + 14 + 10);
         _expanded.Height = _expandedH;
         if (_mode == Mode.Expanded) _h.Target = _expandedH;
+        if (sw.Elapsed.TotalMilliseconds > 6) App.Log($"rebuild {_page}: {sw.Elapsed.TotalMilliseconds:0.0} ms");
     }
 
     private void BuildHome(StackPanel stack)
