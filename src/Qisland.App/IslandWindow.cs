@@ -125,6 +125,9 @@ public sealed partial class IslandWindow : Window
             _shadowPaths.Add(sp);
             _root.Children.Add(sp);
         }
+        _glass = new GlassBackdrop(this, GlassArea, WinW, WinH) { ShiftY = () => _rootShift.Y };
+        _glass.Host.Clip = _pillGeo;
+        _root.Children.Add(_glass.Host);
         _pill.Data = _pillGeo;
         _root.Children.Add(_pill);
         _sheen.Data = _pillGeo;
@@ -190,6 +193,7 @@ public sealed partial class IslandWindow : Window
         Native.DwmSetWindowAttribute(_hwnd, Native.DWMWA_BORDER_COLOR, ref border, sizeof(int));
         var backdrop = 1; // DWMSBT_NONE
         Native.DwmSetWindowAttribute(_hwnd, Native.DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
+        SetGlass(Theme.IsGlass);
     }
 
 
@@ -447,7 +451,17 @@ public sealed partial class IslandWindow : Window
     // 液态玻璃：系统亚克力模糊铺满窗口，再用窗口区域把它裁成胶囊的形状，跟着弹簧每帧更新
     // 系统模糊（亚克力/背景模糊）在这台 Win11 24H2 上不吃窗口区域裁剪：要么糊满整块窗口，要么关掉透明扩展后露出黑块。
     // 所以玻璃外观不用系统模糊，只用半透明白 + 高光描边 + 顶部反光，窗口始终保持透明扩展。
-    private void SetGlass(bool on) { }
+    private GlassBackdrop _glass = null!;
+    private void SetGlass(bool on) { if (!_layered) _glass.Enable(_hwnd, on); }
+
+    /// <summary>要截的那块：当前尺寸和弹簧目标尺寸里更大的那个，再外扩一点，动画途中边缘也有底。</summary>
+    private Rect? GlassArea()
+    {
+        if (_show.Value < 0.02 && _show.Target < 0.5) return null;
+        var w = Math.Max(_w.Value, _w.Target) + 16;
+        var h = Math.Max(_h.Value, _h.Target) + 12;
+        return new Rect((WinW - w) / 2, TopGap - 4, w, h);
+    }
 
     private double _stickW, _stickH, _stickR = 999;
     private (int, int, int, int, int, int) _lastRgn = (-1, -1, -1, -1, -1, -1);

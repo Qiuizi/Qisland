@@ -60,7 +60,8 @@ internal static class Theme
                 Fill = S(0x1F, 0x00, 0x00, 0x00);
                 Hover = S(0x2E, 0xFF, 0xFF, 0xFF);
                 Press = S(0x14, 0x00, 0x00, 0x00);
-                Pill = Freeze(new LinearGradientBrush(Color.FromArgb(0xD8, 0xFA, 0xFB, 0xFD), Color.FromArgb(0xB8, 0xF0, 0xF2, 0xF7), 90));
+                // 背后是真实模糊（GlassBackdrop），这里只罩一层薄薄的白：通透来自少盖，可读来自模糊后的低对比
+                Pill = Freeze(new LinearGradientBrush(Color.FromArgb(0x8C, 0xFC, 0xFC, 0xFE), Color.FromArgb(0x66, 0xF2, 0xF4, 0xF8), 90));
                 var rim = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
                 rim.GradientStops.Add(new GradientStop(Color.FromArgb(0xF0, 0xFF, 0xFF, 0xFF), 0));
                 rim.GradientStops.Add(new GradientStop(Color.FromArgb(0x50, 0xFF, 0xFF, 0xFF), 0.35));
