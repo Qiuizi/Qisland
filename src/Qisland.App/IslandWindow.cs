@@ -543,6 +543,7 @@ public sealed partial class IslandWindow : Window
 
     private void RebuildCompact()
     {
+        _compactLyric = null;
         _compact.Children.Clear();
         _compact.ColumnDefinitions.Clear();
         if (OsdActive) { BuildOsd(); return; }
@@ -660,12 +661,12 @@ public sealed partial class IslandWindow : Window
             if (cd != null) stack.Children.Add(cd);
             if (tc != null) stack.Children.Add(tc);
             if (RainHint() is { } rh) stack.Children.Add(rh);
-            if (music != null) stack.Children.Add(Glassy(MusicCard(music)));
+            if (music != null) stack.Children.Add(Glassy(MusicWithLyrics(music)));
             if (_todos.Count > 0) stack.Children.Add(Glassy(TodoBlock()));
         }
         else
         {
-            if (music != null) stack.Children.Add(Glassy(MusicCard(music)));
+            if (music != null) stack.Children.Add(Glassy(MusicWithLyrics(music)));
             var rows = new StackPanel();
             foreach (var a in ranked.Take(MaxRows)) rows.Children.Add(Row(a));
             if (ranked.Count > MaxRows)
@@ -936,8 +937,20 @@ public sealed partial class IslandWindow : Window
             FontFamily = Theme.Text, FontSize = 13, VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(10, 0, 10, 1),
         };
-        title.Inlines.Add(new Run(m.Title) { Foreground = Theme.Primary, FontWeight = FontWeights.SemiBold });
-        if (m.Artist.Length > 0) title.Inlines.Add(new Run("  " + m.Artist) { Foreground = Theme.Secondary, FontWeight = FontWeights.Medium });
+        var lyr = LiveLyrics;
+        _compactLyric = null;
+        if (lyr != null)
+        {
+            title.Foreground = Theme.Primary; title.FontWeight = FontWeights.SemiBold;
+            title.Text = LyricAt(Lrc.IndexAt(lyr, (Media?.LivePosition() ?? TimeSpan.Zero) + TimeSpan.FromMilliseconds(250)), lyr).cur;
+            title.ToolTip = $"{m.Title}  {m.Artist}";
+            _compactLyric = title;
+        }
+        else
+        {
+            title.Inlines.Add(new Run(m.Title) { Foreground = Theme.Primary, FontWeight = FontWeights.SemiBold });
+            if (m.Artist.Length > 0) title.Inlines.Add(new Run("  " + m.Artist) { Foreground = Theme.Secondary, FontWeight = FontWeights.Medium });
+        }
         Grid.SetColumn(title, 1);
         _compact.Children.Add(title);
         var bars = Bars(14);
@@ -946,7 +959,7 @@ public sealed partial class IslandWindow : Window
         Grid.SetColumn(bars, 2);
         _compact.Children.Add(bars);
         var textW = MeasureText(m.Title, 13, FontWeights.SemiBold) + (m.Artist.Length > 0 ? MeasureText("  " + m.Artist, 13, FontWeights.Medium) : 0);
-        _compactW = Math.Clamp(7 + tileW + 10 + Math.Min(textW, 260) + 10 + 14 + 14, 200, 400);
+        _compactW = lyr != null ? LyricCompactW : Math.Clamp(7 + tileW + 10 + Math.Min(textW, 260) + 10 + 14 + 14, 200, 400);
         _compact.Width = _compactW;
         Place(_compact, _compactW);
         if (_mode == Mode.Compact) _w.Target = _compactW;
@@ -967,6 +980,16 @@ public sealed partial class IslandWindow : Window
             st.BeginAnimation(ScaleTransform.ScaleYProperty, a);
             sp.Children.Add(r);
         }
+        return sp;
+    }
+
+    private FrameworkElement MusicWithLyrics(MediaState m)
+    {
+        var card = MusicCard(m);
+        if (CardLyrics() is not { } ly) return card;
+        var sp = new StackPanel();
+        sp.Children.Add(card);
+        sp.Children.Add(ly);
         return sp;
     }
 

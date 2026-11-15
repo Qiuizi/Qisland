@@ -258,6 +258,9 @@ public sealed class MediaWatcher
         Run(s => s.TryChangePlaybackPositionAsync(target.Ticks));
     }
 
+    /// <summary>截图演示用：直接塞一个播放状态，不连系统会话。</summary>
+    public void ShowDemo(MediaState s) { Current = s; Changed?.Invoke(); }
+
     public void Toggle() => Run(s => s.TryTogglePlayPauseAsync());
     public void Next() => Run(s => s.TrySkipNextAsync());
     public void Previous() => Run(s => s.TrySkipPreviousAsync());

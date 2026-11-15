@@ -71,6 +71,21 @@ public sealed partial class IslandWindow
         SetMode(Mode.Idle);
         await Shot(dir, "12-class-idle", Mode.Idle);
         Classes = realClasses;
+        // 歌词：演示用自编歌词
+        Media ??= new MediaWatcher(Dispatcher);
+        Lyrics ??= new LyricsService();
+        var t0 = TimeSpan.FromSeconds(40);
+        Lyrics.ShowDemo([
+            new(t0 - TimeSpan.FromSeconds(6), "风从教学楼的走廊穿过", "The wind runs through the hallway"),
+            new(t0 - TimeSpan.FromSeconds(1), "把没写完的作业吹成了诗", "Turning unfinished homework into poems"),
+            new(t0 + TimeSpan.FromSeconds(5), "灯一盏一盏亮起来", "Lights come on one by one"),
+        ]);
+        Media.ShowDemo(new MediaState("晚自习", "示例歌手", "网易云音乐", "netease", true, null, t0, TimeSpan.FromSeconds(214), DateTime.Now));
+        OnLyricsChanged();
+        await Task.Delay(300);
+        await Shot(dir, "13-lyrics-compact", Mode.Compact);
+        _page = Page.Home; _expDirty = true; _pageCache.Clear();
+        await Shot(dir, "14-lyrics-home", Mode.Expanded);
         App.Log("snapshot 完成: " + dir);
     }
 

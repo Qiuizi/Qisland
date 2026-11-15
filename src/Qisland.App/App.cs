@@ -27,6 +27,7 @@ public sealed class App : Application
     private TodoFile? _todo;
     private Countdowns? _countdown;
     private ClassWatcher? _classes;
+    private LyricsService? _lyrics;
     private VolumeWatcher? _volume;
     private SystemWatch _sys = null!;
     private Updater _upd = null!;
@@ -142,7 +143,10 @@ public sealed class App : Application
         _ = new InfoStationWatcher(_store, Http).Loop();
         _media = new MediaWatcher(Dispatcher);
         _window.Media = _media;
-        _media.Changed += () => _window.OnMediaChanged();
+        _lyrics = new LyricsService();
+        _window.Lyrics = _lyrics;
+        _media.Changed += () => { _window.OnMediaChanged(); _lyrics.OnTrack(_media.Current); _window.UpdateLyricTimer(); };
+        _lyrics.Changed += _window.OnLyricsChanged;
         _ = _media.StartAsync();
         _tick.Tick += (_, _) =>
         {
@@ -260,6 +264,9 @@ public sealed class App : Application
         menu.Items.Add(look);
         menu.Items.Add("导入课表（.ics）…", null, (_, _) => Dispatcher.BeginInvoke(ImportTimetable));
         menu.Items.Add("编辑倒计时", null, (_, _) => Process.Start(new ProcessStartInfo("notepad.exe", "\"" + Countdowns.PathName + "\"") { UseShellExecute = true }));
+        var lyr = new System.Windows.Forms.ToolStripMenuItem("显示歌词") { CheckOnClick = true, Checked = LyricsService.Enabled, ToolTipText = "播放音乐时胶囊里滚动显示当前这句歌词（网易云 / LRCLIB）" };
+        lyr.CheckedChanged += (_, _) => Dispatcher.BeginInvoke(() => { LyricsService.Enabled = lyr.Checked; _lyrics?.OnTrack(null); _lyrics?.OnTrack(_media?.Current); });
+        menu.Items.Add(lyr);
         var keys = new System.Windows.Forms.ToolStripMenuItem("接管音量键") { CheckOnClick = true, Checked = !File.Exists(VolumeWatcher.OffFlag), ToolTipText = "音量键改由灵动岛显示，不再弹出系统音量浮窗" };
         keys.CheckedChanged += (_, _) => _volume?.HookKeys(keys.Checked);
         menu.Items.Add(keys);
