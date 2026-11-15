@@ -48,8 +48,12 @@ public sealed partial class IslandWindow
                 _expanded.UpdateLayout();
                 App.Log($"warm {p}: {t.Elapsed.TotalMilliseconds:0.0} ms");
             }
+            // 预热完把每页都放进缓存（RebuildExpanded 会清缓存，所以逐页建完再按顺序留存）
+            var built = new Dictionary<Page, (StackPanel, double, Border?, TextBlock?)>();
+            foreach (var p in Enum.GetValues<Page>()) { _page = p; RebuildExpanded(); if (p != Page.Widgets) built[p] = (_expStack!, _expandedH, _mediaFill, _mediaTime); }
             _page = keep;
             RebuildExpanded();
+            foreach (var kv in built) if (kv.Key != keep) _pageCache[kv.Key] = kv.Value;
         };
         warm.Start();
         Deactivated += (_, _) => EndEditing();
@@ -170,7 +174,7 @@ public sealed partial class IslandWindow
     {
         if (p == _page) return;
         _page = p;
-        RebuildExpanded();
+        ShowPage();
         if (p == Page.Widgets) RefreshWidgets();
         // 新页从运动方向那一侧滑进来，弹簧收尾时会轻轻过冲一下再停住
         _pageX.Value = dir * 110;

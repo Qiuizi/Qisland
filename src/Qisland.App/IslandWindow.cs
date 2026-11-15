@@ -603,6 +603,7 @@ public sealed partial class IslandWindow : Window
         var stack = new StackPanel { Margin = new Thickness(16, 14, 16, 0) };
         _mediaFill = null; _mediaTime = null;
         BuildPage(stack);
+        _pageCache.Clear(); // 数据变了：其他页的缓存一律作废
         _expStack = stack;
         ApplyPageOffset();
         _expanded.Children.Add(stack);
@@ -610,7 +611,26 @@ public sealed partial class IslandWindow : Window
         _expandedH = Math.Ceiling(stack.DesiredSize.Height + 14 + 10);
         _expanded.Height = _expandedH;
         if (_mode == Mode.Expanded) _h.Target = _expandedH;
+        if (_page != Page.Widgets) _pageCache[_page] = (stack, _expandedH, _mediaFill, _mediaTime);
         if (sw.Elapsed.TotalMilliseconds > 6) App.Log($"rebuild {_page}: {sw.Elapsed.TotalMilliseconds:0.0} ms");
+    }
+
+    // 翻页时优先复用已经建好的页面（组件页每秒刷新，始终现建）
+    private readonly Dictionary<Page, (StackPanel stack, double h, Border? fill, TextBlock? time)> _pageCache = [];
+    private void ShowPage()
+    {
+        if (_expDirty || !_pageCache.TryGetValue(_page, out var c)) { RebuildExpanded(); return; }
+        (c.stack.Parent as Panel)?.Children.Remove(c.stack);
+        _expanded.Children.Clear();
+        _mediaFill = c.fill; _mediaTime = c.time; _gaugeHost = null; _timerHost = null;
+        _expStack = c.stack;
+        ApplyPageOffset();
+        _expanded.Children.Add(c.stack);
+        _expandedH = c.h;
+        _expanded.Height = c.h;
+        if (_mode == Mode.Expanded) _h.Target = c.h;
+        UpdateMediaProgress();
+        if (_page == Page.Todo && _todoBox != null && _editing) Dispatcher.BeginInvoke(() => _todoBox.Focus(), System.Windows.Threading.DispatcherPriority.Input);
     }
 
     private void BuildHome(StackPanel stack)
