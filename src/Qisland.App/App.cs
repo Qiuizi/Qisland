@@ -22,6 +22,7 @@ public sealed class App : Application
     private MessengerFlash? _flash;
     private HarnessWatcher? _harness;
     private FocusTimer? _timer;
+    private MediaWatcher? _media;
     private TodoFile? _todo;
     private readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromSeconds(1) };
     private int _tickN;
@@ -80,6 +81,10 @@ public sealed class App : Application
         _toasts = new ToastMirror(_store);
         _ = _toasts.StartAsync();
         _ = new InfoStationWatcher(_store, Http).Loop();
+        _media = new MediaWatcher(Dispatcher);
+        _window.Media = _media;
+        _media.Changed += () => _window.OnMediaChanged();
+        _ = _media.StartAsync();
         _tick.Tick += (_, _) =>
         {
             _tickN++;
@@ -117,51 +122,34 @@ public sealed class App : Application
         }
     }
 
-    // ───────────── 天气（Open-Meteo，成都，20 分钟一次） ─────────────
+    // ───────────── 天气（成都，20 分钟一次；wttr.in 有逐 3 小时预报和日出日落，Open-Meteo 兜底） ─────────────
     private async Task WeatherLoop()
     {
         const string url = "https://api.open-meteo.com/v1/forecast?latitude=30.66&longitude=104.07&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FShanghai&forecast_days=1";
         while (true)
         {
             var wait = TimeSpan.FromMinutes(20);
-            WeatherSnapshot? w = null;
+            var ok = false;
             try
             {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
-                w = WeatherParser.ParseForecast(await Http.GetStringAsync(url, cts.Token));
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+                var d = WttrParser.Parse(await Http.GetStringAsync("https://wttr.in/Chengdu?format=j1&lang=zh", cts.Token), DateTime.Now);
+                if (d != null) { _window?.SetWeather(d.Now, d); ok = true; }
             }
-            catch (Exception ex) { Log("Open-Meteo: " + ex.Message); }
-            if (w is null)
+            catch (Exception ex) { Log("wttr: " + ex.Message); }
+            if (!ok)
             {
-                // 国内直连 Open-Meteo 经常超时，退到 wttr.in
-                try { w = ParseWttr(await Http.GetStringAsync("https://wttr.in/Chengdu?format=j1")); }
-                catch (Exception ex) { Log("wttr: " + ex.Message); }
+                try
+                {
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+                    var w = WeatherParser.ParseForecast(await Http.GetStringAsync(url, cts.Token));
+                    if (w != null) { _window?.SetWeather(w, null); ok = true; }
+                }
+                catch (Exception ex) { Log("Open-Meteo: " + ex.Message); }
             }
-            if (w is not null) _window?.SetWeather(w); else wait = TimeSpan.FromMinutes(3);
+            if (!ok) wait = TimeSpan.FromMinutes(3);
             await Task.Delay(wait);
         }
-    }
-
-    internal static WeatherSnapshot? ParseWttr(string json)
-    {
-        using var doc = System.Text.Json.JsonDocument.Parse(json);
-        var root = doc.RootElement;
-        var cur = root.GetProperty("current_condition")[0];
-        static double D(System.Text.Json.JsonElement e, string n) => double.Parse(e.GetProperty(n).GetString()!, System.Globalization.CultureInfo.InvariantCulture);
-        var temp = D(cur, "temp_C");
-        var code = int.Parse(cur.GetProperty("weatherCode").GetString()!);
-        var day = root.GetProperty("weather")[0];
-        var wmo = code switch
-        {
-            113 => 0,
-            116 => 2,
-            119 or 122 => 3,
-            143 or 248 or 260 => 45,
-            200 or (>= 386 and <= 395) => 95,
-            179 or 182 or 185 or 227 or 230 or (>= 317 and <= 338) or (>= 368 and <= 377) => 71,
-            _ => 61,
-        };
-        return new WeatherSnapshot(temp, wmo, D(cur, "FeelsLikeC"), D(cur, "humidity"), 0, D(cur, "precipMM"), D(day, "maxtempC"), D(day, "mintempC"));
     }
 
     // ───────────── 托盘 ─────────────

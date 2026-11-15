@@ -21,7 +21,7 @@ public sealed class IslandWindow : Window
 {
     private enum Mode { Idle, Compact, Expanded }
 
-    private const double WinW = 680, WinH = 400, TopGap = 10;
+    private const double WinW = 680, WinH = 600, TopGap = 10;
     private const double IdleW = 176, IdleH = 34, CompactH = 38, ExpandedW = 452, RowH = 56;
     private const int MaxRows = 4;
 
@@ -65,9 +65,14 @@ public sealed class IslandWindow : Window
     private readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromSeconds(1) };
     private string _clockText = "";
     private WeatherSnapshot? _weather;
+    private WeatherDetail? _wx;
+    public MediaWatcher? Media;
+    private Border? _mediaFill;
+    private TextBlock? _mediaTime;
+    private bool MusicPlaying => Media?.Current is { Playing: true };
 
     private readonly TextBlock _idleClock = Txt(13.5, FontWeights.SemiBold, Theme.Primary);
-    private readonly TextBlock _idleWeatherGlyph = Glyph("", 13, Theme.Secondary);
+    private readonly TextBlock _idleWeatherGlyph = WxGlyph("", 13, Theme.Secondary);
     private readonly TextBlock _idleTemp = Txt(13, FontWeights.Medium, Theme.Secondary);
     private double _compactW = 260, _expandedH = 140;
 
@@ -181,7 +186,14 @@ public sealed class IslandWindow : Window
 
     // ───────────────────────────── 状态 ─────────────────────────────
 
-    private Mode DesiredRestMode() => _store.Ranked().Count > 0 ? Mode.Compact : Mode.Idle;
+    private Mode DesiredRestMode() => _store.Ranked().Count > 0 || MusicPlaying ? Mode.Compact : Mode.Idle;
+
+    public void OnMediaChanged()
+    {
+        RebuildCompact();
+        if (_mode == Mode.Expanded) { if (!_animating) RebuildExpanded(); else _expDirty = true; SetMode(Mode.Expanded); }
+        else { _expDirty = true; SetMode(DesiredRestMode()); }
+    }
 
     private void SetMode(Mode m)
     {
@@ -233,6 +245,7 @@ public sealed class IslandWindow : Window
         var text = now.ToString("HH:mm", CultureInfo.InvariantCulture);
         if (text != _clockText) { _clockText = text; _idleClock.Text = text; _expDirty = true; }
         if (_expDirty && !_animating) RebuildExpanded();
+        UpdateMediaProgress();
         if (now.Second % 5 == 0) _store.Expire();
         if (_peekUntil != DateTime.MinValue && now > _peekUntil && !_pinned && _hoverSince == DateTime.MaxValue)
         {
@@ -254,9 +267,10 @@ public sealed class IslandWindow : Window
         if (_mode == Mode.Expanded && !_animating) RebuildExpanded();
     }
 
-    public void SetWeather(WeatherSnapshot w)
+    public void SetWeather(WeatherSnapshot w, WeatherDetail? detail)
     {
         _weather = w;
+        if (detail != null) _wx = detail;
         RebuildIdle();
         _expDirty = true;
     }
@@ -386,7 +400,7 @@ public sealed class IslandWindow : Window
         _idleClock.Text = _clockText;
         if (_weather is { } w)
         {
-            _idleWeatherGlyph.Text = Theme.WeatherGlyph(w.Code);
+            _idleWeatherGlyph.Text = Theme.WeatherGlyph(w.Code, Theme.IsNight(DateTime.Now));
             _idleTemp.Text = $"{w.Temperature:0}°";
         }
         else { _idleWeatherGlyph.Text = ""; _idleTemp.Text = DateTime.Now.ToString("ddd", new CultureInfo("zh-CN")); }
@@ -397,7 +411,7 @@ public sealed class IslandWindow : Window
         _compact.Children.Clear();
         _compact.ColumnDefinitions.Clear();
         var ranked = _store.Ranked();
-        if (ranked.Count == 0) return;
+        if (ranked.Count == 0) { if (MusicPlaying) CompactMusic(Media!.Current!); return; }
         var a = ranked[0];
 
         _compact.Height = CompactH;
@@ -462,14 +476,19 @@ public sealed class IslandWindow : Window
         _expDirty = false;
         var stack = new StackPanel { Margin = new Thickness(16, 14, 16, 0) };
         var ranked = _store.Ranked();
+        _mediaFill = null; _mediaTime = null;
+        var music = Media?.Current;
 
         if (ranked.Count == 0)
         {
             stack.Children.Add(HeroClock());
+            if (_wx != null) stack.Children.Add(WeatherStrip());
+            if (music != null) stack.Children.Add(MusicCard(music));
             if (_todos.Count > 0) stack.Children.Add(TodoBlock());
         }
         else
         {
+            if (music != null) stack.Children.Add(MusicCard(music));
             foreach (var a in ranked.Take(MaxRows)) stack.Children.Add(Row(a));
             if (ranked.Count > MaxRows)
             {
@@ -480,6 +499,7 @@ public sealed class IslandWindow : Window
             }
             if (_todos.Count > 0) stack.Children.Add(TodoBlock());
             stack.Children.Add(Footer());
+            if (_wx != null) stack.Children.Add(WeatherStrip());
         }
         _expanded.Children.Add(stack);
         stack.Measure(new Size(ExpandedW, double.PositiveInfinity));
@@ -505,13 +525,15 @@ public sealed class IslandWindow : Window
         {
             var right = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 0, 6, 0) };
             var line = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-            var gl = Glyph(Theme.WeatherGlyph(w.Code), 22, Theme.Primary);
+            var gl = WxGlyph(Theme.WeatherGlyph(w.Code, Theme.IsNight(DateTime.Now)), 22, Theme.Primary);
             gl.Margin = new Thickness(0, 4, 8, 0);
             line.Children.Add(gl);
             line.Children.Add(new TextBlock { Text = $"{w.Temperature:0}°", FontFamily = Theme.Display, FontSize = 30, FontWeight = FontWeights.Medium, Foreground = Theme.Primary });
             right.Children.Add(line);
             var d = Txt(12.5, FontWeights.Medium, Theme.Secondary);
-            d.Text = $"成都 · {WeatherParser.Describe(w.Code)}  {w.Low:0}° / {w.High:0}°";
+            d.Text = _wx is { } x
+                ? $"成都 · {WeatherParser.Describe(w.Code)} · 体感 {w.FeelsLike:0}°"
+                : $"成都 · {WeatherParser.Describe(w.Code)}  {w.Low:0}° / {w.High:0}°";
             d.HorizontalAlignment = HorizontalAlignment.Right;
             right.Children.Add(d);
             Grid.SetColumn(right, 1);
@@ -562,12 +584,25 @@ public sealed class IslandWindow : Window
         Grid.SetColumn(right, 2);
         g.Children.Add(right);
 
-        g.Cursor = Cursors.Hand;
+        var canOpen = Launcher.CanOpen(a.Source);
+        if (canOpen) g.Cursor = Cursors.Hand;
+        AddHover(g);
         g.MouseLeftButtonUp += (_, e) =>
         {
-            if (OpenRequested?.Invoke(a) != true) return;
             e.Handled = true;
+            App.Log($"点击 {a.Id}");
+            if (!canOpen || OpenRequested?.Invoke(a) != true)
+            {
+                // 没有对应软件（计时、通知等）：点一下当作「已读」，已完成或非常驻的直接收掉
+                if (!a.Sticky || a.Kind == ActivityKind.Done) _store.Remove(a.Id);
+                return;
+            }
+            // 消息类点开即已读；Agent 运行中的保留，完成的收掉
+            if (!a.Sticky && (a.Kind != ActivityKind.Running && a.Kind != ActivityKind.WaitingApproval || a.Source is "wechat" or "qq"))
+                _store.Remove(a.Id);
+            if (a.Source is "wechat" or "qq") MessengerFlash.ClearFlash(a.Source, _store);
             _pinned = false;
+            _peekUntil = DateTime.MinValue;
             SetMode(DesiredRestMode());
         };
         if (!a.Sticky)
@@ -611,7 +646,7 @@ public sealed class IslandWindow : Window
         var left = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 0, 0) };
         if (_weather is { } w)
         {
-            var gl = Glyph(Theme.WeatherGlyph(w.Code), 13, Theme.Secondary);
+            var gl = WxGlyph(Theme.WeatherGlyph(w.Code, Theme.IsNight(DateTime.Now)), 13, Theme.Secondary);
             gl.Margin = new Thickness(0, 1, 7, 0);
             left.Children.Add(gl);
             var tx = Txt(12.5, FontWeights.Medium, Theme.Secondary);
@@ -626,6 +661,202 @@ public sealed class IslandWindow : Window
         Grid.SetColumn(clock, 1);
         g.Children.Add(clock);
         return g;
+    }
+
+    // ───────────────────────────── 音乐 ─────────────────────────────
+
+    private static readonly Brush HoverFill = Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF)));
+    private static readonly Brush PressFill = Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF)));
+
+    // 行悬停给一层很淡的底色（圆角，不画任何分隔线），让「能点」这件事看得见
+    private static void AddHover(Grid g)
+    {
+        var bg = new Border { CornerRadius = new CornerRadius(14), Margin = new Thickness(-8, 2, -8, 2), Background = Brushes.Transparent, IsHitTestVisible = false };
+        Grid.SetColumnSpan(bg, Math.Max(1, g.ColumnDefinitions.Count));
+        g.Children.Insert(0, bg);
+        g.MouseEnter += (_, _) => bg.Background = HoverFill;
+        g.MouseLeave += (_, _) => bg.Background = Brushes.Transparent;
+        g.PreviewMouseLeftButtonDown += (_, _) => bg.Background = PressFill;
+    }
+
+    private static FrameworkElement ArtTile(MediaState m, double size, double radius)
+    {
+        if (m.Art == null) return Tile("music", size, radius);
+        return new Border
+        {
+            Width = size, Height = size, CornerRadius = new CornerRadius(radius),
+            Background = new ImageBrush(m.Art) { Stretch = Stretch.UniformToFill },
+        };
+    }
+
+    private void CompactMusic(MediaState m)
+    {
+        _compact.Height = CompactH;
+        _compact.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _compact.ColumnDefinitions.Add(new ColumnDefinition());
+        _compact.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var tile = ArtTile(m, 24, 6);
+        tile.Margin = new Thickness(7, 0, 0, 0);
+        tile.VerticalAlignment = VerticalAlignment.Center;
+        _compact.Children.Add(tile);
+        var title = new TextBlock
+        {
+            FontFamily = Theme.Text, FontSize = 13, VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(10, 0, 10, 1),
+        };
+        title.Inlines.Add(new Run(m.Title) { Foreground = Theme.Primary, FontWeight = FontWeights.SemiBold });
+        if (m.Artist.Length > 0) title.Inlines.Add(new Run("  " + m.Artist) { Foreground = Theme.Secondary, FontWeight = FontWeights.Medium });
+        Grid.SetColumn(title, 1);
+        _compact.Children.Add(title);
+        var bars = Bars(14);
+        bars.Margin = new Thickness(0, 0, 14, 0);
+        bars.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(bars, 2);
+        _compact.Children.Add(bars);
+        var textW = MeasureText(m.Title, 13, FontWeights.SemiBold) + (m.Artist.Length > 0 ? MeasureText("  " + m.Artist, 13, FontWeights.Medium) : 0);
+        _compactW = Math.Clamp(7 + 24 + 10 + Math.Min(textW, 260) + 10 + 14 + 14, 200, 400);
+        _compact.Width = _compactW;
+        Place(_compact, _compactW);
+        if (_mode == Mode.Compact) _w.Target = _compactW;
+    }
+
+    // 三根跳动的频谱条：逐格动画、10 fps，和转圈指示器一样几乎不耗渲染
+    private static FrameworkElement Bars(double h)
+    {
+        var sp = new StackPanel { Orientation = Orientation.Horizontal, Height = h };
+        double[][] seq = [[0.35, 0.9, 0.55, 1, 0.4, 0.75], [0.8, 0.4, 1, 0.5, 0.9, 0.3], [0.5, 1, 0.3, 0.7, 0.45, 0.95]];
+        for (var i = 0; i < 3; i++)
+        {
+            var st = new ScaleTransform(1, seq[i][0]);
+            var r = new Rectangle { Width = 3, Height = h, RadiusX = 1.5, RadiusY = 1.5, Fill = Theme.Red, Margin = new Thickness(i == 0 ? 0 : 2.5, 0, 0, 0), RenderTransform = st, RenderTransformOrigin = new Point(0.5, 1) };
+            var a = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromSeconds(1.2), RepeatBehavior = RepeatBehavior.Forever };
+            for (var k = 0; k < 6; k++) a.KeyFrames.Add(new LinearDoubleKeyFrame(seq[i][k], KeyTime.FromTimeSpan(TimeSpan.FromSeconds(k * 0.2))));
+            Timeline.SetDesiredFrameRate(a, 12);
+            st.BeginAnimation(ScaleTransform.ScaleYProperty, a);
+            sp.Children.Add(r);
+        }
+        return sp;
+    }
+
+    private FrameworkElement MusicCard(MediaState m)
+    {
+        var g = new Grid { Height = 74, Background = Brushes.Transparent, Margin = new Thickness(0, 0, 0, 4) };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var art = ArtTile(m, 48, 11);
+        art.VerticalAlignment = VerticalAlignment.Center;
+        g.Children.Add(art);
+
+        var mid = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 10, 0) };
+        var t = Txt(14, FontWeights.SemiBold, Theme.Primary);
+        t.Text = m.Title;
+        mid.Children.Add(t);
+        var sub = Txt(12.5, FontWeights.Normal, Theme.Secondary);
+        sub.Text = m.Artist.Length > 0 ? $"{m.Artist} · {m.App}" : m.App;
+        sub.Margin = new Thickness(0, 2, 0, 0);
+        mid.Children.Add(sub);
+        if (m.Duration > TimeSpan.FromSeconds(1))
+        {
+            var line = new Grid { Margin = new Thickness(0, 7, 0, 0) };
+            line.ColumnDefinitions.Add(new ColumnDefinition());
+            line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var track = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = Theme.Fill, VerticalAlignment = VerticalAlignment.Center };
+            var fill = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = Theme.Primary, HorizontalAlignment = HorizontalAlignment.Left, Width = 3 };
+            track.Child = fill;
+            track.SizeChanged += (_, _) => UpdateMediaProgress();
+            line.Children.Add(track);
+            var time = Txt(10.5, FontWeights.Medium, Theme.Tertiary);
+            time.Margin = new Thickness(8, 0, 0, 0);
+            Grid.SetColumn(time, 1);
+            line.Children.Add(time);
+            mid.Children.Add(line);
+            _mediaFill = fill; _mediaTime = time;
+        }
+        Grid.SetColumn(mid, 1);
+        g.Children.Add(mid);
+
+        var ctl = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        ctl.Children.Add(MediaButton("\uE892", 15, () => Media?.Previous()));
+        ctl.Children.Add(MediaButton(m.Playing ? "\uE769" : "\uE768", 19, () => Media?.Toggle()));
+        ctl.Children.Add(MediaButton("\uE893", 15, () => Media?.Next()));
+        Grid.SetColumn(ctl, 2);
+        g.Children.Add(ctl);
+
+        g.Cursor = Cursors.Hand;
+        AddHover(g);
+        g.MouseLeftButtonUp += (_, e) => { e.Handled = true; Launcher.Open(m.AppSource == "music" ? "music" : m.AppSource); };
+        UpdateMediaProgress();
+        return g;
+    }
+
+    private static FrameworkElement MediaButton(string glyph, double size, Action act)
+    {
+        var b = new Border { Width = 34, Height = 34, CornerRadius = new CornerRadius(17), Background = Brushes.Transparent, Cursor = Cursors.Hand };
+        var tb = Glyph(glyph, size, Theme.Primary);
+        tb.HorizontalAlignment = HorizontalAlignment.Center;
+        b.Child = tb;
+        b.MouseEnter += (_, _) => b.Background = HoverFill;
+        b.MouseLeave += (_, _) => b.Background = Brushes.Transparent;
+        b.MouseLeftButtonDown += (_, e) => { b.Background = PressFill; e.Handled = true; };
+        b.MouseLeftButtonUp += (_, e) => { e.Handled = true; b.Background = HoverFill; act(); };
+        return b;
+    }
+
+    private void UpdateMediaProgress()
+    {
+        if (_mediaFill == null || Media?.Current is not { } m || m.Duration <= TimeSpan.Zero) return;
+        var pos = Media.LivePosition();
+        if (_mediaFill.Parent is FrameworkElement track && track.ActualWidth > 0)
+            _mediaFill.Width = Math.Max(3, track.ActualWidth * Math.Clamp(pos.TotalSeconds / m.Duration.TotalSeconds, 0, 1));
+        if (_mediaTime != null) _mediaTime.Text = $"{Fmt(pos)} / {Fmt(m.Duration)}";
+    }
+
+    private static string Fmt(TimeSpan t) => t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss");
+
+    // ───────────────────────────── 天气详情 ─────────────────────────────
+
+    private FrameworkElement WeatherStrip()
+    {
+        var x = _wx!;
+        var w = x.Now;
+        var sp = new StackPanel { Margin = new Thickness(0, 4, 0, 10) };
+
+        var facts = Txt(12, FontWeights.Medium, Theme.Secondary);
+        facts.Text = $"湿度 {w.Humidity:0}%   {x.WindDir} {w.WindSpeed:0} km/h   降水概率 {x.RainChance}%   紫外线 {x.Uv:0}   日出 {x.Sunrise}  日落 {x.Sunset}";
+        facts.Margin = new Thickness(2, 0, 0, 10);
+        sp.Children.Add(facts);
+
+        var cells = new System.Windows.Controls.Primitives.UniformGrid { Rows = 1 };
+        foreach (var h in x.Hours.Take(5))
+            cells.Children.Add(WeatherCell(h.At.Date == DateTime.Today ? h.At.ToString("H时") : "明" + h.At.ToString("H时"), h.Code, $"{h.Temp:0}°", h.Rain >= 30 ? $"{h.Rain}%" : null, Theme.IsNight(h.At)));
+        if (x.TomorrowHigh != 0 || x.TomorrowLow != 0)
+            cells.Children.Add(WeatherCell("明天", x.TomorrowCode, $"{x.TomorrowLow:0}°/{x.TomorrowHigh:0}°", x.TomorrowRain >= 30 ? $"{x.TomorrowRain}%" : null));
+        sp.Children.Add(cells);
+        return sp;
+    }
+
+    private static FrameworkElement WeatherCell(string label, int code, string temp, string? rain, bool night = false)
+    {
+        var c = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center };
+        var l = Txt(11, FontWeights.Medium, Theme.Tertiary);
+        l.Text = label;
+        l.HorizontalAlignment = HorizontalAlignment.Center;
+        c.Children.Add(l);
+        var g = WxGlyph(Theme.WeatherGlyph(code, night), 16, Theme.Primary);
+        g.HorizontalAlignment = HorizontalAlignment.Center;
+        g.Margin = new Thickness(0, 5, 0, 4);
+        c.Children.Add(g);
+        var t = Txt(12.5, FontWeights.SemiBold, Theme.Primary);
+        t.Text = temp;
+        t.HorizontalAlignment = HorizontalAlignment.Center;
+        c.Children.Add(t);
+        var r = Txt(10.5, FontWeights.Medium, Theme.Blue);
+        r.Text = rain ?? " ";
+        r.HorizontalAlignment = HorizontalAlignment.Center;
+        c.Children.Add(r);
+        return c;
     }
 
     // ───────────────────────────── 小部件 ─────────────────────────────
@@ -740,6 +971,11 @@ public sealed class IslandWindow : Window
     {
         FontFamily = Theme.Text, FontSize = size, FontWeight = weight, Foreground = fg,
         TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap,
+    };
+
+    private static TextBlock WxGlyph(string g, double size, Brush fg) => new()
+    {
+        Text = g, FontFamily = Theme.Symbols, FontSize = size, Foreground = fg, VerticalAlignment = VerticalAlignment.Center,
     };
 
     private static TextBlock Glyph(string g, double size, Brush fg) => new()

@@ -39,6 +39,7 @@ internal static class Theme
         "qq" => (Color.FromRgb(0x12, 0xB7, 0xF5), "\uE8BD", null),
         "timer" => (Color.FromRgb(0xFF, 0x9F, 0x0A), "\uE823", null),
         "todo" => (Color.FromRgb(0xFF, 0x45, 0x3A), "\uE73E", null),
+        "music" => (Color.FromRgb(0xFA, 0x2D, 0x48), "\uE8D6", null),
         _ => (Color.FromRgb(0x5E, 0x5C, 0xE6), "\uE946", null),
     };
 
@@ -55,6 +56,7 @@ internal static class Theme
         "qq" => "QQ",
         "timer" => "计时",
         "todo" => "待办",
+        "music" => "音乐",
         _ => "通知",
     };
 
@@ -68,11 +70,22 @@ internal static class Theme
         _ => "",
     };
 
-    public static string WeatherGlyph(int code) => code switch
+    public static readonly FontFamily Symbols = new("Segoe UI Symbol");
+
+    /// <summary>Fluent 图标字体里没有天气图标，用 Segoe UI Symbol 的单色天气符号（WPF 不渲染彩色 emoji，单色正好统一）。</summary>
+    public static string WeatherGlyph(int code, bool night = false) => code switch
     {
-        0 or 1 => "\uE706",
-        _ => "\uE753",
+        0 or 1 => night ? "\u263E" : "\u2600",
+        2 => night ? "\u2601" : "\u26C5",
+        3 => "\u2601",
+        45 or 48 => "\u2601",
+        >= 51 and <= 67 or >= 80 and <= 82 => "\u2614",
+        >= 71 and <= 77 or 85 or 86 => "\u2744",
+        >= 95 => "\u26C8",
+        _ => "\u2601",
     };
+
+    public static bool IsNight(DateTime t) => t.Hour < 7 || t.Hour >= 19;
 
     public static string Ago(DateTime t)
     {
