@@ -55,7 +55,7 @@ public sealed partial class IslandWindow : Window
     private readonly Spring _expOp = new(0) { Response = 0.34, DampingRatio = 1, Epsilon = 0.004 };
     private readonly Spring _bubbleOp = new(0) { Response = 0.36, DampingRatio = 0.9, Epsilon = 0.004 };
     private readonly Spring _show = new(1) { Response = 0.40, DampingRatio = 1, Epsilon = 0.004 };
-    private Spring[] Springs => [_w, _h, _r, _idleOp, _compactOp, _expOp, _bubbleOp, _show];
+    private Spring[] Springs => [_w, _h, _r, _idleOp, _compactOp, _expOp, _bubbleOp, _show, _pageX];
 
     private Mode _mode = Mode.Idle;
     private bool _animating, _clickThrough = true, _pinned, _hidden;
@@ -365,6 +365,7 @@ public sealed partial class IslandWindow : Window
 
     private void ApplyFrame()
     {
+        ApplyPageOffset();
         var w = Math.Max(20, _w.Value);
         var h = Math.Max(20, _h.Value);
         var r = Math.Clamp(_r.Value, 4, h / 2);
@@ -561,6 +562,7 @@ public sealed partial class IslandWindow : Window
         _mediaFill = null; _mediaTime = null;
         BuildPage(stack);
         _expStack = stack;
+        ApplyPageOffset();
         _expanded.Children.Add(stack);
         stack.Measure(new Size(ExpandedW, double.PositiveInfinity));
         _expandedH = Math.Ceiling(stack.DesiredSize.Height + 14 + 10);

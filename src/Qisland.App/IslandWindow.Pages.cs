@@ -47,42 +47,89 @@ public sealed partial class IslandWindow
 
     // ───────────── 页面切换 ─────────────
 
+    // 翻页偏移由一根弹簧驱动：手指拖动时直接跟手（带橡皮筋阻尼），松手后弹簧带轻微回弹归位
+    private readonly Spring _pageX = new(0) { Response = 0.46, DampingRatio = 0.74, Epsilon = 0.2 };
+    private readonly TranslateTransform _pageTT = new();
     private double _scrollAcc;
     private DateTime _scrollLast = DateTime.MinValue, _scrollSwitched = DateTime.MinValue;
     private bool _scrollLocked;
+    private System.Windows.Threading.DispatcherTimer? _gestureEnd;
+
+    private void ApplyPageOffset()
+    {
+        if (_expStack == null) return;
+        if (_expStack.RenderTransform != _pageTT) _expStack.RenderTransform = _pageTT;
+        var x = _pageX.Value;
+        _pageTT.X = x;
+        _expStack.Opacity = 1 - Math.Min(0.55, Math.Abs(x) / 260);
+    }
+
+    /// <summary>橡皮筋：拉得越远阻力越大，永远拉不过 limit。</summary>
+    private static double Rubber(double x, double limit) => Math.Sign(x) * limit * (1 - 1 / (Math.Abs(x) / limit + 1));
+
+    private bool AtEdge(int dir) => (int)_page + dir < 0 || (int)_page + dir > 2;
 
     /// <summary>
     /// 滚轮和触控板统一走这里，delta 为正表示往下一页。
-    /// 触控板一次滑动会连发几十个小增量，还带惯性：累计到阈值翻一页，然后锁住直到这次手势停下，
-    /// 保证"滑一下 = 翻一页"；鼠标滚轮每格 120，直接翻。
+    /// 鼠标滚轮（每格 120）直接翻页；触控板是连续的小增量：内容先跟着手指被"拉"过去，
+    /// 拉过阈值才翻，没过阈值松手就弹回原位；一次手势（含惯性）只翻一页。
     /// </summary>
     private void OnScroll(int delta)
     {
         var now = DateTime.Now;
         var quiet = (now - _scrollLast).TotalMilliseconds > 200;
         _scrollLast = now;
-        if (quiet) { _scrollLocked = false; _scrollAcc = 0; }
+        RestartGestureEnd();
         if (_mode != Mode.Expanded) { SetMode(Mode.Expanded); _scrollLocked = true; return; }
-        if (_scrollLocked)
+
+        var discrete = Math.Abs(delta) >= 120 && delta % 120 == 0;
+        if (discrete)
         {
-            // 鼠标滚轮一格一格拨时，隔开一点就允许连续翻
-            if (Math.Abs(delta) >= 120 && (now - _scrollSwitched).TotalMilliseconds > 420) { _scrollLocked = false; _scrollAcc = 0; }
-            else return;
+            if ((now - _scrollSwitched).TotalMilliseconds < 380) return;
+            _scrollSwitched = now;
+            _scrollAcc = 0;
+            Step(delta > 0 ? 1 : -1);
+            return;
         }
+
+        if (quiet) { _scrollLocked = false; _scrollAcc = 0; }
+        if (_scrollLocked) return;
         _scrollAcc += delta;
-        if (Math.Abs(_scrollAcc) < 40) return;
         var dir = _scrollAcc > 0 ? 1 : -1;
-        _scrollAcc = 0;
-        _scrollLocked = true;
-        _scrollSwitched = now;
-        Step(dir);
+        var edge = AtEdge(dir);
+        _pageX.Snap(Rubber(-_scrollAcc * 0.55, edge ? 46 : 150));
+        ApplyPageOffset();
+        if (!edge && Math.Abs(_scrollAcc) >= 190)
+        {
+            _scrollLocked = true;
+            _scrollAcc = 0;
+            _scrollSwitched = now;
+            GoTo((Page)((int)_page + dir), dir);
+        }
+    }
+
+    private void RestartGestureEnd()
+    {
+        if (_gestureEnd == null)
+        {
+            _gestureEnd = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(140) };
+            _gestureEnd.Tick += (_, _) =>
+            {
+                _gestureEnd!.Stop();
+                // 手势结束还没翻页：弹回原位
+                if (!_scrollLocked && Math.Abs(_pageX.Value) > 0.5) { _pageX.Target = 0; Kick(); }
+                _scrollLocked = false;
+                _scrollAcc = 0;
+            };
+        }
+        _gestureEnd.Stop();
+        _gestureEnd.Start();
     }
 
     private void Step(int dir)
     {
-        var next = (int)_page + dir;
-        if (next < 0 || next > 2) { Nudge(-dir); return; }
-        GoTo((Page)next, dir);
+        if (AtEdge(dir)) { Nudge(dir); return; }
+        GoTo((Page)((int)_page + dir), dir);
     }
 
     // 水平滚动（触控板左右滑、鼠标侧滚轮）WPF 不发事件，从窗口消息里接
@@ -98,10 +145,34 @@ public sealed partial class IslandWindow
         return IntPtr.Zero;
     }
 
+    private void GoTo(Page p, int dir)
+    {
+        if (p == _page) return;
+        _page = p;
+        RebuildExpanded();
+        if (p == Page.Widgets) RefreshWidgets();
+        // 新页从运动方向那一侧滑进来，弹簧收尾时会轻轻过冲一下再停住
+        _pageX.Value = dir * 110;
+        _pageX.Velocity = 0;
+        _pageX.Target = 0;
+        ApplyPageOffset();
+        SetMode(Mode.Expanded);
+        Kick();
+    }
+
+    // 到头了：给弹簧一个冲量，顶一下再弹回来
+    private void Nudge(int dir)
+    {
+        _pageX.Target = 0;
+        _pageX.Velocity = -dir * 520;
+        Kick();
+    }
+
     // ───────────── 鼠标按住左右拖动翻页 ─────────────
 
     private Point? _swipeStart;
-    private double _swipeDx;
+    private double _swipeDx, _swipeV;
+    private DateTime _swipeT;
     private bool _swiping;
 
     private void OnSwipeMove(object sender, MouseEventArgs e)
@@ -113,18 +184,17 @@ public sealed partial class IslandWindow
         {
             if (Math.Abs(dx) < 10 || Math.Abs(dx) < Math.Abs(p.Y - s0.Y) * 1.5) return;
             _swiping = true;
+            _swipeT = DateTime.Now;
             _root.CaptureMouse();
         }
+        var now = DateTime.Now;
+        var dt = Math.Max(0.004, (now - _swipeT).TotalSeconds);
+        _swipeV = 0.7 * _swipeV + 0.3 * ((dx - _swipeDx) / dt);
+        _swipeT = now;
         _swipeDx = dx;
-        if (_expStack != null)
-        {
-            // 到头时阻尼更大，像拉橡皮筋
-            var edge = ((int)_page == 0 && dx > 0) || ((int)_page == 2 && dx < 0);
-            var tt = _expStack.RenderTransform as TranslateTransform ?? new TranslateTransform();
-            tt.BeginAnimation(TranslateTransform.XProperty, null);
-            tt.X = dx * (edge ? 0.2 : 0.55);
-            _expStack.RenderTransform = tt;
-        }
+        var edge = AtEdge(dx < 0 ? 1 : -1);
+        _pageX.Snap(Rubber(dx, edge ? 46 : 170));
+        ApplyPageOffset();
         e.Handled = true;
     }
 
@@ -138,55 +208,25 @@ public sealed partial class IslandWindow
     private void EndSwipe()
     {
         var dx = _swipeDx;
+        var v = _swipeV;
         _swiping = false;
         _swipeStart = null;
-        _swipeDx = 0;
+        _swipeDx = 0; _swipeV = 0;
         if (_root.IsMouseCaptured) _root.ReleaseMouseCapture();
         var dir = dx < 0 ? 1 : -1;
-        var next = (int)_page + dir;
-        if (Math.Abs(dx) > 50 && next >= 0 && next <= 2) { GoTo((Page)next, dir); return; }
-        if (_expStack?.RenderTransform is TranslateTransform tt)
-            tt.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(tt.X, 0, TimeSpan.FromMilliseconds(320)) { EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.25 } });
-    }
-
-    private void GoTo(Page p, int dir)
-    {
-        if (p == _page) return;
-        _page = p;
-        RebuildExpanded();
-        if (p == Page.Widgets) RefreshWidgets();
-        SlideIn(dir);
-        SetMode(Mode.Expanded);
-    }
-
-    private void SlideIn(int dir)
-    {
-        if (_expStack == null) return;
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        var tt = new TranslateTransform(34 * dir, 0);
-        _expStack.RenderTransform = tt;
-        tt.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(34 * dir, 0, TimeSpan.FromMilliseconds(340)) { EasingFunction = ease });
-        _expStack.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(240)) { EasingFunction = ease });
-    }
-
-    // 到头了就轻轻顶一下再弹回来
-    private void Nudge(int dir)
-    {
-        if (_expStack == null) return;
-        var tt = new TranslateTransform();
-        _expStack.RenderTransform = tt;
-        var a = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromMilliseconds(300) };
-        a.KeyFrames.Add(new EasingDoubleKeyFrame(10 * dir, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(90)), new CubicEase { EasingMode = EasingMode.EaseOut }));
-        a.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(300)), new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.3 }));
-        tt.BeginAnimation(TranslateTransform.XProperty, a);
+        // 拖得够远，或者甩得够快，都算翻页
+        if (!AtEdge(dir) && (Math.Abs(dx) > 70 || (Math.Abs(v) > 600 && Math.Sign(v) == -dir && Math.Abs(dx) > 20))) { GoTo((Page)((int)_page + dir), dir); return; }
+        _pageX.Velocity = AtEdge(dir) ? 0 : v * 0.3;
+        _pageX.Target = 0;
+        Kick();
     }
 
     /// <summary>展开时内容一行行浮上来（NotchNook 那种），而不是整块一起出现。</summary>
     private void StaggerIn()
     {
         if (_expStack == null) return;
-        _expStack.RenderTransform = null;
-        _expStack.BeginAnimation(OpacityProperty, null);
+        _pageX.Snap(0);
+        ApplyPageOffset();
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
         var i = 0;
         foreach (UIElement c in _expStack.Children)
@@ -533,7 +573,7 @@ public sealed partial class IslandWindow
             var wasOpen = _mode == Mode.Expanded;
             _page = Page.Shelf;
             RebuildExpanded();
-            if (wasOpen) SlideIn(1);
+            if (wasOpen) { _pageX.Value = 110; _pageX.Velocity = 0; _pageX.Target = 0; ApplyPageOffset(); Kick(); }
             SetMode(Mode.Expanded);
         }
         HighlightDrop(true);
