@@ -26,6 +26,8 @@ public static class AgentEventParser
         var source = FirstString(root, "source", "agent", "provider");
         var hook = FirstString(root, "hook_event_name", "hookEventName");
         var codexType = FirstString(root, "type");
+        if (string.IsNullOrEmpty(source) && !string.IsNullOrEmpty(defaultSource) && !string.IsNullOrEmpty(hook))
+            source = defaultSource; // 走专用入口的 hook（如 /v1/agent/codex），来源以入口为准
         if (string.IsNullOrEmpty(source))
         {
             if (!string.IsNullOrEmpty(hook)) source = "claude-code";
@@ -36,12 +38,21 @@ public static class AgentEventParser
         source = NormalizeSource(source);
         if (source is not ("claude-code" or "codex" or "deepseek-harness")) return null;
 
+        // 会话刚打开、模型请求这类事件不代表在干活，不上岛
+        if (hook is "SessionStart" or "PreModelRequest" or "PostModelRequest" or "PreCompact" or "PostCompact") return null;
         var kind = Classify(source, hook, codexType, root);
         var session = FirstString(root, "session_id", "sessionId", "thread-id", "thread_id", "turn-id", "id");
         if (string.IsNullOrEmpty(session)) session = "default";
         var tool = FirstString(root, "tool_name", "toolName", "command");
+        if (root.TryGetProperty("tool_input", out var ti) && ti.ValueKind == JsonValueKind.Object)
+        {
+            var cmd = FirstString(ti, "command", "description", "file_path", "path");
+            if (cmd.Length > 0) tool = tool.Length > 0 ? tool + " · " + OneLine(cmd) : OneLine(cmd);
+        }
         var detail = FirstString(root, "detail", "message", "last-assistant-message", "last_assistant_message", "error", "reason");
+        if (string.IsNullOrEmpty(detail) && hook == "UserPromptSubmit") detail = OneLine(FirstString(root, "prompt"));
         if (string.IsNullOrEmpty(detail) && !string.IsNullOrEmpty(tool)) detail = tool;
+        detail = OneLine(detail);
         var cwd = FirstString(root, "cwd");
         if (!string.IsNullOrEmpty(cwd))
         {
@@ -69,7 +80,7 @@ public static class AgentEventParser
             ActivityKind.WaitingApproval => 4 * 60 * 60,
             ActivityKind.Running => 4 * 60 * 60,
             ActivityKind.Error => 25,
-            ActivityKind.Done => 8,
+            ActivityKind.Done => hook is "SessionEnd" ? 2 : 45,
             _ => 30,
         };
 
@@ -113,13 +124,13 @@ public static class AgentEventParser
         if (status is "done" or "completed" or "complete" or "idle" or "stopped") return ActivityKind.Done;
         if (status is "running" or "working" or "busy") return ActivityKind.Running;
 
-        if (source == "claude-code")
+        if (source == "claude-code" || !string.IsNullOrEmpty(hook))
         {
             var name = hook.Trim();
             if (name.Equals("PermissionRequest", StringComparison.OrdinalIgnoreCase)) return ActivityKind.WaitingApproval;
             if (name.Equals("Notification", StringComparison.OrdinalIgnoreCase)) return ActivityKind.WaitingApproval;
             if (name.Contains("Failure", StringComparison.OrdinalIgnoreCase) || HasError(root)) return ActivityKind.Error;
-            if (name is "Stop" or "SessionEnd" or "SubagentStop" or "StopFailure") return ActivityKind.Done;
+            if (name is "Stop" or "SessionEnd" or "StopFailure" or "Interrupt") return ActivityKind.Done;
             return ActivityKind.Running;
         }
 
@@ -191,6 +202,9 @@ public static class AgentEventParser
         number = value.GetDouble();
         return true;
     }
+
+    private static string OneLine(string text)
+        => string.Join(' ', text.Split(['\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries)).Trim();
 
     private static string Trim(string text, int max)
         => text.Length <= max ? text : text[..(max - 1)] + "…";

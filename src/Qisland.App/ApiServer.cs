@@ -120,6 +120,13 @@ public sealed class ApiServer : IDisposable
             return (200, $"{{\"ok\":true,\"id\":{JsonSerializer.Serialize(d.Id)}}}");
         }
 
+        if (method == "POST" && path.StartsWith("/v1/agent/", StringComparison.Ordinal))
+        {
+            var a = AgentEventParser.Parse(body, path["/v1/agent/".Length..]);
+            if (a is not null) _post(() => _store.Upsert(a));
+            return (200, "{\"ok\":true}");
+        }
+
         if (method == "DELETE" && path.StartsWith("/v1/island/push/", StringComparison.Ordinal))
         {
             var id = Uri.UnescapeDataString(path["/v1/island/push/".Length..]);

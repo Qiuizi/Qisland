@@ -33,6 +33,7 @@ public sealed class App : Application
     [STAThread]
     public static int Main(string[] args)
     {
+        if (args.Length >= 2 && args[0] == "hook") return HookRelay.Run(args[1]);
         using var mutex = new Mutex(true, @"Local\Qisland.Island", out var first);
         if (!first) return 0;
         var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
