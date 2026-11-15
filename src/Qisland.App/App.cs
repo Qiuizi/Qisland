@@ -28,6 +28,8 @@ public sealed class App : Application
     private Countdowns? _countdown;
     private ClassWatcher? _classes;
     private LyricsService? _lyrics;
+    private HomeworkHub? _homework;
+    private YuketangService? _ykt;
     private VolumeWatcher? _volume;
     private SystemWatch _sys = null!;
     private Updater _upd = null!;
@@ -136,6 +138,13 @@ public sealed class App : Application
         catch (Exception ex) { Log("倒计时: " + ex.Message); }
         try { _classes = new ClassWatcher(_store); _window.Classes = _classes; _classes.Changed += _window.OnCountdownChanged; _window.OnCountdownChanged(); }
         catch (Exception ex) { Log("课表: " + ex.Message); }
+        try
+        {
+            _homework = new HomeworkHub(_store); _window.Homework = _homework; _homework.Changed += _window.OnHomeworkChanged;
+            _ykt = new YuketangService(_homework, _store);
+            _homework.Tick(); _window.OnHomeworkChanged();
+        }
+        catch (Exception ex) { Log("作业: " + ex.Message); }
         try { _todo = new TodoFile(_store); _window.Todo = _todo; _todo.Changed += () => _window.SetTodos(_todo.Open); _window.SetTodos(_todo.Open); }
         catch (Exception ex) { Log("待办: " + ex.Message); }
         _toasts = new ToastMirror(_store);
@@ -158,9 +167,31 @@ public sealed class App : Application
             if (_tickN % 5 == 0) _store.Expire();
             if (DateTime.Today != _day) { _day = DateTime.Today; _countdown?.Refresh(); }
             if (_tickN % 30 == 0) { try { _classes?.Tick(); } catch (Exception ex) { Log("课表: " + ex.Message); } }
+            if (_tickN % 10 == 0) { try { _ykt?.Tick(); } catch (Exception ex) { Log("雨课堂: " + ex.Message); } }
+            if (_tickN % 60 == 0) { try { _homework?.Tick(); _window.OnHomeworkChanged(); } catch (Exception ex) { Log("作业: " + ex.Message); } }
         };
         _tick.Start();
         Log("providers started");
+    }
+
+    private void YuketangLoginOrOut()
+    {
+        if (_ykt == null) return;
+        if (_ykt.LoggedIn && !_ykt.Expired)
+        {
+            if (System.Windows.MessageBox.Show($"退出雨课堂账号 {_ykt.UserName}？本机保存的登录状态会被删除。", "Qisland", MessageBoxButton.OKCancel) == MessageBoxResult.OK) _ykt.Logout();
+            return;
+        }
+        var ykt = _ykt;
+        var w = new QrLoginWindow("雨课堂扫码登录", "用微信扫一扫，登录后只读取各课程的作业和截止时间。",
+            async () => { var qr = await YuketangService.RequestQr(); return (qr.Content, ct => ykt.WaitLogin(qr, ct)); });
+        w.Closed += (_, _) =>
+        {
+            if (!w.Success) return;
+            _store.Remove("ykt:expired");
+            _store.Upsert(new IslandActivity("ykt:login", HomeworkHub.Source, "雨课堂已连接", $"{ykt.UserName} · 正在读取作业…", ActivityKind.Done, 60, DurationSeconds: 5));
+        };
+        w.Show();
     }
 
     private void ImportTimetable()
@@ -263,6 +294,20 @@ public sealed class App : Application
         };
         menu.Items.Add(look);
         menu.Items.Add("导入课表（.ics）…", null, (_, _) => Dispatcher.BeginInvoke(ImportTimetable));
+        var hwMenu = new System.Windows.Forms.ToolStripMenuItem("作业 DDL");
+        var yktLogin = new System.Windows.Forms.ToolStripMenuItem("雨课堂：扫码登录…");
+        yktLogin.Click += (_, _) => Dispatcher.BeginInvoke(YuketangLoginOrOut);
+        var hwRefresh = new System.Windows.Forms.ToolStripMenuItem("立即刷新作业");
+        hwRefresh.Click += (_, _) => Dispatcher.BeginInvoke(() => _ykt?.RefreshNow());
+        hwMenu.DropDownItems.Add(yktLogin);
+        hwMenu.DropDownItems.Add(hwRefresh);
+        hwMenu.DropDownOpening += (_, _) =>
+        {
+            yktLogin.Text = _ykt is { LoggedIn: true } y ? (y.Expired ? "雨课堂：登录过期，重新扫码…" : $"雨课堂：已登录 {y.UserName}（点此退出）") : "雨课堂：扫码登录…";
+            hwRefresh.Enabled = _ykt?.LoggedIn == true;
+            hwRefresh.Text = _ykt?.LastOk is { } t ? $"立即刷新作业（上次 {t:HH:mm}）" : "立即刷新作业";
+        };
+        menu.Items.Add(hwMenu);
         menu.Items.Add("编辑倒计时", null, (_, _) => Process.Start(new ProcessStartInfo("notepad.exe", "\"" + Countdowns.PathName + "\"") { UseShellExecute = true }));
         var lyr = new System.Windows.Forms.ToolStripMenuItem("显示歌词") { CheckOnClick = true, Checked = LyricsService.Enabled, ToolTipText = "播放音乐时胶囊里滚动显示当前这句歌词（网易云 / LRCLIB）" };
         lyr.CheckedChanged += (_, _) => Dispatcher.BeginInvoke(() => { LyricsService.Enabled = lyr.Checked; _lyrics?.OnTrack(null); _lyrics?.OnTrack(_media?.Current); });

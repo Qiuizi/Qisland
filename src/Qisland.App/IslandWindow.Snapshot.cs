@@ -86,6 +86,17 @@ public sealed partial class IslandWindow
         await Shot(dir, "13-lyrics-compact", Mode.Compact);
         _page = Page.Home; _expDirty = true; _pageCache.Clear();
         await Shot(dir, "14-lyrics-home", Mode.Expanded);
+        // 作业 DDL：演示数据
+        Media = null;
+        foreach (var a in _store.Ranked().ToList()) _store.Remove(a.Id);
+        var realHw = Homework;
+        Homework = HomeworkHub.Demo(_store);
+        OnHomeworkChanged();
+        _page = Page.Home; _expDirty = true; _pageCache.Clear();
+        await Shot(dir, "15-homework-home", Mode.Expanded);
+        SetMode(Mode.Idle);
+        await Shot(dir, "16-homework-idle", Mode.Idle);
+        Homework = realHw;
         App.Log("snapshot 完成: " + dir);
     }
 
