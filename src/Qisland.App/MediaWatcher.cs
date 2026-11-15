@@ -138,9 +138,12 @@ public sealed class MediaWatcher
     }
     private volatile bool _again;
 
+    // 只有界面上要换的东西变了才算变化。进度不算：浏览器每隔几秒就推一次时间轴，
+    // 以前每推一次就整块重建展开视图，正是播放视频时一顿一顿、闪一下的原因。进度条每秒自己按 LivePosition 走。
     private static bool Same(MediaState? a, MediaState? b) =>
         a is null ? b is null : b is not null && a.Title == b.Title && a.Artist == b.Artist && a.Playing == b.Playing
-            && ReferenceEquals(a.Art, b.Art) && Math.Abs((a.Position - b.Position).TotalSeconds) < 1.5 && a.Duration == b.Duration;
+            && ReferenceEquals(a.Art, b.Art) && a.Duration == b.Duration && a.App == b.App
+            && a.Video == b.Video && a.Sessions == b.Sessions && a.CanSeek == b.CanSeek;
 
     private async Task<MediaState?> Read(GlobalSystemMediaTransportControlsSession? s)
     {

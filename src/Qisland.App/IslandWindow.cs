@@ -357,6 +357,7 @@ public sealed partial class IslandWindow : Window
         {
             CompositionTarget.Rendering -= OnRendering;
             _animating = false;
+            ApplyFrame(); // 停稳后把窗口区域收回到最终大小
             App.Log($"anim → {_mode}: {_frames} 帧, 掉帧 {_slowFrames}, 最长 {_maxDt * 1000:0} ms");
             _frames = 0; _slowFrames = 0; _maxDt = 0;
             if (_mode != Mode.Expanded) App.TrimSoon();
@@ -435,19 +436,41 @@ public sealed partial class IslandWindow : Window
     // 所以玻璃外观不用系统模糊，只用半透明白 + 高光描边 + 顶部反光，窗口始终保持透明扩展。
     private void SetGlass(bool on) { }
 
+    private double _stickW, _stickH, _stickR = 999;
     private (int, int, int, int, int, int) _lastRgn = (-1, -1, -1, -1, -1, -1);
 
     // 窗口形状 = 岛 + 阴影的范围。WS_EX_TRANSPARENT 对非分层窗口不会把点击让给别的程序，
     // 所以用窗口区域把 680×600 的窗口裁到岛本身：区域外的点击、悬停直接落到下面的窗口。
+    //
+    // 关键：每改一次窗口区域，DWM 都要重新合成整块窗口，逐帧改会掉帧、闪烁。
+    // 所以动画期间直接取「当前尺寸」和「目标尺寸」里更大的那个，并按 24 px 取整：
+    // 一次变形只在开始时扩一次、结束后收一次，中间几十帧都不碰区域。
     private void UpdateHitRegion(double left, double w, double h, double r, double bubbleOp, double show)
     {
         if (_hwnd == IntPtr.Zero) return;
         var dpi = VisualTreeHelper.GetDpi(this);
         int P(double v) => (int)Math.Round(v * dpi.DpiScaleX);
+        static double Up(double v) => Math.Ceiling(v / 24) * 24;
         const double side = 16, below = 20;
-        var y0 = TopGap + _rootShift.Y;
-        var key = show < 0.02 ? (0, 0, 0, 0, 0, 0)
-            : (P(left - side), P(Math.Max(0, y0 - side)), P(left + w + side), P(y0 + h + below), P((r + side) * 2), bubbleOp > 0.05 ? P(_bubbleShift.X) : -1);
+        var visible = show >= 0.02 || _show.Target > 0.5;
+        var y0 = TopGap + (_show.Target > 0.5 ? 0 : _rootShift.Y);
+        var bw = Up(Math.Max(w, _w.Target));
+        var bh = Up(Math.Max(h, _h.Target));
+        var bl = (WinW - bw) / 2;
+        var rr = Math.Min(Math.Min(r, _r.Target), bh / 2);
+        if (_animating)
+        {
+            // 动画中区域只扩不缩（半径只减不增），收的那一下留到弹簧停稳之后
+            bw = _stickW = Math.Max(bw, _stickW);
+            bh = _stickH = Math.Max(bh, _stickH);
+            rr = _stickR = Math.Min(rr, _stickR);
+            bl = (WinW - bw) / 2;
+        }
+        else { _stickW = 0; _stickH = 0; _stickR = 999; }
+        var bubble = bubbleOp > 0.05 || _bubbleOp.Target > 0.05;
+        var bubbleX = bl + bw + 8;
+        var key = !visible ? (0, 0, 0, 0, 0, 0)
+            : (P(bl - side), P(Math.Max(0, y0 - side)), P(bl + bw + side), P(y0 + bh + below), P((rr + side) * 2), bubble ? P(bubbleX) : -1);
         if (key == _lastRgn) return;
         _lastRgn = key;
         IntPtr rgn;
@@ -457,7 +480,8 @@ public sealed partial class IslandWindow : Window
             rgn = Native.CreateRoundRectRgn(key.Item1, key.Item2, key.Item3 + 1, key.Item4 + 1, key.Item5, key.Item5);
             if (key.Item6 >= 0)
             {
-                var b = Native.CreateRoundRectRgn(key.Item6 - P(8), key.Item2, key.Item6 + P(CompactH + 8) + 1, P(y0 + CompactH + below) + 1, P(CompactH + 16), P(CompactH + 16));
+                // 气泡贴着岛右侧滑进来：从岛中线到气泡最终位置一次性包住，滑动途中不再改区域
+                var b = Native.CreateRectRgn(P(WinW / 2), key.Item2, key.Item6 + P(CompactH + 8) + 1, P(y0 + CompactH + below) + 1);
                 Native.CombineRgn(rgn, rgn, b, 2);
                 Native.DeleteObject(b);
             }
