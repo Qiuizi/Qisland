@@ -280,7 +280,7 @@ public sealed partial class IslandWindow : Window
     {
         _todos = todos;
         _expDirty = true;
-        if (_mode == Mode.Expanded && !_animating) RebuildExpanded();
+        if (_mode == Mode.Expanded && (!_animating || _page == Page.Todo)) RebuildExpanded();
     }
 
     public void SetWeather(WeatherSnapshot w, WeatherDetail? detail)
@@ -323,7 +323,7 @@ public sealed partial class IslandWindow : Window
         {
             _hoverSince = DateTime.MaxValue;
             if (_outsideSince == DateTime.MinValue) _outsideSince = now;
-            if (_mode == Mode.Expanded && !_pinned && !_swiping && now > _peekUntil && (now - _outsideSince).TotalMilliseconds > 420)
+            if (_mode == Mode.Expanded && !_pinned && !_swiping && !_editing && now > _peekUntil && (now - _outsideSince).TotalMilliseconds > 420)
                 SetMode(DesiredRestMode());
         }
 
@@ -701,22 +701,37 @@ public sealed partial class IslandWindow : Window
         return g;
     }
 
+    // 主页上的待办：点圆圈直接完成，点文字或"还有 N 件"跳到待办页
     private FrameworkElement TodoBlock()
     {
         var sp = new StackPanel { Margin = new Thickness(2, 6, 0, 0) };
-        foreach (var t in _todos.Take(3))
+        var open = Todo?.Items.Where(i => !i.Done).ToList();
+        for (var k = 0; k < Math.Min(3, _todos.Count); k++)
         {
-            var line = new StackPanel { Orientation = Orientation.Horizontal, Height = 24 };
-            line.Children.Add(new Border
+            var it = open != null && k < open.Count ? open[k] : null;
+            var line = new StackPanel { Orientation = Orientation.Horizontal, Height = 24, Background = Brushes.Transparent, Cursor = Cursors.Hand };
+            var dot = new Border
             {
                 Width = 13, Height = 13, CornerRadius = new CornerRadius(6.5), BorderThickness = new Thickness(1.4),
-                BorderBrush = Theme.Tertiary, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0),
-            });
+                BorderBrush = Theme.Tertiary, Background = Brushes.Transparent, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0),
+            };
+            line.Children.Add(dot);
             var tx = Txt(13, FontWeights.Normal, Theme.Primary);
-            tx.Text = t;
+            tx.Text = _todos[k];
             tx.VerticalAlignment = VerticalAlignment.Center;
             tx.MaxWidth = ExpandedW - 70;
             line.Children.Add(tx);
+            dot.MouseLeftButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                if (it == null) return;
+                dot.Background = Theme.Blue; dot.BorderBrush = Theme.Blue;
+                tx.Foreground = Theme.Tertiary; tx.TextDecorations = TextDecorations.Strikethrough;
+                var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(380) };
+                t.Tick += (_, _) => { t.Stop(); Todo?.SetDone(it, true); };
+                t.Start();
+            };
+            line.MouseLeftButtonUp += (_, e) => { if (!e.Handled) { e.Handled = true; GoTo(Page.Todo, 1); } };
             sp.Children.Add(line);
         }
         if (_todos.Count > 3)
@@ -724,6 +739,8 @@ public sealed partial class IslandWindow : Window
             var more = Txt(11.5, FontWeights.Medium, Theme.Tertiary);
             more.Text = $"还有 {_todos.Count - 3} 件待办";
             more.Margin = new Thickness(23, 0, 0, 0);
+            more.Cursor = Cursors.Hand;
+            more.MouseLeftButtonUp += (_, e) => { e.Handled = true; GoTo(Page.Todo, 1); };
             sp.Children.Add(more);
         }
         return sp;
@@ -770,12 +787,14 @@ public sealed partial class IslandWindow : Window
         g.PreviewMouseLeftButtonDown += (_, _) => bg.Background = PressFill;
     }
 
+    // 视频用 16:9 缩略图，音乐用方形封面；没有封面时用来源软件的图标
     private static FrameworkElement ArtTile(MediaState m, double size, double radius)
     {
-        if (m.Art == null) return Tile("music", size, radius);
+        if (m.Art == null) return Tile(m.AppSource, size, radius);
+        var w = m.Video ? Math.Round(size * 16 / 9) : size;
         return new Border
         {
-            Width = size, Height = size, CornerRadius = new CornerRadius(radius),
+            Width = w, Height = size, CornerRadius = new CornerRadius(radius),
             Background = new ImageBrush(m.Art) { Stretch = Stretch.UniformToFill },
         };
     }
@@ -787,6 +806,7 @@ public sealed partial class IslandWindow : Window
         _compact.ColumnDefinitions.Add(new ColumnDefinition());
         _compact.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var tile = ArtTile(m, 24, 6);
+        var tileW = m.Art != null && m.Video ? 43 : 24;
         tile.Margin = new Thickness(7, 0, 0, 0);
         tile.VerticalAlignment = VerticalAlignment.Center;
         _compact.Children.Add(tile);
@@ -805,7 +825,7 @@ public sealed partial class IslandWindow : Window
         Grid.SetColumn(bars, 2);
         _compact.Children.Add(bars);
         var textW = MeasureText(m.Title, 13, FontWeights.SemiBold) + (m.Artist.Length > 0 ? MeasureText("  " + m.Artist, 13, FontWeights.Medium) : 0);
-        _compactW = Math.Clamp(7 + 24 + 10 + Math.Min(textW, 260) + 10 + 14 + 14, 200, 400);
+        _compactW = Math.Clamp(7 + tileW + 10 + Math.Min(textW, 260) + 10 + 14 + 14, 200, 400);
         _compact.Width = _compactW;
         Place(_compact, _compactW);
         if (_mode == Mode.Compact) _w.Target = _compactW;
@@ -843,23 +863,64 @@ public sealed partial class IslandWindow : Window
         var mid = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 10, 0) };
         var t = Txt(14, FontWeights.SemiBold, Theme.Primary);
         t.Text = m.Title;
+        t.ToolTip = m.Title;
         mid.Children.Add(t);
+        var subRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
         var sub = Txt(12.5, FontWeights.Normal, Theme.Secondary);
         sub.Text = m.Artist.Length > 0 ? $"{m.Artist} · {m.App}" : m.App;
-        sub.Margin = new Thickness(0, 2, 0, 0);
-        mid.Children.Add(sub);
+        sub.MaxWidth = ExpandedW - 230;
+        subRow.Children.Add(sub);
+        if (m.Sessions > 1)
+        {
+            // 同时有多个来源在放：点这个小胶囊在它们之间切换
+            var sw = new Border { CornerRadius = new CornerRadius(7), Background = Theme.Fill, Padding = new Thickness(6, 1, 6, 1), Margin = new Thickness(7, 0, 0, 0), Cursor = Cursors.Hand, VerticalAlignment = VerticalAlignment.Center };
+            var swp = new StackPanel { Orientation = Orientation.Horizontal };
+            swp.Children.Add(Glyph("\uE8AB", 9, Theme.Secondary));
+            var swt = Txt(10.5, FontWeights.Medium, Theme.Secondary); swt.Text = $" {m.Sessions}"; swp.Children.Add(swt);
+            sw.Child = swp;
+            sw.ToolTip = "切换播放来源";
+            sw.MouseEnter += (_, _) => sw.Background = HoverFill;
+            sw.MouseLeave += (_, _) => sw.Background = Theme.Fill;
+            sw.MouseLeftButtonDown += (_, e) => e.Handled = true;
+            sw.MouseLeftButtonUp += (_, e) => { e.Handled = true; Media?.Cycle(); };
+            subRow.Children.Add(sw);
+        }
+        mid.Children.Add(subRow);
         if (m.Duration > TimeSpan.FromSeconds(1))
         {
-            var line = new Grid { Margin = new Thickness(0, 7, 0, 0) };
+            var line = new Grid { Margin = new Thickness(0, 3, 0, 0) };
             line.ColumnDefinitions.Add(new ColumnDefinition());
             line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var track = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = Theme.Fill, VerticalAlignment = VerticalAlignment.Center };
             var fill = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = Theme.Primary, HorizontalAlignment = HorizontalAlignment.Left, Width = 3 };
             track.Child = fill;
             track.SizeChanged += (_, _) => UpdateMediaProgress();
-            line.Children.Add(track);
+            // 进度条本身只有 3 px，外面包一层 14 px 高的透明热区，悬停时变粗，点击或拖动跳转
+            var hit = new Grid { Height = 14, Background = Brushes.Transparent };
+            hit.Children.Add(track);
+            if (m.CanSeek)
+            {
+                hit.Cursor = Cursors.Hand;
+                hit.MouseEnter += (_, _) => { track.Height = 5; fill.Height = 5; track.CornerRadius = fill.CornerRadius = new CornerRadius(2.5); };
+                hit.MouseLeave += (_, _) => { if (!hit.IsMouseCaptured) { track.Height = 3; fill.Height = 3; track.CornerRadius = fill.CornerRadius = new CornerRadius(1.5); } };
+                double Frac(MouseEventArgs e) => track.ActualWidth > 0 ? Math.Clamp(e.GetPosition(track).X / track.ActualWidth, 0, 1) : 0;
+                hit.MouseLeftButtonDown += (_, e) => { e.Handled = true; hit.CaptureMouse(); _seeking = Frac(e); UpdateMediaProgress(); };
+                hit.MouseMove += (_, e) => { if (hit.IsMouseCaptured) { _seeking = Frac(e); UpdateMediaProgress(); } };
+                hit.MouseLeftButtonUp += (_, e) =>
+                {
+                    e.Handled = true;
+                    if (!hit.IsMouseCaptured) return;
+                    hit.ReleaseMouseCapture();
+                    var f = Frac(e);
+                    _seeking = null;
+                    Media?.Seek(f);
+                    UpdateMediaProgress();
+                };
+            }
+            line.Children.Add(hit);
             var time = Txt(10.5, FontWeights.Medium, Theme.Tertiary);
             time.Margin = new Thickness(8, 0, 0, 0);
+            time.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(time, 1);
             line.Children.Add(time);
             mid.Children.Add(line);
@@ -877,10 +938,12 @@ public sealed partial class IslandWindow : Window
 
         g.Cursor = Cursors.Hand;
         AddHover(g);
-        g.MouseLeftButtonUp += (_, e) => { e.Handled = true; Launcher.Open(m.AppSource == "music" ? "music" : m.AppSource); };
+        g.MouseLeftButtonUp += (_, e) => { e.Handled = true; Launcher.Open(m.AppSource); };
         UpdateMediaProgress();
         return g;
     }
+
+    private double? _seeking;
 
     private static FrameworkElement MediaButton(string glyph, double size, Action act)
     {
@@ -898,7 +961,7 @@ public sealed partial class IslandWindow : Window
     private void UpdateMediaProgress()
     {
         if (_mediaFill == null || Media?.Current is not { } m || m.Duration <= TimeSpan.Zero) return;
-        var pos = Media.LivePosition();
+        var pos = _seeking is { } sk ? TimeSpan.FromSeconds(m.Duration.TotalSeconds * sk) : Media.LivePosition();
         if (_mediaFill.Parent is FrameworkElement track && track.ActualWidth > 0)
             _mediaFill.Width = Math.Max(3, track.ActualWidth * Math.Clamp(pos.TotalSeconds / m.Duration.TotalSeconds, 0, 1));
         if (_mediaTime != null) _mediaTime.Text = $"{Fmt(pos)} / {Fmt(m.Duration)}";

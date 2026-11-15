@@ -7,7 +7,8 @@ namespace Qisland.App;
 
 public sealed record MediaState(
     string Title, string Artist, string App, string AppSource, bool Playing,
-    BitmapSource? Art, TimeSpan Position, TimeSpan Duration, DateTime PositionAt);
+    BitmapSource? Art, TimeSpan Position, TimeSpan Duration, DateTime PositionAt,
+    bool Video = false, int Sessions = 1, bool CanSeek = false);
 
 /// <summary>系统媒体会话（网易云、QQ 音乐、Spotify、浏览器都会上报）：读歌名/封面/进度，并能切歌暂停。</summary>
 public sealed class MediaWatcher
@@ -15,6 +16,9 @@ public sealed class MediaWatcher
     private readonly Dispatcher _ui;
     private GlobalSystemMediaTransportControlsSessionManager? _mgr;
     private GlobalSystemMediaTransportControlsSession? _session;
+    private string? _pinnedId;                       // 用户手动切到的来源
+    private readonly HashSet<GlobalSystemMediaTransportControlsSession> _hooked = [];
+    private TimeSpan _start;
     private string _artKey = "";
     private BitmapSource? _art;
     public MediaState? Current { get; private set; }
@@ -37,6 +41,7 @@ public sealed class MediaWatcher
 
     private void Attach()
     {
+        HookAll();
         var s = Pick();
         if (!ReferenceEquals(s, _session))
         {
@@ -57,17 +62,53 @@ public sealed class MediaWatcher
         _ = RefreshAsync();
     }
 
-    // 优先正在播放的会话；都没播放时用系统给的当前会话
+    // 每个会话的播放状态都要听：另一个软件开始播放时自动切过去
+    private void HookAll()
+    {
+        if (_mgr == null) return;
+        try
+        {
+            lock (_hooked)
+                foreach (var x in _mgr.GetSessions())
+                    if (_hooked.Add(x)) x.PlaybackInfoChanged += (_, _) => { if (x != _session) Attach(); };
+        }
+        catch { }
+    }
+
+    private List<GlobalSystemMediaTransportControlsSession> All()
+    {
+        try { return _mgr?.GetSessions().ToList() ?? []; } catch { return []; }
+    }
+
+    // 手动选的来源优先；否则正在播放的（最近开始的优先），都没播放时用系统给的当前会话
     private GlobalSystemMediaTransportControlsSession? Pick()
     {
         if (_mgr == null) return null;
         try
         {
-            foreach (var s in _mgr.GetSessions())
-                if (s.GetPlaybackInfo()?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) return s;
-            return _mgr.GetCurrentSession();
+            var all = All();
+            if (_pinnedId != null)
+            {
+                var pinned = all.FirstOrDefault(x => x.SourceAppUserModelId == _pinnedId);
+                if (pinned != null) return pinned;
+                _pinnedId = null;
+            }
+            var playing = all.Where(x => x.GetPlaybackInfo()?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing).ToList();
+            if (_session != null && playing.Contains(_session)) return _session; // 正在播的不被别人抢
+            if (playing.Count > 0) return playing[^1];
+            return _mgr.GetCurrentSession() ?? all.FirstOrDefault();
         }
         catch { return null; }
+    }
+
+    /// <summary>同时有多个来源时（比如网易云 + 浏览器视频），在它们之间轮换。</summary>
+    public void Cycle()
+    {
+        var all = All();
+        if (all.Count < 2) return;
+        var i = _session == null ? -1 : all.IndexOf(_session);
+        _pinnedId = all[(i + 1 + all.Count) % all.Count].SourceAppUserModelId;
+        Attach();
     }
 
     private void OnProps(GlobalSystemMediaTransportControlsSession s, MediaPropertiesChangedEventArgs e) => _ = RefreshAsync();
@@ -111,6 +152,16 @@ public sealed class MediaWatcher
         var playing = pb?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
         var aumid = s.SourceAppUserModelId ?? "";
         var (app, src) = AppName(aumid);
+        var video = props.PlaybackType == Windows.Media.MediaPlaybackType.Video;
+        var title = props.Title.Trim();
+        var artist = (props.Artist ?? "").Trim();
+        if (src is "chrome" or "edge" or "firefox" or "browser")
+        {
+            var (clean, site) = CleanWebTitle(title);
+            title = clean;
+            if (site != null) app = $"{site} · {app}";
+            video |= site != null;
+        }
 
         var key = props.Title + "|" + props.Artist + "|" + props.AlbumTitle;
         if (key != _artKey)
@@ -119,8 +170,11 @@ public sealed class MediaWatcher
             _art = props.Thumbnail != null ? await LoadArt(props.Thumbnail) : null;
         }
         var dur = tl.EndTime - tl.StartTime;
-        return new MediaState(props.Title.Trim(), (props.Artist ?? "").Trim(), app, src, playing, _art,
-            tl.Position, dur < TimeSpan.Zero ? TimeSpan.Zero : dur, tl.LastUpdatedTime.LocalDateTime);
+        _start = tl.StartTime;
+        var canSeek = pb?.Controls?.IsPlaybackPositionEnabled == true && dur > TimeSpan.FromSeconds(1);
+        return new MediaState(title, artist, app, src, playing, _art,
+            tl.Position - tl.StartTime, dur < TimeSpan.Zero ? TimeSpan.Zero : dur, tl.LastUpdatedTime.LocalDateTime,
+            video, Math.Max(1, All().Count), canSeek);
     }
 
     private static async Task<BitmapSource?> LoadArt(Windows.Storage.Streams.IRandomAccessStreamReference r)
@@ -144,6 +198,7 @@ public sealed class MediaWatcher
         catch { return null; }
     }
 
+    // AUMID 例子：cloudmusic.exe、QQMusic.exe、Spotify.exe / SpotifyAB.SpotifyMusic_…!Spotify、Chrome、MSEdge、308046B0AF4A39CB（Firefox）
     private static (string, string) AppName(string aumid)
     {
         var a = aumid.ToLowerInvariant();
@@ -151,10 +206,36 @@ public sealed class MediaWatcher
         if (a.Contains("qqmusic")) return ("QQ 音乐", "qqmusic");
         if (a.Contains("spotify")) return ("Spotify", "spotify");
         if (a.Contains("kugou")) return ("酷狗音乐", "kugou");
-        if (a.Contains("msedge") || a.Contains("chrome") || a.Contains("firefox")) return ("浏览器", "browser");
-        if (a.Contains("zunemusic") || a.Contains("media")) return ("媒体播放器", "player");
+        if (a.Contains("kwmusic") || a.Contains("kuwo")) return ("酷我音乐", "kuwo");
+        if (a.Contains("applemusic") || a.Contains("appleinc")) return ("Apple Music", "applemusic");
+        if (a.Contains("zunemusic")) return ("媒体播放器", "player");
+        if (a.Contains("potplayer")) return ("PotPlayer", "potplayer");
+        if (a.Contains("vlc")) return ("VLC", "potplayer");
+        if (a.Contains("foobar")) return ("foobar2000", "player");
+        if (a.Contains("bilibili") || a.Contains("哔哩")) return ("哔哩哔哩", "bilibili");
+        if (a.Contains("msedge")) return ("Edge", "edge");
+        if (a.Contains("chrome")) return ("Chrome", "chrome");
+        if (a.Contains("firefox") || a.Contains("308046b0af4a39cb")) return ("Firefox", "firefox");
+        if (a.Contains("opera") || a.Contains("brave") || a.Contains("360") || a.Contains("qqbrowser")) return ("浏览器", "browser");
         var n = Path.GetFileNameWithoutExtension(aumid);
         return (string.IsNullOrEmpty(n) ? "正在播放" : n, "player");
+    }
+
+    private static readonly (string suffix, string site)[] Sites =
+    [
+        ("_哔哩哔哩_bilibili", "哔哩哔哩"), ("_bilibili", "哔哩哔哩"), (" - 哔哩哔哩", "哔哩哔哩"),
+        (" - YouTube", "YouTube"), (" - 优酷", "优酷"), ("_腾讯视频", "腾讯视频"), (" - 腾讯视频", "腾讯视频"),
+        ("-爱奇艺", "爱奇艺"), ("_爱奇艺", "爱奇艺"), (" - Netflix", "Netflix"), (" - 抖音", "抖音"), (" - 西瓜视频", "西瓜视频"),
+    ];
+
+    private static (string, string?) CleanWebTitle(string t)
+    {
+        foreach (var (suffix, site) in Sites)
+        {
+            var i = t.IndexOf(suffix, StringComparison.OrdinalIgnoreCase);
+            if (i > 0) return (t[..i].Trim(), site);
+        }
+        return (t, null);
     }
 
     public TimeSpan LivePosition()
@@ -163,6 +244,15 @@ public sealed class MediaWatcher
         var p = c.Playing ? c.Position + (DateTime.Now - c.PositionAt) : c.Position;
         if (c.Duration > TimeSpan.Zero && p > c.Duration) p = c.Duration;
         return p < TimeSpan.Zero ? TimeSpan.Zero : p;
+    }
+
+    /// <summary>拖进度条：fraction 0~1。</summary>
+    public void Seek(double fraction)
+    {
+        if (Current is not { CanSeek: true } c) return;
+        var target = _start + TimeSpan.FromSeconds(c.Duration.TotalSeconds * Math.Clamp(fraction, 0, 1));
+        Current = c with { Position = target - _start, PositionAt = DateTime.Now };
+        Run(s => s.TryChangePlaybackPositionAsync(target.Ticks));
     }
 
     public void Toggle() => Run(s => s.TryTogglePlayPauseAsync());

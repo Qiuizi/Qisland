@@ -288,20 +288,28 @@ public sealed class FocusTimer
 }
 
 /// <summary>待办：%APPDATA%\Qisland\todo.md，一行一条 “- [ ] 事项”，勾成 “- [x]” 就算完成。用记事本就能改。</summary>
+public sealed record TodoItem(int Line, string Text, bool Done);
+
+/// <summary>
+/// 待办存在 %APPDATA%\Qisland\todo.md（标准 Markdown 任务列表，可以用任何编辑器改）。
+/// 岛上添加 / 勾选 / 删除都直接改这个文件，外部改动也会实时同步回岛上。
+/// </summary>
 public sealed class TodoFile : IDisposable
 {
     private readonly ActivityStore _store;
     private readonly FileSystemWatcher _watcher;
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(400) };
     public static string PathName => System.IO.Path.Combine(App.DataDir, "todo.md");
-    public IReadOnlyList<string> Open { get; private set; } = [];
+    private const string Sample = "在这里写下第一件事";
+    public IReadOnlyList<TodoItem> Items { get; private set; } = [];
+    public IReadOnlyList<string> Open => Items.Where(i => !i.Done).Select(i => i.Text).ToList();
     public event Action? Changed;
 
     public TodoFile(ActivityStore store)
     {
         _store = store;
         if (!File.Exists(PathName))
-            File.WriteAllText(PathName, "# 待办（一行一条，完成后把 [ ] 改成 [x]）\n- [ ] 在这里写下第一件事\n");
+            File.WriteAllText(PathName, "# 待办（一行一条，完成后把 [ ] 改成 [x]）\n");
         _watcher = new FileSystemWatcher(App.DataDir, "todo.md") { NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName, EnableRaisingEvents = true };
         _watcher.Changed += (_, _) => _debounce.Dispatcher.BeginInvoke(Kick);
         _watcher.Created += (_, _) => _debounce.Dispatcher.BeginInvoke(Kick);
@@ -312,20 +320,80 @@ public sealed class TodoFile : IDisposable
 
     private void Kick() { _debounce.Stop(); _debounce.Start(); }
 
+    private static (bool ok, bool done, string text) Parse(string raw)
+    {
+        var l = raw.Trim();
+        if (l.Length < 5 || (l[0] != '-' && l[0] != '*') || l[1] != ' ' || l[2] != '[' || l[4] != ']') return (false, false, "");
+        var done = l[3] is 'x' or 'X';
+        if (!done && l[3] != ' ') return (false, false, "");
+        var text = l[5..].Trim();
+        return (text.Length > 0 && text != Sample, done, text);
+    }
+
     private void Load()
     {
         try
         {
-            Open = File.ReadAllLines(PathName)
-                .Select(l => l.Trim())
-                .Where(l => l.StartsWith("- [ ]", StringComparison.Ordinal) || l.StartsWith("* [ ]", StringComparison.Ordinal))
-                .Select(l => l[5..].Trim())
-                .Where(l => l.Length > 0 && l != "在这里写下第一件事")
-                .ToList();
+            var lines = File.ReadAllLines(PathName);
+            var list = new List<TodoItem>();
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var (ok, done, text) = Parse(lines[i]);
+                if (ok) list.Add(new TodoItem(i, text, done));
+            }
+            Items = list;
             Changed?.Invoke();
         }
         catch (IOException) { Kick(); }
     }
+
+    private void Edit(Action<List<string>> change)
+    {
+        try
+        {
+            var lines = File.ReadAllLines(PathName).ToList();
+            change(lines);
+            File.WriteAllLines(PathName, lines);
+        }
+        catch (Exception ex) { App.Log("待办写入: " + ex.Message); }
+        Load();
+    }
+
+    private static bool Same(List<string> lines, TodoItem it) => it.Line < lines.Count && Parse(lines[it.Line]) is var p && p.ok && p.text == it.Text;
+
+    /// <summary>新待办插在未完成列表的最后、已完成的前面。</summary>
+    public void Add(string text)
+    {
+        text = text.Replace("\r", " ").Replace("\n", " ").Trim();
+        if (text.Length == 0) return;
+        Edit(lines =>
+        {
+            lines.RemoveAll(l => l.Contains("[ ] " + Sample));
+            var at = lines.Count;
+            for (var i = lines.Count - 1; i >= 0; i--)
+                if (Parse(lines[i]) is { ok: true, done: false }) { at = i + 1; break; }
+                else if (Parse(lines[i]) is { ok: true, done: true }) at = i;
+            lines.Insert(at, "- [ ] " + text);
+        });
+    }
+
+    public void SetDone(TodoItem it, bool done) => Edit(lines =>
+    {
+        if (!Same(lines, it)) return;
+        lines.RemoveAt(it.Line);
+        // 勾掉的挪到文件末尾（最近完成的在最后），取消勾选的放回未完成末尾
+        if (done) lines.Add("- [x] " + it.Text);
+        else
+        {
+            var at = lines.Count;
+            for (var i = 0; i < lines.Count; i++) if (Parse(lines[i]) is { ok: true, done: true }) { at = i; break; }
+            lines.Insert(at, "- [ ] " + it.Text);
+        }
+    });
+
+    public void Delete(TodoItem it) => Edit(lines => { if (Same(lines, it)) lines.RemoveAt(it.Line); });
+
+    public void ClearDone() => Edit(lines => lines.RemoveAll(l => Parse(l) is { ok: true, done: true }));
 
     public void Dispose() => _watcher.Dispose();
 }

@@ -78,7 +78,7 @@ public sealed class App : Application
         _window.Timer = _timer;
         _harness = new HarnessWatcher(_store);
         try { _flash = new MessengerFlash(_store); _flash.Start(); } catch (Exception ex) { Log("ShellHook: " + ex.Message); }
-        try { _todo = new TodoFile(_store); _todo.Changed += () => _window.SetTodos(_todo.Open); _window.SetTodos(_todo.Open); }
+        try { _todo = new TodoFile(_store); _window.Todo = _todo; _todo.Changed += () => _window.SetTodos(_todo.Open); _window.SetTodos(_todo.Open); }
         catch (Exception ex) { Log("待办: " + ex.Message); }
         _toasts = new ToastMirror(_store);
         _ = _toasts.StartAsync();

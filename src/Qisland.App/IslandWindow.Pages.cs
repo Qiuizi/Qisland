@@ -14,8 +14,9 @@ namespace Qisland.App;
 /// <summary>展开后的多页：滚轮切换 主页 / 组件 / 文件架，拖文件进岛自动跳到文件架。</summary>
 public sealed partial class IslandWindow
 {
-    private enum Page { Home, Widgets, Shelf }
-    private static readonly string[] PageNames = ["主页", "组件", "文件架"];
+    private enum Page { Home, Widgets, Todo, Shelf }
+    private static readonly string[] PageNames = ["主页", "组件", "待办", "文件架"];
+    private const int LastPage = 3;
 
     private Page _page = Page.Home;
     private StackPanel? _expStack;
@@ -32,6 +33,7 @@ public sealed partial class IslandWindow
 
     private void SetupPages()
     {
+        Deactivated += (_, _) => EndEditing();
         AllowDrop = true;
         PreviewMouseWheel += (_, e) => { OnScroll(-e.Delta); e.Handled = true; };
         _root.PreviewMouseLeftButtonDown += (_, e) => { _swipeStart = e.GetPosition(this); _swipeDx = 0; };
@@ -67,7 +69,7 @@ public sealed partial class IslandWindow
     /// <summary>橡皮筋：拉得越远阻力越大，永远拉不过 limit。</summary>
     private static double Rubber(double x, double limit) => Math.Sign(x) * limit * (1 - 1 / (Math.Abs(x) / limit + 1));
 
-    private bool AtEdge(int dir) => (int)_page + dir < 0 || (int)_page + dir > 2;
+    private bool AtEdge(int dir) => (int)_page + dir < 0 || (int)_page + dir > LastPage;
 
     /// <summary>
     /// 滚轮和触控板统一走这里，delta 为正表示往下一页。
@@ -177,6 +179,7 @@ public sealed partial class IslandWindow
 
     private void OnSwipeMove(object sender, MouseEventArgs e)
     {
+        if (_todoBox?.IsMouseCaptureWithin == true) return;
         if (_swipeStart is not Point s0 || e.LeftButton != MouseButtonState.Pressed || _mode != Mode.Expanded) { if (!_swiping) _swipeStart = null; return; }
         var p = e.GetPosition(this);
         var dx = p.X - s0.X;
@@ -248,6 +251,7 @@ public sealed partial class IslandWindow
         {
             case Page.Widgets: BuildWidgets(stack); break;
             case Page.Shelf: BuildShelf(stack); break;
+            case Page.Todo: BuildTodo(stack); break;
             default: BuildHome(stack); break;
         }
         stack.Children.Add(PageDots());
@@ -256,7 +260,7 @@ public sealed partial class IslandWindow
     private FrameworkElement PageDots()
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 10, 0, 0), Background = Brushes.Transparent };
-        for (var i = 0; i < 3; i++)
+        for (var i = 0; i <= LastPage; i++)
         {
             var on = i == (int)_page;
             var dot = new Border
@@ -280,6 +284,7 @@ public sealed partial class IslandWindow
     private void OnCollapsed()
     {
         // 收起后回到主页，下次悬停先看到消息
+        EndEditing();
         if (_page != Page.Home && !_dragging) { _page = Page.Home; _expDirty = true; }
     }
 
