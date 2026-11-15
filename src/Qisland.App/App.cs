@@ -26,6 +26,7 @@ public sealed class App : Application
     private MediaWatcher? _media;
     private TodoFile? _todo;
     private Countdowns? _countdown;
+    private ClassWatcher? _classes;
     private VolumeWatcher? _volume;
     private SystemWatch _sys = null!;
     private Updater _upd = null!;
@@ -132,6 +133,8 @@ public sealed class App : Application
             }; } catch (Exception ex) { Log("音量: " + ex.Message); }
         try { _countdown = new Countdowns(); _window.Countdown = _countdown; _countdown.Changed += _window.OnCountdownChanged; _window.OnCountdownChanged(); }
         catch (Exception ex) { Log("倒计时: " + ex.Message); }
+        try { _classes = new ClassWatcher(_store); _window.Classes = _classes; _classes.Changed += _window.OnCountdownChanged; _window.OnCountdownChanged(); }
+        catch (Exception ex) { Log("课表: " + ex.Message); }
         try { _todo = new TodoFile(_store); _window.Todo = _todo; _todo.Changed += () => _window.SetTodos(_todo.Open); _window.SetTodos(_todo.Open); }
         catch (Exception ex) { Log("待办: " + ex.Message); }
         _toasts = new ToastMirror(_store);
@@ -150,9 +153,24 @@ public sealed class App : Application
             if (_tickN % 3 == 0) { try { _harness.Tick(); } catch (Exception ex) { Log("DSH: " + ex.Message); } }
             if (_tickN % 5 == 0) _store.Expire();
             if (DateTime.Today != _day) { _day = DateTime.Today; _countdown?.Refresh(); }
+            if (_tickN % 30 == 0) { try { _classes?.Tick(); } catch (Exception ex) { Log("课表: " + ex.Message); } }
         };
         _tick.Start();
         Log("providers started");
+    }
+
+    private void ImportTimetable()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog { Title = "选择课表 .ics（SCU Plus / WakeUp 导出）", Filter = "日历文件 (*.ics)|*.ics|所有文件|*.*" };
+        if (dlg.ShowDialog() != true) return;
+        if (!ClassWatcher.Import(dlg.FileName))
+        {
+            _store.Upsert(new IslandActivity("class:import", ClassWatcher.Source, "课表导入失败", "这个文件里没有找到课程（需要 .ics 日历格式）", ActivityKind.Error, 70, DurationSeconds: 6));
+            return;
+        }
+        _classes?.Tick();
+        var n = _classes?.Day(DateTime.Today).Count ?? 0;
+        _store.Upsert(new IslandActivity("class:import", ClassWatcher.Source, "课表已导入", n > 0 ? $"今天有 {n} 节课" : "今天没有课", ActivityKind.Done, 60, DurationSeconds: 5));
     }
 
     // ───────────── 收件箱：给 WSL NAT 模式等连不上 localhost 的场景 ─────────────
@@ -240,6 +258,7 @@ public sealed class App : Application
             foreach (System.Windows.Forms.ToolStripMenuItem i in look.DropDownItems) i.Checked = i.Text == Theme.LookName(Theme.Current);
         };
         menu.Items.Add(look);
+        menu.Items.Add("导入课表（.ics）…", null, (_, _) => Dispatcher.BeginInvoke(ImportTimetable));
         menu.Items.Add("编辑倒计时", null, (_, _) => Process.Start(new ProcessStartInfo("notepad.exe", "\"" + Countdowns.PathName + "\"") { UseShellExecute = true }));
         var keys = new System.Windows.Forms.ToolStripMenuItem("接管音量键") { CheckOnClick = true, Checked = !File.Exists(VolumeWatcher.OffFlag), ToolTipText = "音量键改由灵动岛显示，不再弹出系统音量浮窗" };
         keys.CheckedChanged += (_, _) => _volume?.HookKeys(keys.Checked);

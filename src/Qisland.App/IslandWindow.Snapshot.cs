@@ -58,6 +58,19 @@ public sealed partial class IslandWindow
         foreach (var a in _store.Ranked().ToList()) _store.Remove(a.Id);
         _osd = OsdKind.Volume; _osdLevel = 0.64; _osdMuted = false;
         await Shot(dir, "06-volume", Mode.Compact, osd: true);
+        _osd = OsdKind.None;
+        // 课表：上课中 + 下一节
+        var realClasses = Classes;
+        Classes = new ClassWatcher(_store, ClassWatcher.DemoIcs());
+        OnCountdownChanged();
+        await Task.Delay(300);
+        await Shot(dir, "10-class-compact", Mode.Compact);
+        _page = Page.Home; _expDirty = true; _pageCache.Clear();
+        await Shot(dir, "11-class-home", Mode.Expanded);
+        foreach (var a in _store.Ranked().ToList()) _store.Remove(a.Id);
+        SetMode(Mode.Idle);
+        await Shot(dir, "12-class-idle", Mode.Idle);
+        Classes = realClasses;
         App.Log("snapshot 完成: " + dir);
     }
 

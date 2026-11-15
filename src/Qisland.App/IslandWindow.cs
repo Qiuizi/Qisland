@@ -646,7 +646,10 @@ public sealed partial class IslandWindow : Window
 
     private void BuildHome(StackPanel stack)
     {
+        var tc = TodayClasses();
         var ranked = _store.Ranked();
+        // 有「今天的课」卡片时，上课中/下一节这两条就不再重复列成行
+        if (tc != null) ranked = ranked.Where(a => a.Id is not ("class:now" or "class:next")).ToList();
         var music = Media?.Current;
 
         var cd = CountdownStrip();
@@ -655,6 +658,7 @@ public sealed partial class IslandWindow : Window
         {
             stack.Children.Add(HeroClock());
             if (cd != null) stack.Children.Add(cd);
+            if (tc != null) stack.Children.Add(tc);
             if (RainHint() is { } rh) stack.Children.Add(rh);
             if (music != null) stack.Children.Add(Glassy(MusicCard(music)));
             if (_todos.Count > 0) stack.Children.Add(Glassy(TodoBlock()));
@@ -672,6 +676,7 @@ public sealed partial class IslandWindow : Window
                 rows.Children.Add(more);
             }
             stack.Children.Add(Glassy(rows));
+            if (tc != null) stack.Children.Add(tc);
             if (_todos.Count > 0) stack.Children.Add(Glassy(TodoBlock()));
             if (cd != null) { cd.Margin = new Thickness(0, 8, 0, 2); stack.Children.Add(cd); }
             stack.Children.Add(Glassy(Footer(), footer: true));
