@@ -655,26 +655,58 @@ public sealed partial class IslandWindow : Window
         {
             stack.Children.Add(HeroClock());
             if (cd != null) stack.Children.Add(cd);
-            if (_wx != null) stack.Children.Add(WeatherStrip());
-            if (music != null) stack.Children.Add(MusicCard(music));
-            if (_todos.Count > 0) stack.Children.Add(TodoBlock());
+            if (RainHint() is { } rh) stack.Children.Add(rh);
+            if (music != null) stack.Children.Add(Glassy(MusicCard(music)));
+            if (_todos.Count > 0) stack.Children.Add(Glassy(TodoBlock()));
         }
         else
         {
-            if (music != null) stack.Children.Add(MusicCard(music));
-            foreach (var a in ranked.Take(MaxRows)) stack.Children.Add(Row(a));
+            if (music != null) stack.Children.Add(Glassy(MusicCard(music)));
+            var rows = new StackPanel();
+            foreach (var a in ranked.Take(MaxRows)) rows.Children.Add(Row(a));
             if (ranked.Count > MaxRows)
             {
                 var more = Txt(12, FontWeights.Medium, Theme.Tertiary);
                 more.Text = $"还有 {ranked.Count - MaxRows} 条";
                 more.Margin = new Thickness(46, 0, 0, 2);
-                stack.Children.Add(more);
+                rows.Children.Add(more);
             }
-            if (_todos.Count > 0) stack.Children.Add(TodoBlock());
+            stack.Children.Add(Glassy(rows));
+            if (_todos.Count > 0) stack.Children.Add(Glassy(TodoBlock()));
             if (cd != null) { cd.Margin = new Thickness(0, 8, 0, 2); stack.Children.Add(cd); }
-            stack.Children.Add(Footer());
-            if (_wx != null) stack.Children.Add(WeatherStrip());
+            stack.Children.Add(Glassy(Footer(), footer: true));
         }
+    }
+
+    // 玻璃主题下把一组内容装进半透明卡片；其它主题原样返回，保持原来的无卡片布局
+    private static FrameworkElement Glassy(FrameworkElement child, bool footer = false)
+    {
+        if (Theme.CardRim == null) return child;
+        child.Margin = new Thickness(0);
+        return new Border
+        {
+            Background = Theme.Card, BorderBrush = Theme.CardRim, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(20),
+            Padding = footer ? new Thickness(14, 0, 14, 0) : new Thickness(14, 4, 14, 4), Margin = new Thickness(0, 4, 0, 4), Child = child,
+        };
+    }
+
+    // 首页天气只留一句有用的话：接下来 12 小时第一次可能下雨的时间
+    private string? RainText()
+    {
+        if (_wx is not { } x) return null;
+        var h = x.Hours.Take(12).FirstOrDefault(h => h.Rain >= 40);
+        if (h == null) return null;
+        var when = h.At.Date == DateTime.Today ? h.At.ToString("H时") : "明天" + h.At.ToString("H时");
+        return $"{when}起可能有雨";
+    }
+
+    private FrameworkElement? RainHint()
+    {
+        if (RainText() is not { } t) return null;
+        var tb = Txt(12, FontWeights.Medium, Theme.Blue);
+        tb.Text = "☂ " + t;
+        tb.Margin = new Thickness(6, 0, 0, 8);
+        return tb;
     }
 
     private FrameworkElement HeroClock()
@@ -838,6 +870,12 @@ public sealed partial class IslandWindow : Window
             var tx = Txt(12.5, FontWeights.Medium, Theme.Secondary);
             tx.Text = $"{w.Temperature:0}°  {WeatherParser.Describe(w.Code)}  {w.Low:0}° / {w.High:0}°";
             left.Children.Add(tx);
+            if (RainText() is { } rt)
+            {
+                var rb = Txt(12.5, FontWeights.Medium, Theme.Blue);
+                rb.Text = "   " + rt;
+                left.Children.Add(rb);
+            }
         }
         g.Children.Add(left);
         var clock = Txt(12.5, FontWeights.Medium, Theme.Secondary);
