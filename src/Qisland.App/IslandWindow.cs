@@ -31,7 +31,11 @@ public sealed class IslandWindow : Window
     private readonly Canvas _root = new() { Width = WinW, Height = WinH };
     // 胶囊、阴影都是 Path + RectangleGeometry：每帧只改几何参数，只触发重绘，不触发布局
     private readonly RectangleGeometry _pillGeo = new();
+    private readonly RectangleGeometry _rimGeo = new();
     private readonly Path _pill = new() { Fill = Theme.Pill };
+    private readonly Path _rim = new() { StrokeThickness = 1, IsHitTestVisible = false };
+    private readonly Path _sheen = new() { IsHitTestVisible = false };
+    private readonly List<Path> _shadowPaths = [];
     private readonly Canvas _content = new() { Width = WinW, Height = WinH };
     private readonly ScaleTransform _bubbleScale = new(1, 1);
     private readonly TranslateTransform _bubbleShift = new();
@@ -116,10 +120,14 @@ public sealed class IslandWindow : Window
         {
             var g = new RectangleGeometry();
             _shadows.Add(g);
-            _root.Children.Add(new Path { Data = g, Fill = Theme.Freeze(new SolidColorBrush(Color.FromArgb(a, 0, 0, 0))), IsHitTestVisible = false });
+            var sp = new Path { Data = g, Fill = Theme.Freeze(new SolidColorBrush(Color.FromArgb(a, 0, 0, 0))), IsHitTestVisible = false };
+            _shadowPaths.Add(sp);
+            _root.Children.Add(sp);
         }
         _pill.Data = _pillGeo;
         _root.Children.Add(_pill);
+        _sheen.Data = _pillGeo;
+        _root.Children.Add(_sheen);
 
         _content.Clip = _clip;
         foreach (var layer in new[] { _idle, _compact, _expanded })
@@ -136,6 +144,8 @@ public sealed class IslandWindow : Window
         _bubble.RenderTransform = new TransformGroup { Children = { _bubbleScale, _bubbleShift } };
         Canvas.SetTop(_bubble, TopGap);
         _root.Children.Add(_bubble);
+        _rim.Data = _rimGeo;
+        _root.Children.Add(_rim);
 
         // 空闲：左时钟，右天气
         _idle.Height = IdleH;
@@ -365,6 +375,8 @@ public sealed class IslandWindow : Window
         }
         _clip.Rect = new Rect(left, TopGap, w, h);
         _clip.RadiusX = _clip.RadiusY = r;
+        _rimGeo.Rect = new Rect(left + 0.5, TopGap + 0.5, w - 1, h - 1);
+        _rimGeo.RadiusX = _rimGeo.RadiusY = Math.Max(0, r - 0.5);
 
         Fade(_idle, _idleOp.Value);
         Fade(_compact, _compactOp.Value);
@@ -379,6 +391,73 @@ public sealed class IslandWindow : Window
         var show = Math.Clamp(_show.Value, 0, 1);
         _root.Opacity = show;
         _rootShift.Y = (1 - show) * -(TopGap + h);
+        if (Theme.IsGlass) UpdateGlassRegion(left, w, h, r, bo, show);
+    }
+
+    // ───────────────────────────── 外观 ─────────────────────────────
+
+    internal void ApplyLook(Theme.Look look)
+    {
+        Theme.Apply(look);
+        _pill.Fill = Theme.Pill;
+        _bubble.Background = Theme.Pill;
+        _rim.Stroke = Theme.Rim;
+        _rim.Visibility = Theme.Rim == null ? Visibility.Collapsed : Visibility.Visible;
+        _sheen.Fill = Theme.Sheen;
+        _sheen.Visibility = Theme.Sheen == null ? Visibility.Collapsed : Visibility.Visible;
+        for (var i = 0; i < _shadowPaths.Count; i++)
+        {
+            var a = (byte)(ShadowLayers[i].a * Theme.ShadowAlpha / 0x22);
+            _shadowPaths[i].Fill = Theme.Freeze(new SolidColorBrush(Color.FromArgb(a, 0, 0, 0)));
+            _shadowPaths[i].Visibility = Theme.IsGlass ? Visibility.Collapsed : Visibility.Visible;
+        }
+        _idleClock.Foreground = Theme.Primary;
+        _idleTemp.Foreground = Theme.Secondary;
+        _idleWeatherGlyph.Foreground = Theme.Secondary;
+        if (_hwnd != IntPtr.Zero) SetGlass(Theme.IsGlass);
+        RebuildIdle();
+        RebuildCompact();
+        RebuildBubble(_store.Ranked());
+        RebuildExpanded();
+        ApplyFrame();
+    }
+
+    private bool _glassOn;
+    private (int, int, int, int, int, int) _lastRgn;
+
+    // 液态玻璃：系统亚克力模糊铺满窗口，再用窗口区域把它裁成胶囊的形状，跟着弹簧每帧更新
+    private void SetGlass(bool on)
+    {
+        if (on == _glassOn) return;
+        _glassOn = on;
+        // Win11 的亚克力会无视窗口区域铺满整个扩展帧；玻璃模式下收回扩展帧，让区域真正裁剪模糊
+        var e = on ? 0 : -1;
+        var m = new Native.MARGINS { Left = e, Right = e, Top = e, Bottom = e };
+        Native.DwmExtendFrameIntoClientArea(_hwnd, ref m);
+        Native.SetAccent(_hwnd, on);
+        if (!on) Native.SetWindowRgn(_hwnd, IntPtr.Zero, true);
+        _lastRgn = default;
+    }
+
+    private void UpdateGlassRegion(double left, double w, double h, double r, double bubbleOp, double show)
+    {
+        if (!_glassOn) return;
+        var dpi = VisualTreeHelper.GetDpi(this);
+        int P(double v) => (int)Math.Round(v * dpi.DpiScaleX);
+        var y0 = TopGap + _rootShift.Y;
+        var key = show < 0.05 ? (0, 0, 0, 0, 0, 0) : (P(left), P(y0), P(left + w), P(y0 + h), P(r * 2), bubbleOp > 0.3 ? P(_bubbleShift.X) : -1);
+        if (key == _lastRgn) return;
+        _lastRgn = key;
+        var rgn = Native.CreateRoundRectRgn(key.Item1, key.Item2, key.Item3 + 1, key.Item4 + 1, key.Item5, key.Item5);
+        if (key.Item6 >= 0)
+        {
+            var s = P(CompactH * _bubbleScale.ScaleX);
+            var by = P(y0 + (CompactH - CompactH * _bubbleScale.ScaleY) / 2);
+            var b = Native.CreateRoundRectRgn(key.Item6, by, key.Item6 + s + 1, by + s + 1, s, s);
+            Native.CombineRgn(rgn, rgn, b, 2);
+            Native.DeleteObject(b);
+        }
+        Native.SetWindowRgn(_hwnd, rgn, true);
     }
 
     private static void Place(FrameworkElement layer, double width) => Canvas.SetLeft(layer, Math.Round((WinW - width) / 2));
@@ -665,8 +744,8 @@ public sealed class IslandWindow : Window
 
     // ───────────────────────────── 音乐 ─────────────────────────────
 
-    private static readonly Brush HoverFill = Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF)));
-    private static readonly Brush PressFill = Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF)));
+    private static Brush HoverFill => Theme.Hover;
+    private static Brush PressFill => Theme.Press;
 
     // 行悬停给一层很淡的底色（圆角，不画任何分隔线），让「能点」这件事看得见
     private static void AddHover(Grid g)

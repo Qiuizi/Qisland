@@ -10,18 +10,83 @@ internal static class Theme
     public static readonly FontFamily Display = new("Segoe UI Variable Display, Segoe UI, Microsoft YaHei UI");
     public static readonly FontFamily Icons = new("Segoe Fluent Icons, Segoe MDL2 Assets");
 
-    public static readonly Brush Primary = Freeze(new SolidColorBrush(Color.FromRgb(0xF5, 0xF5, 0xF7)));
-    public static readonly Brush Secondary = Freeze(new SolidColorBrush(Color.FromArgb(0x9E, 0xEB, 0xEB, 0xF5)));
-    public static readonly Brush Tertiary = Freeze(new SolidColorBrush(Color.FromArgb(0x66, 0xEB, 0xEB, 0xF5)));
-    public static readonly Brush Fill = Freeze(new SolidColorBrush(Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF)));
+    public enum Look { Dark, Light, Glass }
+    public static Look Current { get; private set; } = Look.Dark;
+    public static bool IsGlass => Current == Look.Glass;
+
+    public static Brush Primary { get; private set; } = null!;
+    public static Brush Secondary { get; private set; } = null!;
+    public static Brush Tertiary { get; private set; } = null!;
+    public static Brush Fill { get; private set; } = null!;
+    public static Brush Hover { get; private set; } = null!;
+    public static Brush Press { get; private set; } = null!;
+    /// <summary>胶囊底色。深色：近黑渐变；白色：近白渐变；液态玻璃：半透明白，背后是系统亚克力模糊。</summary>
+    public static Brush Pill { get; private set; } = null!;
+    /// <summary>玻璃的高光描边：上沿亮、下沿几乎透明，模拟液体表面的反光。</summary>
+    public static Brush? Rim { get; private set; }
+    /// <summary>玻璃内部从上往下的一层柔光。</summary>
+    public static Brush? Sheen { get; private set; }
+    public static byte ShadowAlpha { get; private set; } = 0x22;
     public static readonly Brush Green = Freeze(new SolidColorBrush(Color.FromRgb(0x30, 0xD1, 0x58)));
     public static readonly Brush Orange = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x9F, 0x0A)));
     public static readonly Brush Red = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x45, 0x3A)));
     public static readonly Brush Blue = Freeze(new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF)));
 
-    /// <summary>纯黑会和深色壁纸糊在一起，用极浅的竖向渐变给一点体积感。</summary>
-    public static readonly Brush Pill = Freeze(new LinearGradientBrush(
-        Color.FromRgb(0x12, 0x12, 0x14), Color.FromRgb(0x02, 0x02, 0x03), 90));
+    static Theme() => Apply(Look.Dark);
+
+    private static SolidColorBrush S(byte a, byte r, byte g, byte b) => Freeze(new SolidColorBrush(Color.FromArgb(a, r, g, b)));
+
+    public static void Apply(Look look)
+    {
+        Current = look;
+        Rim = null; Sheen = null;
+        switch (look)
+        {
+            case Look.Light:
+                Primary = S(0xFF, 0x1D, 0x1D, 0x1F);
+                Secondary = S(0xA6, 0x3C, 0x3C, 0x43);
+                Tertiary = S(0x73, 0x3C, 0x3C, 0x43);
+                Fill = S(0x17, 0x00, 0x00, 0x00);
+                Hover = S(0x0D, 0x00, 0x00, 0x00);
+                Press = S(0x1A, 0x00, 0x00, 0x00);
+                Pill = Freeze(new LinearGradientBrush(Color.FromRgb(0xFF, 0xFF, 0xFF), Color.FromRgb(0xF2, 0xF2, 0xF5), 90));
+                Rim = Freeze(new LinearGradientBrush(Color.FromArgb(0x14, 0, 0, 0), Color.FromArgb(0x1F, 0, 0, 0), 90));
+                ShadowAlpha = 0x26;
+                break;
+            case Look.Glass:
+                Primary = S(0xFF, 0x12, 0x12, 0x14);
+                Secondary = S(0xB3, 0x2A, 0x2A, 0x30);
+                Tertiary = S(0x80, 0x2A, 0x2A, 0x30);
+                Fill = S(0x1F, 0x00, 0x00, 0x00);
+                Hover = S(0x2E, 0xFF, 0xFF, 0xFF);
+                Press = S(0x14, 0x00, 0x00, 0x00);
+                Pill = Freeze(new LinearGradientBrush(Color.FromArgb(0xA8, 0xFF, 0xFF, 0xFF), Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF), 90));
+                var rim = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
+                rim.GradientStops.Add(new GradientStop(Color.FromArgb(0xF0, 0xFF, 0xFF, 0xFF), 0));
+                rim.GradientStops.Add(new GradientStop(Color.FromArgb(0x50, 0xFF, 0xFF, 0xFF), 0.35));
+                rim.GradientStops.Add(new GradientStop(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF), 0.75));
+                rim.GradientStops.Add(new GradientStop(Color.FromArgb(0x90, 0xFF, 0xFF, 0xFF), 1));
+                Rim = Freeze(rim);
+                var sheen = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
+                sheen.GradientStops.Add(new GradientStop(Color.FromArgb(0x55, 0xFF, 0xFF, 0xFF), 0));
+                sheen.GradientStops.Add(new GradientStop(Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF), 0.45));
+                Sheen = Freeze(sheen);
+                ShadowAlpha = 0x18;
+                break;
+            default:
+                Primary = S(0xFF, 0xF5, 0xF5, 0xF7);
+                Secondary = S(0x9E, 0xEB, 0xEB, 0xF5);
+                Tertiary = S(0x66, 0xEB, 0xEB, 0xF5);
+                Fill = S(0x1F, 0xFF, 0xFF, 0xFF);
+                Hover = S(0x14, 0xFF, 0xFF, 0xFF);
+                Press = S(0x24, 0xFF, 0xFF, 0xFF);
+                Pill = Freeze(new LinearGradientBrush(Color.FromRgb(0x12, 0x12, 0x14), Color.FromRgb(0x02, 0x02, 0x03), 90));
+                ShadowAlpha = 0x22;
+                break;
+        }
+    }
+
+    public static string LookName(Look l) => l switch { Look.Light => "白色", Look.Glass => "液态玻璃", _ => "深色" };
 
     public static T Freeze<T>(T b) where T : Freezable { b.Freeze(); return b; }
 

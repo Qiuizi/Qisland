@@ -67,4 +67,28 @@ internal static class Native
         var m = info.rcMonitor;
         return r.Left <= m.Left && r.Top <= m.Top && r.Right >= m.Right && r.Bottom >= m.Bottom;
     }
+
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateRoundRectRgn(int l, int t, int r, int b, int w, int h);
+    [DllImport("gdi32.dll")] public static extern int CombineRgn(IntPtr dst, IntPtr a, IntPtr b, int mode);
+    [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr o);
+    [DllImport("user32.dll")] public static extern int SetWindowRgn(IntPtr h, IntPtr rgn, bool redraw);
+
+    [StructLayout(LayoutKind.Sequential)] private struct AccentPolicy { public int State, Flags, Gradient, Anim; }
+    [StructLayout(LayoutKind.Sequential)] private struct WinCompAttr { public int Attr; public IntPtr Data; public int Size; }
+    [DllImport("user32.dll")] private static extern int SetWindowCompositionAttribute(IntPtr h, ref WinCompAttr d);
+
+    /// <summary>ACCENT_ENABLE_ACRYLICBLURBEHIND：窗口背后的内容做高斯模糊+噪点，颜色由我们自己的半透明底色决定。</summary>
+    public static void SetAccent(IntPtr hwnd, bool on)
+    {
+        var p = new AccentPolicy { State = on ? 3 : 0, Flags = 2, Gradient = on ? 0x01FFFFFF : 0 };
+        var size = Marshal.SizeOf<AccentPolicy>();
+        var mem = Marshal.AllocHGlobal(size);
+        try
+        {
+            Marshal.StructureToPtr(p, mem, false);
+            var d = new WinCompAttr { Attr = 19, Data = mem, Size = size };
+            SetWindowCompositionAttribute(hwnd, ref d);
+        }
+        finally { Marshal.FreeHGlobal(mem); }
+    }
 }

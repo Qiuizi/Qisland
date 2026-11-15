@@ -23,14 +23,16 @@ public static class Launcher
     private delegate bool EnumProc(IntPtr h, IntPtr l);
     [StructLayout(LayoutKind.Sequential)] private struct RECT { public int L, T, R, B; }
 
-    private sealed record Target(string[] Processes, string[] Exes, string? Lnk = null, string? Shell = null);
+    /// <summary>Hotkey：软件自带的「显示主窗口」快捷键（微信 Ctrl+Alt+W、QQ Ctrl+Alt+Z）。
+    /// 这类软件在运行时绝不能再启动一次 exe：微信 4.x 支持多开，会弹出一个新的登录窗口。</summary>
+    private sealed record Target(string[] Processes, string[] Exes, string? Lnk = null, string? Shell = null, byte Hotkey = 0, string? MainTitle = null);
 
     private static readonly string Local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 
     private static Target? For(string source) => source switch
     {
-        "wechat" => new(["Weixin", "WeChat"], [@"C:\Program Files\Tencent\Weixin\Weixin.exe"], "微信"),
-        "qq" => new(["QQ"], [@"D:\Program Files\Tencent\QQNT\QQ.exe"], "QQ"),
+        "wechat" => new(["Weixin", "WeChat"], [@"C:\Program Files\Tencent\Weixin\Weixin.exe"], "微信", null, (byte)'W', "微信"),
+        "qq" => new(["QQ"], [@"D:\Program Files\Tencent\QQNT\QQ.exe"], "QQ", null, (byte)'Z', "QQ"),
         "deepseek-harness" or "deepseek" => new(["DeepSeek Harness"], [@"D:\Program Files (x86)\DSH\DeepSeek Harness.exe"], "DeepSeek Harness"),
         "info-station" or "info-deadline" => new(["info-station"], [Path.Combine(Local, "信息监控站", "info-station.exe")], "信息监控站"),
         "coursedesk" or "course" => new(["CourseDesk"], [], "CourseDesk"),
@@ -53,6 +55,11 @@ public static class Launcher
         {
             UnlockForeground();
             if (Focus(t)) { App.Log($"打开 {source}: 切到已有窗口"); return true; }
+            if (t.Hotkey != 0 && Running(t, out var pids))
+            {
+                _ = Task.Run(() => Summon(source, t, pids));
+                return true;
+            }
             foreach (var exe in t.Exes)
                 if (File.Exists(exe))
                 {
@@ -111,6 +118,39 @@ public static class Launcher
         BringWindowToTop(best);
         SetForegroundWindow(best);
         return true;
+    }
+
+    [DllImport("user32.dll")] private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string? cls, string? title);
+
+    private static bool Running(Target t, out HashSet<uint> pids)
+    {
+        pids = [];
+        foreach (var name in t.Processes)
+            foreach (var p in Process.GetProcessesByName(name)) { using (p) pids.Add((uint)p.Id); }
+        return pids.Count > 0;
+    }
+
+    // 托盘里的微信/QQ：先按软件自己的快捷键让它把主窗口叫出来；快捷键被改掉了，就直接把它隐藏的主窗口显示出来
+    private static void Summon(string source, Target t, HashSet<uint> pids)
+    {
+        keybd_event(0x11, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(t.Hotkey, 0, 0, UIntPtr.Zero);
+        keybd_event(t.Hotkey, 0, 2, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero); keybd_event(0x11, 0, 2, UIntPtr.Zero);
+        for (var i = 0; i < 8; i++)
+        {
+            Thread.Sleep(100);
+            if (Focus(t)) { App.Log($"打开 {source}: 快捷键唤出"); return; }
+        }
+        var h = IntPtr.Zero;
+        while ((h = FindWindowEx(IntPtr.Zero, h, null, t.MainTitle)) != IntPtr.Zero)
+        {
+            GetWindowThreadProcessId(h, out var pid);
+            if (!pids.Contains(pid)) continue;
+            ShowWindow(h, 9);
+            SetForegroundWindow(h);
+            App.Log($"打开 {source}: 显示隐藏的主窗口");
+            return;
+        }
+        App.Log($"打开 {source}: 没找到主窗口");
     }
 
     private static string? FindShortcut(string name)

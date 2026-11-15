@@ -73,6 +73,7 @@ public sealed class App : Application
     private void StartProviders()
     {
         _window!.OpenRequested = Launcher.Open;
+        _window.ApplyLook(LoadLook());
         _timer = new FocusTimer(_store);
         _harness = new HarnessWatcher(_store);
         try { _flash = new MessengerFlash(_store); _flash.Start(); } catch (Exception ex) { Log("ShellHook: " + ex.Message); }
@@ -153,6 +154,14 @@ public sealed class App : Application
     }
 
     // ───────────── 托盘 ─────────────
+    private static string LookFile => Path.Combine(DataDir, "look.txt");
+    private static Theme.Look LoadLook()
+    {
+        try { return Enum.TryParse<Theme.Look>(File.ReadAllText(LookFile).Trim(), out var l) ? l : Theme.Look.Dark; }
+        catch { return Theme.Look.Dark; }
+    }
+    private static void SaveLook(Theme.Look l) { try { File.WriteAllText(LookFile, l.ToString()); } catch { } }
+
     private void SetupTray()
     {
         var menu = new System.Windows.Forms.ContextMenuStrip();
@@ -162,6 +171,18 @@ public sealed class App : Application
         focus.DropDownItems.Add(new System.Windows.Forms.ToolStripSeparator());
         focus.DropDownItems.Add("取消计时", null, (_, _) => Dispatcher.BeginInvoke(() => _timer?.Cancel()));
         menu.Items.Add(focus);
+        var look = new System.Windows.Forms.ToolStripMenuItem("外观");
+        foreach (var l in new[] { Theme.Look.Dark, Theme.Look.Light, Theme.Look.Glass })
+        {
+            var item = new System.Windows.Forms.ToolStripMenuItem(Theme.LookName(l));
+            item.Click += (_, _) => Dispatcher.BeginInvoke(() => { _window?.ApplyLook(l); SaveLook(l); });
+            look.DropDownItems.Add(item);
+        }
+        look.DropDownOpening += (_, _) =>
+        {
+            foreach (System.Windows.Forms.ToolStripMenuItem i in look.DropDownItems) i.Checked = i.Text == Theme.LookName(Theme.Current);
+        };
+        menu.Items.Add(look);
         menu.Items.Add("编辑待办", null, (_, _) => Process.Start(new ProcessStartInfo("notepad.exe", "\"" + TodoFile.PathName + "\"") { UseShellExecute = true }));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("发送测试卡片", null, (_, _) => Dispatcher.BeginInvoke(Demo));
