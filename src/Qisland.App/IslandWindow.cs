@@ -409,7 +409,7 @@ public sealed class IslandWindow : Window
         {
             var a = (byte)(ShadowLayers[i].a * Theme.ShadowAlpha / 0x22);
             _shadowPaths[i].Fill = Theme.Freeze(new SolidColorBrush(Color.FromArgb(a, 0, 0, 0)));
-            _shadowPaths[i].Visibility = Theme.IsGlass ? Visibility.Collapsed : Visibility.Visible;
+            _shadowPaths[i].Visibility = Visibility.Visible;
         }
         _idleClock.Foreground = Theme.Primary;
         _idleTemp.Foreground = Theme.Secondary;
@@ -422,43 +422,13 @@ public sealed class IslandWindow : Window
         ApplyFrame();
     }
 
-    private bool _glassOn;
-    private (int, int, int, int, int, int) _lastRgn;
-
+    
     // 液态玻璃：系统亚克力模糊铺满窗口，再用窗口区域把它裁成胶囊的形状，跟着弹簧每帧更新
-    private void SetGlass(bool on)
-    {
-        if (on == _glassOn) return;
-        _glassOn = on;
-        // Win11 的亚克力会无视窗口区域铺满整个扩展帧；玻璃模式下收回扩展帧，让区域真正裁剪模糊
-        var e = on ? 0 : -1;
-        var m = new Native.MARGINS { Left = e, Right = e, Top = e, Bottom = e };
-        Native.DwmExtendFrameIntoClientArea(_hwnd, ref m);
-        Native.SetAccent(_hwnd, on);
-        if (!on) Native.SetWindowRgn(_hwnd, IntPtr.Zero, true);
-        _lastRgn = default;
-    }
+    // 系统模糊（亚克力/背景模糊）在这台 Win11 24H2 上不吃窗口区域裁剪：要么糊满整块窗口，要么关掉透明扩展后露出黑块。
+    // 所以玻璃外观不用系统模糊，只用半透明白 + 高光描边 + 顶部反光，窗口始终保持透明扩展。
+    private void SetGlass(bool on) { }
 
-    private void UpdateGlassRegion(double left, double w, double h, double r, double bubbleOp, double show)
-    {
-        if (!_glassOn) return;
-        var dpi = VisualTreeHelper.GetDpi(this);
-        int P(double v) => (int)Math.Round(v * dpi.DpiScaleX);
-        var y0 = TopGap + _rootShift.Y;
-        var key = show < 0.05 ? (0, 0, 0, 0, 0, 0) : (P(left), P(y0), P(left + w), P(y0 + h), P(r * 2), bubbleOp > 0.3 ? P(_bubbleShift.X) : -1);
-        if (key == _lastRgn) return;
-        _lastRgn = key;
-        var rgn = Native.CreateRoundRectRgn(key.Item1, key.Item2, key.Item3 + 1, key.Item4 + 1, key.Item5, key.Item5);
-        if (key.Item6 >= 0)
-        {
-            var s = P(CompactH * _bubbleScale.ScaleX);
-            var by = P(y0 + (CompactH - CompactH * _bubbleScale.ScaleY) / 2);
-            var b = Native.CreateRoundRectRgn(key.Item6, by, key.Item6 + s + 1, by + s + 1, s, s);
-            Native.CombineRgn(rgn, rgn, b, 2);
-            Native.DeleteObject(b);
-        }
-        Native.SetWindowRgn(_hwnd, rgn, true);
-    }
+    private void UpdateGlassRegion(double left, double w, double h, double r, double bubbleOp, double show) { }
 
     private static void Place(FrameworkElement layer, double width) => Canvas.SetLeft(layer, Math.Round((WinW - width) / 2));
 
