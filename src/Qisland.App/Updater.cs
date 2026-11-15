@@ -3,6 +3,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Qisland.Core;
@@ -31,7 +32,14 @@ public sealed class Updater
 
     public Updater(ActivityStore store, HttpClient http, Action quit) { _store = store; _http = http; _quit = quit; }
 
-    private sealed record Release(string Tag, string Name, string Notes, string Url, string? ZipUrl, long ZipSize, bool Pre);
+    private sealed record Release(string Tag, string Name, string Notes, string Url, string? ZipUrl, long ZipSize, bool Pre, string? Sha256);
+
+    /// <summary>下载专用：不设总超时（大文件），由每次尝试自己的握手/卡顿超时控制。</summary>
+    private static readonly HttpClient Dl = new() { Timeout = Timeout.InfiniteTimeSpan };
+
+    /// <summary>国内直连 GitHub 的下载域名（release-assets）经常 SSL 握手被掐。依次尝试：直连两次 → 公共加速镜像。
+    /// 镜像是第三方，所以只有 GitHub API 给出了 sha256 时才走镜像，下载完逐字节校验，对不上就丢弃。</summary>
+    private static readonly string[] Mirrors = ["https://gh-proxy.com/", "https://ghfast.top/"];
 
     private static string ReadVersion()
     {
@@ -99,16 +107,19 @@ public sealed class Updater
             var tag = r.GetProperty("tag_name").GetString() ?? "";
             if (SemVer.Compare(tag, current) <= 0) continue;
             if (best != null && SemVer.Compare(tag, best.Tag) <= 0) continue;
-            string? zip = null; long size = 0;
+            string? zip = null, sha = null; long size = 0;
             foreach (var a in r.GetProperty("assets").EnumerateArray())
             {
                 var n = a.GetProperty("name").GetString() ?? "";
                 if (!n.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) continue;
                 if (zip == null || n.Contains("win-x64", StringComparison.OrdinalIgnoreCase))
-                { zip = a.GetProperty("browser_download_url").GetString(); size = a.GetProperty("size").GetInt64(); }
+                {
+                    zip = a.GetProperty("browser_download_url").GetString(); size = a.GetProperty("size").GetInt64();
+                    sha = a.TryGetProperty("digest", out var d) && d.ValueKind == JsonValueKind.String && d.GetString()!.StartsWith("sha256:") ? d.GetString()![7..].ToLowerInvariant() : null;
+                }
             }
             best = new Release(tag, r.GetProperty("name").GetString() ?? tag, r.TryGetProperty("body", out var b) ? b.GetString() ?? "" : "",
-                r.GetProperty("html_url").GetString() ?? "", zip, size, pre);
+                r.GetProperty("html_url").GetString() ?? "", zip, size, pre, sha);
         }
         return best;
     }
@@ -130,6 +141,33 @@ public sealed class Updater
         _store.Remove(Id);
     }
 
+    /// <summary>一次下载尝试：15 秒内拿不到响应头、或连续 20 秒没收到数据，就判失败换下一条线路。</summary>
+    private static async Task Download(string url, string path, Release r, string label, Action<double, string> progress)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var resp = await Dl.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        resp.EnsureSuccessStatusCode();
+        var total = resp.Content.Headers.ContentLength ?? r.ZipSize;
+        await using var src = await resp.Content.ReadAsStreamAsync(cts.Token);
+        await using var dst = File.Create(path);
+        var buf = new byte[81920];
+        long got = 0; var last = DateTime.MinValue;
+        while (true)
+        {
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            var n = await src.ReadAsync(buf, cts.Token);
+            if (n == 0) break;
+            await dst.WriteAsync(buf.AsMemory(0, n), cts.Token);
+            got += n;
+            if ((DateTime.Now - last).TotalMilliseconds > 150 && total > 0)
+            {
+                last = DateTime.Now;
+                progress(0.9 * got / total, $"{got / 1048576.0:0.0} / {total / 1048576.0:0.0} MB · {label}");
+            }
+        }
+        if (total > 0 && got != total) throw new IOException($"只下到 {got}/{total} 字节");
+    }
+
     private async Task Install(Release r)
     {
         _busy = true;
@@ -142,27 +180,29 @@ public sealed class Updater
             void Progress(double p, string body) =>
                 App.Current.Dispatcher.BeginInvoke(() => _store.Upsert(new IslandActivity(Id, "update", $"正在更新到 {r.Tag}", body, ActivityKind.Running, 70, DurationSeconds: 0), sticky: true, progress: p));
 
-            Progress(0, "下载中…");
-            using (var resp = await _http.GetAsync(r.ZipUrl, HttpCompletionOption.ResponseHeadersRead))
+            var routes = new List<(string url, string label)> { (r.ZipUrl!, "GitHub"), (r.ZipUrl!, "GitHub") };
+            if (r.Sha256 != null) foreach (var m in Mirrors) routes.Add((m + r.ZipUrl, "加速镜像"));
+            Exception? lastErr = null; var ok = false;
+            for (var i = 0; i < routes.Count && !ok; i++)
             {
-                resp.EnsureSuccessStatusCode();
-                var total = resp.Content.Headers.ContentLength ?? r.ZipSize;
-                await using var src = await resp.Content.ReadAsStreamAsync();
-                await using var dst = File.Create(zip);
-                var buf = new byte[81920];
-                long got = 0; var last = DateTime.MinValue;
-                int n;
-                while ((n = await src.ReadAsync(buf)) > 0)
+                var (url, label) = routes[i];
+                try
                 {
-                    await dst.WriteAsync(buf.AsMemory(0, n));
-                    got += n;
-                    if ((DateTime.Now - last).TotalMilliseconds > 150 && total > 0)
+                    Progress(0, i == 0 ? "下载中…" : $"换线路重试（{label}）…");
+                    await Download(url, zip, r, label, Progress);
+                    if (r.Sha256 != null)
                     {
-                        last = DateTime.Now;
-                        Progress(0.9 * got / total, $"{got / 1048576.0:0.0} / {total / 1048576.0:0.0} MB");
+                        string h;
+                        await using (var fs = File.OpenRead(zip)) h = Convert.ToHexString(await SHA256.HashDataAsync(fs)).ToLowerInvariant();
+                        if (h != r.Sha256) throw new InvalidDataException($"校验不一致 {h[..12]}");
                     }
+                    else if (r.ZipSize > 0 && new FileInfo(zip).Length != r.ZipSize) throw new InvalidDataException("文件大小不对");
+                    ok = true;
+                    App.Log($"更新包下载完成（{label}）{url}");
                 }
+                catch (Exception ex) { lastErr = ex; App.Log($"更新下载失败（{label}）: {ex.GetType().Name} {ex.Message}"); await Task.Delay(800); }
             }
+            if (!ok) throw lastErr ?? new IOException("下载失败");
             Progress(0.93, "解压中…");
             var dir = Path.Combine(tmp, "pkg");
             await Task.Run(() => ZipFile.ExtractToDirectory(zip, dir, true));
@@ -191,8 +231,7 @@ public sealed class Updater
             App.Log("更新失败: " + ex);
             _busy = false;
             App.Current.Dispatcher.BeginInvoke(() =>
-                _store.Upsert(new IslandActivity(Id, "update", "更新没成功", "点一下去 GitHub 手动下载", ActivityKind.Error, 60, DurationSeconds: 0), sticky: true));
-            _found = _found! with { ZipUrl = null };
+                _store.Upsert(new IslandActivity(Id, "update", "更新没成功", "网络不通，点一下再试", ActivityKind.Error, 60, DurationSeconds: 0), sticky: true));
         }
     }
 }
