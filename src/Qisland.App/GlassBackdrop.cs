@@ -62,8 +62,9 @@ public sealed class GlassBackdrop
         var area = _area();
         if (area is not { } a || a.Width < 4 || a.Height < 4) return;
         var now = Environment.TickCount64;
-        // 变形动画期间沿用上一帧背景：每次 GDI 截屏要在 UI 线程上花 10ms+，会把 120 帧的动画压到 60 帧。
-        if (Animating() && _wb != null) return;
+        // 变形动画期间，只要上一张截图还盖得住岛的最终范围就沿用它：每次 GDI 截屏要在 UI 线程上花 10ms+，
+        // 逐帧截会把 120 帧的动画压到 60 帧。范围变大（展开）时必须先补一张够大的，否则新长出来的部分是空的。
+        if (Animating() && _wb != null && Covers(_lastArea, a)) return;
         _lastArea = a; _lastCap = now;
         var sw0 = System.Diagnostics.Stopwatch.StartNew();
         try { CaptureCore(a); }
@@ -73,6 +74,12 @@ public sealed class GlassBackdrop
             if (ms > 8 && now - _slowLogged > 60000) { _slowLogged = now; App.Log($"glass capture {ms:0.0} ms ({a.Width:0}×{a.Height:0})"); }
         }
     }
+
+    private static bool Covers(Rect big, Rect a) =>
+        a.Left >= big.Left - 0.5 && a.Top >= big.Top - 0.5 && a.Right <= big.Right + 0.5 && a.Bottom <= big.Bottom + 0.5;
+
+    /// <summary>岛的目标尺寸刚变：立刻按新范围补一张背景，赶在动画第一帧之前。</summary>
+    public void Refresh() => Capture();
 
     private void CaptureCore(Rect a)
     {

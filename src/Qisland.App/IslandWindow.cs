@@ -234,6 +234,7 @@ public sealed partial class IslandWindow : Window
         _compact.IsHitTestVisible = false;
         _expanded.IsHitTestVisible = m == Mode.Expanded;
         _content.IsHitTestVisible = m == Mode.Expanded;
+        if (_glass != null && _glass.Host.Visibility == Visibility.Visible) _glass.Refresh();
         Kick();
     }
 
