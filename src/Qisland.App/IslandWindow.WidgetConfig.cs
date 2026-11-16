@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -161,10 +162,8 @@ public sealed partial class IslandWindow
     {
         var g = new Grid { Height = 20, Margin = new Thickness(0, 0, 0, 6), Background = Brushes.Transparent };
         var l = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        // iOS 小组件那样的小方块图标：彩色圆角底 + 白色图形
-        var tile = new Border { Width = 18, Height = 18, CornerRadius = new CornerRadius(5.5), Background = d.Tint, VerticalAlignment = VerticalAlignment.Center };
-        var gl = Glyph(d.Glyph, 10, Brushes.White); gl.HorizontalAlignment = HorizontalAlignment.Center; gl.VerticalAlignment = VerticalAlignment.Center;
-        tile.Child = gl;
+        var tile = WidgetIcon(d.Id, 20);
+        tile.VerticalAlignment = VerticalAlignment.Center;
         l.Children.Add(tile);
         var t = Txt(12.5, FontWeights.SemiBold, Theme.Primary); t.Text = d.Name; t.Margin = new Thickness(7, 0, 0, 0); t.VerticalAlignment = VerticalAlignment.Center; l.Children.Add(t);
         g.Children.Add(l);
@@ -177,6 +176,81 @@ public sealed partial class IslandWindow
             g.MouseLeftButtonUp += (_, e) => { e.Handled = true; GoTo(p, (int)p > (int)_page ? 1 : -1); };
         }
         return g;
+    }
+
+    /// <summary>
+    /// 组件图标：渐变圆角方块 + 手画的实心矢量图形（24×24 坐标），照 iOS 小组件 / SF Symbols 的填充风格。
+    /// 原来用的是 Segoe 线框字形，小尺寸下像占位符，所以改成自己画。日历仿 iOS：白底红色日期数字。
+    /// </summary>
+    private static Border WidgetIcon(string id, double size)
+    {
+        static Color C(uint v) => Color.FromRgb((byte)(v >> 16), (byte)(v >> 8), (byte)v);
+        var (top, bottom) = id switch
+        {
+            "weather" => (C(0x5AC8FA), C(0x1E7CF2)),
+            "todo" => (C(0xFF7A6E), C(0xF5352B)),
+            "clip" => (C(0x9C9BFF), C(0x5E5CE6)),
+            "calendar" => (C(0xFFFFFF), C(0xE9E9EE)),
+            "timer" => (C(0xFFC34D), C(0xFF8A00)),
+            _ => (C(0x5EE07A), C(0x24AE45)),
+        };
+        var bg = new LinearGradientBrush(top, bottom, 90); bg.Freeze();
+        var tile = new Border
+        {
+            Width = size, Height = size, CornerRadius = new CornerRadius(size * 0.29), Background = bg,
+            BorderThickness = new Thickness(0.6),
+            BorderBrush = Theme.Freeze(new SolidColorBrush(id == "calendar" ? Color.FromArgb(0x30, 0, 0, 0) : Color.FromArgb(0x38, 0xFF, 0xFF, 0xFF))),
+            SnapsToDevicePixels = true,
+        };
+        if (id == "calendar")
+        {
+            var day = new TextBlock
+            {
+                Text = DateTime.Today.Day.ToString(CultureInfo.InvariantCulture), FontFamily = Theme.Text, FontWeight = FontWeights.Bold,
+                FontSize = size * 0.5, Foreground = Theme.Red, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, size * 0.1, 0, 0),
+            };
+            var bar = new Border { Height = size * 0.22, VerticalAlignment = VerticalAlignment.Top, Background = Theme.Red, CornerRadius = new CornerRadius(size * 0.29, size * 0.29, 0, 0) };
+            var g = new Grid(); g.Children.Add(bar); g.Children.Add(day);
+            tile.Child = g;
+            return tile;
+        }
+        var canvas = new Canvas { Width = 24, Height = 24 };
+        void Fill(string data, double opacity = 1, Brush? brush = null)
+        {
+            var path = new System.Windows.Shapes.Path { Data = Geometry.Parse(data), Fill = brush ?? Brushes.White, Opacity = opacity };
+            canvas.Children.Add(path);
+        }
+        void Stroke(string data, double w)
+        {
+            canvas.Children.Add(new System.Windows.Shapes.Path { Data = Geometry.Parse(data), Stroke = Brushes.White, StrokeThickness = w, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round });
+        }
+        switch (id)
+        {
+            case "weather": // 太阳 + 云
+                Fill("M9 3.2a5.3 5.3 0 1 1 0 10.6a5.3 5.3 0 1 1 0-10.6Z", 1, Theme.Freeze(new SolidColorBrush(C(0xFFD60A))));
+                Fill("M7.2 20.5a4.2 4.2 0 0 1-.5-8.37a5.8 5.8 0 0 1 11.1-1.6a5 5 0 0 1-.3 9.97Z");
+                break;
+            case "todo": // 三行勾选清单
+                Fill("M3.3 4.6a2.1 2.1 0 1 1 4.2 0a2.1 2.1 0 1 1-4.2 0Z M3.3 12a2.1 2.1 0 1 1 4.2 0a2.1 2.1 0 1 1-4.2 0Z M3.3 19.4a2.1 2.1 0 1 1 4.2 0a2.1 2.1 0 1 1-4.2 0Z");
+                Fill("M10.2 3.4h10.3a1.2 1.2 0 0 1 0 2.4H10.2a1.2 1.2 0 0 1 0-2.4Z M10.2 10.8h10.3a1.2 1.2 0 0 1 0 2.4H10.2a1.2 1.2 0 0 1 0-2.4Z M10.2 18.2h7.3a1.2 1.2 0 0 1 0 2.4h-7.3a1.2 1.2 0 0 1 0-2.4Z");
+                break;
+            case "clip": // 剪贴板：夹子 + 板身，板身上两行字
+                Fill("M9 2h6a1.3 1.3 0 0 1 1.3 1.3V6H7.7V3.3A1.3 1.3 0 0 1 9 2Z");
+                Fill("F1 M6 4.2h.6v3.1h10.8V4.2h.6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-14a2 2 0 0 1 2-2Z M8 11.2v1.8h8v-1.8Z M8 15.4v1.8h5.5v-1.8Z");
+                break;
+            case "timer": // 秒表：表盘 + 指针 + 顶钮
+                Fill("M10 1.6h4a1.1 1.1 0 0 1 0 2.2h-4a1.1 1.1 0 0 1 0-2.2Z");
+                Stroke("M12 5.8a7.6 7.6 0 1 1 0 15.2a7.6 7.6 0 1 1 0-15.2Z", 2.3);
+                Stroke("M12 13.4V9.4", 2.3);
+                break;
+            default: // 系统：芯片
+                Fill("F1 M8.5 5h7A3.5 3.5 0 0 1 19 8.5v7a3.5 3.5 0 0 1-3.5 3.5h-7A3.5 3.5 0 0 1 5 15.5v-7A3.5 3.5 0 0 1 8.5 5Z M9.5 9.5v5h5v-5Z");
+                Fill("M9 1.8h1.6V4H9Z M13.4 1.8H15V4h-1.6Z M9 20h1.6v2.2H9Z M13.4 20H15v2.2h-1.6Z M1.8 9H4v1.6H1.8Z M1.8 13.4H4V15H1.8Z M20 9h2.2v1.6H20Z M20 13.4h2.2V15H20Z");
+                break;
+        }
+        tile.Child = new Viewbox { Child = canvas, Margin = new Thickness(size * 0.19), Stretch = Stretch.Uniform };
+        return tile;
     }
 
     /// <summary>行悬停：整行一层很淡的圆角底，左右各外扩 6 px，和文字对齐但不贴边。</summary>
@@ -326,9 +400,7 @@ public sealed partial class IslandWindow
             tog.MouseLeftButtonUp += (_, e) => { e.Handled = true; list[idx] = (id, !on); SaveWidgets(); RebuildExpanded(); };
             g.Children.Add(tog);
 
-            var tile = new Border { Width = 26, Height = 26, CornerRadius = new CornerRadius(8), Background = d.Tint, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center, Opacity = on ? 1 : 0.45 };
-            var gl = Glyph(d.Glyph, 12, Brushes.White); gl.HorizontalAlignment = HorizontalAlignment.Center; gl.VerticalAlignment = VerticalAlignment.Center;
-            tile.Child = gl;
+            var tile = WidgetIcon(d.Id, 26); tile.Margin = new Thickness(0, 0, 10, 0); tile.VerticalAlignment = VerticalAlignment.Center; tile.Opacity = on ? 1 : 0.45;
             Grid.SetColumn(tile, 1);
             g.Children.Add(tile);
 
