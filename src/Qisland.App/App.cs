@@ -31,6 +31,11 @@ public sealed class App : Application
     private HomeworkHub? _homework;
     private YuketangService? _ykt;
     private XuexitongService? _xxt;
+    /// <summary>原始响应落盘只在调试时开：设 QISLAND_DEBUG=1，或在数据目录 debug 里放一个 enabled 文件。</summary>
+    public static bool DebugDumps => _debugDumps ??= Environment.GetEnvironmentVariable("QISLAND_DEBUG") == "1"
+        || File.Exists(Path.Combine(DataDir, "debug", "enabled"));
+    private static bool? _debugDumps;
+
     private ApprovalBroker? _approvals;
     private CodexQuota? _quota;
     private VolumeWatcher? _volume;

@@ -230,9 +230,10 @@ public sealed class YuketangService
 
     private static bool Truthy(JsonNode? n) => n is JsonValue v && (v.TryGetValue<bool>(out var b) ? b : Num(v) > 0);
 
-    // 把前几次的原始响应存一份到本机 debug 目录，方便对字段（不含登录凭据）
+    // 调试开关打开时（QISLAND_DEBUG=1 或 debug\\enabled 文件），把前几次的原始响应存一份到本机 debug 目录，方便对字段（不含登录凭据）
     private static void Dump(string name, JsonNode node)
     {
+        if (!App.DebugDumps) return;
         try
         {
             Directory.CreateDirectory(DebugDir);

@@ -310,6 +310,7 @@ public sealed partial class XuexitongService
 
     private static void Dump(string name, string text)
     {
+        if (!App.DebugDumps) return;
         try { Directory.CreateDirectory(DebugDir); File.WriteAllText(Path.Combine(DebugDir, "xxt-" + name), text); } catch { }
     }
 }
