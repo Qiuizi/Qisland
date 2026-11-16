@@ -23,7 +23,9 @@ public sealed partial class IslandWindow : Window
 
     private const double WinW = 680, WinH = 600, TopGap = 10;
     private const double IdleW = 176, IdleH = 34, CompactH = 36, ExpandedW = 452, RowH = 56;
-    private const int MaxRows = 4;
+    private const int MaxRows = 3;
+    // 胶囊里左侧图标离边缘的距离：胶囊两端是半圆，图标贴得太近会显得挤在弧线上
+    private const double PillInset = 14;
 
     private readonly ActivityStore _store;
     private readonly bool _layered;
@@ -574,7 +576,7 @@ public sealed partial class IslandWindow : Window
         _compact.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var tile = Tile(a.Source, 24, 7);
-        tile.Margin = new Thickness(5, 0, 0, 0);
+        tile.Margin = new Thickness(PillInset, 0, 0, 0);
         _compact.Children.Add(tile);
 
         var src = Theme.SourceName(a.Source);
@@ -584,20 +586,21 @@ public sealed partial class IslandWindow : Window
             TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(10, 0, 10, 1),
             HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, // 文字在图标和右侧状态之间居中，不贴着图标
         };
-        title.Inlines.Add(new Run(src) { Foreground = Theme.Secondary, FontWeight = FontWeights.Medium });
-        title.Inlines.Add(new Run("  " + a.Title) { Foreground = Theme.Primary, FontWeight = FontWeights.SemiBold });
+        // 左边的图标已经说明了来源（微信、QQ、Codex…），文字只放内容本身，不再跟一个「微信」
+        var text = string.IsNullOrWhiteSpace(a.Title) ? src : a.Title;
+        title.Inlines.Add(new Run(text) { Foreground = Theme.Primary, FontWeight = FontWeights.SemiBold });
         Grid.SetColumn(title, 1);
         _compact.Children.Add(title);
 
         var status = StatusView(a, compact: true);
-        status.Margin = new Thickness(0, 0, 12, 0);
+        status.Margin = new Thickness(0, 0, PillInset + 2, 0);
         status.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(status, 2);
         _compact.Children.Add(status);
 
         status.Measure(new Size(double.PositiveInfinity, CompactH));
-        var textW = MeasureText(src, 13, FontWeights.Medium) + MeasureText("  " + a.Title, 13, FontWeights.SemiBold);
-        _compactW = Math.Clamp(5 + 24 + 10 + Math.Min(textW, 260) + 10 + status.DesiredSize.Width + 12, 216, 400);
+        var textW = MeasureText(text, 13, FontWeights.SemiBold);
+        _compactW = Math.Clamp(PillInset + 24 + 10 + Math.Min(textW, 260) + 10 + status.DesiredSize.Width + PillInset + 2, 200, 400);
         _compact.Width = _compactW;
         Place(_compact, _compactW);
         if (_mode == Mode.Compact) _w.Target = _compactW;
@@ -685,30 +688,21 @@ public sealed partial class IslandWindow : Window
         if (_page == Page.Todo && _todoBox != null && _editing) Dispatcher.BeginInvoke(() => _todoBox.Focus(), System.Windows.Threading.DispatcherPriority.Input);
     }
 
+    /// <summary>
+    /// 首页只放「此刻正在发生」的事：审批、音乐、消息和 Agent。
+    /// 待办、倒数日、天气、课表和作业各有自己的页或组件，这里不再重复堆一遍。
+    /// </summary>
     private void BuildHome(StackPanel stack)
     {
-        var tc = TodayClasses();
-        var ranked = _store.Ranked();
-        // 有「今天的课」卡片时，上课中/下一节这两条就不再重复列成行
-        if (tc != null) ranked = ranked.Where(a => a.Id is not ("class:now" or "class:next")).ToList();
-        var hw = HomeworkCard();
-        if (hw != null) ranked = ranked.Where(a => !a.Id.StartsWith("hw:")).ToList();
+        var ranked = _store.Ranked().Where(a => !a.Id.StartsWith("hw:")).ToList();
         var music = Media?.Current;
 
-        var cd = CountdownStrip();
         foreach (var ac in ApprovalCards()) stack.Children.Add(ac);
         if (FocusDoneCard() is { } fd) stack.Children.Add(fd);
-        var qc = QuotaCard();
         if (ranked.Count == 0)
         {
             stack.Children.Add(HeroClock());
-            if (cd != null) stack.Children.Add(cd);
-            if (tc != null) stack.Children.Add(tc);
-            if (hw != null) stack.Children.Add(hw);
-            if (qc != null) stack.Children.Add(qc);
-            if (RainHint() is { } rh) stack.Children.Add(rh);
             if (music != null) stack.Children.Add(Glassy(MusicWithLyrics(music)));
-            if (_todos.Count > 0) stack.Children.Add(Glassy(TodoBlock()));
         }
         else
         {
@@ -722,14 +716,9 @@ public sealed partial class IslandWindow : Window
                 more.Margin = new Thickness(46, 0, 0, 2);
                 rows.Children.Add(more);
             }
-            if (rows.Children.Count > 0) stack.Children.Add(Glassy(rows));
-            if (qc != null) stack.Children.Add(qc);
-            if (tc != null) stack.Children.Add(tc);
-            if (hw != null) stack.Children.Add(hw);
-            if (_todos.Count > 0) stack.Children.Add(Glassy(TodoBlock()));
-            if (cd != null) { cd.Margin = new Thickness(0, 8, 0, 2); stack.Children.Add(cd); }
-            stack.Children.Add(Glassy(Footer(), footer: true));
+            stack.Children.Add(Glassy(rows));
         }
+        if (QuotaCard() is { } qc) stack.Children.Add(qc);
     }
 
     // 玻璃主题下把一组内容装进半透明卡片；其它主题原样返回，保持原来的无卡片布局
@@ -977,7 +966,7 @@ public sealed partial class IslandWindow : Window
         _compact.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var tile = ArtTile(m, 24, 6);
         var tileW = m.Art != null && m.Video ? 43 : 24;
-        tile.Margin = new Thickness(5, 0, 0, 0);
+        tile.Margin = new Thickness(PillInset, 0, 0, 0);
         tile.VerticalAlignment = VerticalAlignment.Center;
         _compact.Children.Add(tile);
         var title = new TextBlock
@@ -1003,12 +992,12 @@ public sealed partial class IslandWindow : Window
         Grid.SetColumn(title, 1);
         _compact.Children.Add(title);
         var bars = Bars(14);
-        bars.Margin = new Thickness(0, 0, 14, 0);
+        bars.Margin = new Thickness(0, 0, PillInset + 2, 0);
         bars.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(bars, 2);
         _compact.Children.Add(bars);
         var textW = MeasureText(m.Title, 13, FontWeights.SemiBold) + (m.Artist.Length > 0 ? MeasureText("  " + m.Artist, 13, FontWeights.Medium) : 0);
-        _compactW = lyr != null ? LyricCompactW : Math.Clamp(5 + tileW + 10 + Math.Min(textW, 250) + 10 + 14 + 13, 190, 390);
+        _compactW = lyr != null ? LyricCompactW : Math.Clamp(PillInset + tileW + 10 + Math.Min(textW, 250) + 10 + 14 + PillInset + 2, 200, 400);
         _compact.Width = _compactW;
         Place(_compact, _compactW);
         if (_mode == Mode.Compact) _w.Target = _compactW;

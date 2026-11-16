@@ -207,7 +207,8 @@ public sealed partial class IslandWindow
         var sw = System.Diagnostics.Stopwatch.StartNew();
         ShowPage();
         var t1 = sw.Elapsed.TotalMilliseconds;
-        if (p == Page.Widgets) EnterWidgets();
+        if (p == Page.Widgets) { EnterWidgets(); PopWidgets(); }
+        else PopChildren();
         var t2 = sw.Elapsed.TotalMilliseconds;
         if (t2 > 8) App.Log($"翻页到{PageNames[(int)p]}：换页 {t1:0} ms，进入 {t2 - t1:0} ms");
         // 新页从运动方向那一侧滑进来，弹簧收尾时会轻轻过冲一下再停住
@@ -287,16 +288,17 @@ public sealed partial class IslandWindow
         if (_expStack == null) return;
         _pageX.Snap(0);
         ApplyPageOffset();
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        PopChildren();
+    }
+
+    /// <summary>当前页的每一块依次「蹦」出来（带一点过冲），组件页里的卡片另外按行弹。</summary>
+    private void PopChildren()
+    {
+        if (_expStack == null) return;
         var i = 0;
-        foreach (UIElement c in _expStack.Children)
+        foreach (FrameworkElement c in _expStack.Children)
         {
-            var begin = TimeSpan.FromMilliseconds(50 + Math.Min(i, 6) * 38);
-            var tt = new TranslateTransform(0, 10);
-            c.RenderTransform = tt;
-            c.Opacity = 0;
-            c.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(260)) { BeginTime = begin, EasingFunction = ease });
-            tt.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(10, 0, TimeSpan.FromMilliseconds(380)) { BeginTime = begin, EasingFunction = ease });
+            PopIn(c, 40 + Math.Min(i, 6) * 50, 0.9, 14);
             i++;
         }
     }

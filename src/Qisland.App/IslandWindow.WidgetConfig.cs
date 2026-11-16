@@ -19,6 +19,7 @@ public sealed partial class IslandWindow
     private static readonly WidgetDef[] WidgetDefs =
     [
         new("weather", "天气", "\uE706", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF))), false),
+        new("school", "课程", "\uE7BE", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0xAF, 0x52, 0xDE))), false),
         new("todo", "待办", "\uE73A", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x45, 0x3A))), true),
         new("clip", "剪贴板", "\uE77F", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF))), true),
         new("calendar", "日历", "\uE787", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x45, 0x3A))), true),
@@ -36,25 +37,76 @@ public sealed partial class IslandWindow
     private readonly List<(FrameworkElement El, double Top, double H)> _wRows = [];
     private bool _wRevealHooked;
 
+    private readonly HashSet<FrameworkElement> _wShown = [];
+
     /// <summary>
-    /// 滚动渐显：从视口底边进来的卡片由淡、略小逐渐变成完整，从顶边出去的反过来，像 iOS 小组件栈那样"浮出来"。
-    /// 跟着 _wScrollTT 的实时值走（包括滚轮的缓动动画），所以每一帧都对得上。
+    /// 卡片「跳出来」：从略小、略低、透明，用带过冲的弹簧曲线弹到原位，像 iOS 小组件那样蹦一下再停稳。
+    /// 停稳后把变换和透明度动画全部清掉，保证文字是 1:1 清晰的。
+    /// </summary>
+    private static void PopIn(FrameworkElement el, double delayMs, double fromScale = 0.84, double fromY = 22)
+    {
+        var st = new ScaleTransform(fromScale, fromScale);
+        var tt = new TranslateTransform(0, fromY);
+        var tg = new TransformGroup(); tg.Children.Add(st); tg.Children.Add(tt);
+        el.RenderTransformOrigin = new Point(0.5, 0.5);
+        el.RenderTransform = tg;
+        var begin = TimeSpan.FromMilliseconds(delayMs);
+        var back = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.6 };
+        var dur = TimeSpan.FromMilliseconds(560);
+        el.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(240)) { BeginTime = begin, FillBehavior = FillBehavior.HoldEnd });
+        var sa = new DoubleAnimation(fromScale, 1, dur) { BeginTime = begin, EasingFunction = back };
+        sa.Completed += (_, _) =>
+        {
+            if (el.RenderTransform != tg) return; // 期间又被别的动画接管了
+            el.BeginAnimation(UIElement.OpacityProperty, null);
+            el.Opacity = 1;
+            el.RenderTransform = null;
+        };
+        st.BeginAnimation(ScaleTransform.ScaleXProperty, sa);
+        st.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(fromScale, 1, dur) { BeginTime = begin, EasingFunction = back });
+        tt.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(fromY, 0, dur) { BeginTime = begin, EasingFunction = back });
+        if (delayMs > 0) el.Opacity = 0;
+    }
+
+    private static void HideForPop(FrameworkElement el, double opacity)
+    {
+        el.BeginAnimation(UIElement.OpacityProperty, null);
+        el.RenderTransform = null;
+        el.Opacity = opacity;
+    }
+
+    /// <summary>翻进组件页：看得见的卡片一张接一张蹦出来。</summary>
+    private void PopWidgets()
+    {
+        _wShown.Clear();
+        var s = -_wScrollTT.Y;
+        var k = 0;
+        foreach (var (el, top, h) in _wRows)
+        {
+            var vt = top - s;
+            if (vt >= WidgetViewMax || vt + h <= 0) { HideForPop(el, 0); continue; }
+            _wShown.Add(el);
+            PopIn(el, 30 + k * 55);
+            k++;
+        }
+    }
+
+    /// <summary>
+    /// 上下滚动时：卡片还没进视口多少时淡淡地露个边；进来够多时「蹦」一下弹出来；完全滚出去后复位，下次进来再蹦。
     /// </summary>
     private void ApplyReveal()
     {
-        if (_wRows.Count == 0) return;
+        if (_wRows.Count == 0 || _wScrollMax <= 0) return;
         var s = -_wScrollTT.Y;
         foreach (var (el, top, h) in _wRows)
         {
-            var span = Math.Max(40, Math.Min(120, h * 0.8));
             var vt = top - s;
-            var enter = Math.Clamp((WidgetViewMax - vt) / span, 0, 1);
-            var exit = Math.Clamp((vt + h) / span, 0, 1);
-            var p = Math.Min(enter, exit);
-            var e = 1 - (1 - p) * (1 - p) * (1 - p);
-            var sc = p >= 1 ? 1 : 0.9 + 0.1 * e;      // 完全可见时严格等于 1，否则文字会发糊
-            el.Opacity = p >= 1 ? 1 : 0.1 + 0.9 * e;
-            if (el.RenderTransform is ScaleTransform st) st.ScaleX = st.ScaleY = sc;
+            var gone = vt >= WidgetViewMax || vt + h <= 0;
+            if (gone) { if (_wShown.Remove(el)) HideForPop(el, 0); continue; }
+            if (_wShown.Contains(el)) continue;
+            var visible = Math.Min(WidgetViewMax, vt + h) - Math.Max(0, vt);
+            if (visible >= Math.Min(56, h * 0.45)) { _wShown.Add(el); PopIn(el, 0); }
+            else HideForPop(el, 0.18);
         }
     }
 
@@ -76,7 +128,14 @@ public sealed partial class IslandWindow
         }
         catch (Exception ex) { App.Log("读取 widgets.txt: " + ex.Message); }
         // 新版本加的组件、文件里漏掉的组件：补在最后，默认显示
-        foreach (var d in WidgetDefs) if (list.All(x => x.Item1 != d.Id)) list.Add((d.Id, true));
+        // 新组件插在默认顺序里它前一个组件的后面（比如「课程」紧跟天气），而不是一律堆到最后
+        for (var k = 0; k < WidgetDefs.Length; k++)
+        {
+            var d = WidgetDefs[k];
+            if (list.Any(x => x.Item1 == d.Id)) continue;
+            var at = k == 0 ? 0 : list.FindIndex(x => x.Item1 == WidgetDefs[k - 1].Id) + 1;
+            list.Insert(Math.Clamp(at, 0, list.Count), (d.Id, true));
+        }
         return _widgetList = list;
     }
 
@@ -137,18 +196,21 @@ public sealed partial class IslandWindow
         _wScrollTT.Y = -_wScroll;
         inner.RenderTransform = _wScrollTT;
         _wRows.Clear();
-        if (_wScrollMax > 0)
         {
-            // 记下每一行在内容里的位置，滚动时按它离视口上下边的距离做渐显 + 放大
+            // 记下每一行在内容里的位置：翻进来时依次弹出，滚动时进视口再弹
             var y = 0.0;
             foreach (FrameworkElement el in inner.Children)
             {
                 var top = y + el.Margin.Top;
                 y += el.DesiredSize.Height;
-                el.RenderTransformOrigin = new Point(0.5, 0.5);
-                el.RenderTransform = new ScaleTransform();
                 _wRows.Add((el, top, el.DesiredSize.Height - el.Margin.Top));
             }
+            // 页面重建（内容刷新）时不重复蹦：当前看得见的直接算已弹出
+            _wShown.Clear();
+            foreach (var (el, top, rh) in _wRows) if (top + _wScrollTT.Y < WidgetViewMax && top + rh + _wScrollTT.Y > 0) _wShown.Add(el);
+        }
+        if (_wScrollMax > 0)
+        {
             if (!_wRevealHooked) { _wRevealHooked = true; _wScrollTT.Changed += (_, _) => ApplyReveal(); }
             ApplyReveal();
             // Canvas 不约束子元素高度，内容按自己的完整高度排版，视口只负责裁切
@@ -185,6 +247,7 @@ public sealed partial class IslandWindow
         {
             case "weather": return WeatherCard();
             case "system": return SystemRow();
+            case "school": return SchoolWidget();
             case "calendar":
                 _calHost = WCard(CalendarView()); _calHost.Height = HalfH; return _calHost;
             case "timer":
@@ -230,6 +293,7 @@ public sealed partial class IslandWindow
             "calendar" => (C(0xFFFFFF), C(0xE9E9EE)),
             "timer" => (C(0xFFC34D), C(0xFF8A00)),
             "shelf" => (C(0x5FD4DA), C(0x149FB5)),
+            "school" => (C(0xD08CFF), C(0x9B3FDB)),
             _ => (C(0x5EE07A), C(0x24AE45)),
         };
         var bg = new LinearGradientBrush(top, bottom, 90); bg.Freeze();
@@ -285,6 +349,11 @@ public sealed partial class IslandWindow
             case "shelf": // 文件架：收纳盒（盖 + 盒身 + 把手槽）
                 Fill("M3.5 3.8h17a1.5 1.5 0 0 1 1.5 1.5v2.2a1.5 1.5 0 0 1-1.5 1.5h-17A1.5 1.5 0 0 1 2 7.5V5.3a1.5 1.5 0 0 1 1.5-1.5Z");
                 Fill("F1 M3.4 10.2h17.2v8.4a2 2 0 0 1-2 2H5.4a2 2 0 0 1-2-2Z M9.5 12.4a1.1 1.1 0 0 0 0 2.2h5a1.1 1.1 0 0 0 0-2.2Z");
+                break;
+            case "school": // 课程：学士帽
+                Fill("M12 3.6 22.4 8.6 12 13.6 1.6 8.6Z");
+                Fill("M6 11.4v4.4c0 1.9 2.7 3.6 6 3.6s6-1.7 6-3.6v-4.4l-6 2.9Z", 0.92);
+                Fill("M20.2 9.8h1.4v6.4h-1.4Z", 0.85);
                 break;
             default: // 系统：芯片
                 Fill("F1 M8.5 5h7A3.5 3.5 0 0 1 19 8.5v7a3.5 3.5 0 0 1-3.5 3.5h-7A3.5 3.5 0 0 1 5 15.5v-7A3.5 3.5 0 0 1 8.5 5Z M9.5 9.5v5h5v-5Z");
@@ -514,5 +583,28 @@ public sealed partial class IslandWindow
         var mask = (LinearGradientBrush)_wView.OpacityMask;
         mask.GradientStops[2].Color = _wScroll >= _wScrollMax - 1 ? Colors.Black : Colors.Transparent;
         return true;
+    }
+}
+
+public sealed partial class IslandWindow
+{
+    /// <summary>课程组件：今天剩下的课 + 待交作业（原来堆在首页，现在挪到组件页）。</summary>
+    private FrameworkElement SchoolWidget()
+    {
+        var d = WidgetDefs.First(x => x.Id == "school");
+        var sp = new StackPanel();
+        var tc = TodayClasses();
+        var hw = HomeworkCard();
+        sp.Children.Add(WidgetHead(d, DateTime.Now.ToString("ddd", new CultureInfo("zh-CN")), null));
+        if (tc != null) { tc.Margin = new Thickness(0, 0, 0, hw != null ? 6 : 0); sp.Children.Add(tc); }
+        if (hw != null) { hw.Margin = new Thickness(0); sp.Children.Add(hw); }
+        if (tc == null && hw == null)
+        {
+            var e = Txt(12.5, FontWeights.Normal, Theme.Tertiary);
+            e.Text = "今天没课了，也没有待交作业";
+            e.Margin = new Thickness(2, 2, 0, 2);
+            sp.Children.Add(e);
+        }
+        return WCard(sp);
     }
 }
