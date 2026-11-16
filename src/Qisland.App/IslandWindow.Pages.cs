@@ -77,6 +77,7 @@ public sealed partial class IslandWindow
     private readonly TranslateTransform _pageTT = new();
     private double _scrollAcc;
     private DateTime _scrollLast = DateTime.MinValue, _scrollSwitched = DateTime.MinValue, _pageFlippedAt = DateTime.MinValue;
+    private int _scrollAxis; // 0 未定，1 竖，2 横
     private bool _scrollLocked;
     private System.Windows.Threading.DispatcherTimer? _gestureEnd;
 
@@ -107,18 +108,22 @@ public sealed partial class IslandWindow
     /// 鼠标滚轮（每格 120）直接翻页；触控板是连续的小增量：内容先跟着手指被"拉"过去，
     /// 拉过阈值才翻，没过阈值松手就弹回原位；一次手势（含惯性）只翻一页。
     /// </summary>
-    private void OnScroll(int delta)
+    private void OnScroll(int delta, bool horizontal = false)
     {
         var now = DateTime.Now;
         var quiet = (now - _scrollLast).TotalMilliseconds > 200;
         _scrollLast = now;
+        // 轴锁：一串手势的第一个事件定方向。触控板横滑时会夹带少量竖向增量（反之亦然），
+        // 不锁的话横滑会被当成竖滚去滚组件页，两边来回抢就是"往下滑还卡"。
+        if (quiet || _scrollAxis == 0) _scrollAxis = horizontal ? 2 : 1;
+        else if (_scrollAxis != (horizontal ? 2 : 1)) return;
         RestartGestureEnd();
         if (_mode != Mode.Expanded) { SetMode(Mode.Expanded); _scrollLocked = true; return; }
         // 翻到组件页的那一下滑动（含触控板惯性）不能接着拿去滚组件，否则一翻过来就自己往下滑。
         // 要等这串手势停下（200 ms 没事件）再滚；鼠标滚轮翻页后也空 400 ms。
         if (quiet) { _scrollLocked = false; _scrollAcc = 0; }
         var flipping = _scrollLocked || (now - _pageFlippedAt).TotalMilliseconds < 400;
-        if (!flipping && ScrollWidgets(delta)) { _scrollAcc = 0; _scrollSwitched = now; return; }
+        if (!horizontal && !flipping && ScrollWidgets(delta)) { _scrollAcc = 0; _scrollSwitched = now; return; }
 
         var discrete = Math.Abs(delta) >= 120 && delta % 120 == 0;
         if (discrete)
@@ -176,7 +181,7 @@ public sealed partial class IslandWindow
         if (msg == 0x020E) // WM_MOUSEHWHEEL
         {
             var delta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
-            OnScroll(delta);
+            OnScroll(delta, horizontal: true);
             handled = true;
             return new IntPtr(1);
         }

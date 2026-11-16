@@ -463,8 +463,17 @@ public sealed partial class IslandWindow
             return (now - _wScrolledAt).TotalMilliseconds < 350; // 刚滚到头：这一串滚动不翻页
         _wScroll = target;
         _wScrolledAt = now;
-        var anim = new DoubleAnimation(-_wScroll, TimeSpan.FromMilliseconds(Math.Abs(delta) >= 120 ? 260 : 90)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
-        _wScrollTT.BeginAnimation(TranslateTransform.YProperty, anim);
+        if (Math.Abs(delta) >= 120 && delta % 120 == 0)
+        {
+            var anim = new DoubleAnimation(-_wScroll, TimeSpan.FromMilliseconds(220)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+            _wScrollTT.BeginAnimation(TranslateTransform.YProperty, anim);
+        }
+        else
+        {
+            // 触控板本身就是连续的小增量，直接跟手；每个事件再起一段动画会互相打断，看起来一顿一顿的
+            _wScrollTT.BeginAnimation(TranslateTransform.YProperty, null);
+            _wScrollTT.Y = -_wScroll;
+        }
         var mask = (LinearGradientBrush)_wView.OpacityMask;
         mask.GradientStops[2].Color = _wScroll >= _wScrollMax - 1 ? Colors.Black : Colors.Transparent;
         return true;
