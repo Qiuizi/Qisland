@@ -21,16 +21,31 @@ Qisland **不读** IndexedDB / LevelDB。额度如果只写在那里，岛上就
 
 设置里可以单独关掉 DeepSeek Harness，也可以和全部 AI 助手一起关。
 
-## 可选插件草稿
+## 在岛上批准：dsh-qisland-bridge 插件
 
-公开文档在 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)：插件是 Cordis 模块，导出 `name` 和 `apply(ctx)`，用 `ctx.on` 听事件，用 `ctx.effect` 管清理。生命周期文档里，轮次状态是 `agent/status`（`running` / `idle`），一轮自然结束前会过 `agent/turn-stopping`。实验性的 auto-review 插件还听了 `tools/pre-execute`，并且 `inject` 了 `approval`。
+DSH 的审批既不弹系统通知，也不改窗口标题，所以上面两条接不住它。要在岛上处理审批，得装 [integrations/dsh-qisland-bridge](../integrations/dsh-qisland-bridge) 这个 Cordis 插件。
 
-`plugins/dsh-qisland/` 是按这些文档写的草稿。它只旁路 POST，不拦截工具，也不改批准结果。桌面版 0.2.2-rc.1 的插件安装走的是应用自己的插件页 / `dsh plugin`，这份草稿没有在那台已安装的应用里跑过。进程和通知不依赖它。
+它挂在 `approval/request` 上，处理方式和 [CodeIsland](https://github.com/wxtsky/CodeIsland) 的 DSH 桥 [dsh-codeisland-bridge](https://github.com/LeLiu/dsh-codeisland-bridge) 一样，岛先接审批，接不住再交回 DSH：
 
-装的时候不要把草稿拷进 `app.asar`。如果应用认本地插件目录，再按它当时的说明加进去。源码树里的装法长这样，仅供对照：
+- 把工具名和命令发到 `POST http://127.0.0.1:9840/v1/approval/deepseek-harness`，岛上弹出审批卡。
+- 点「允许」时插件返回 `'allowed-once'`，点「拒绝」时返回 `'rejected'`。这两种情况下 DSH 自己的弹窗都不会出现。
+- 点「回 DSH」、岛没开、100 秒没点或者出错时，插件调用 `next()`，交回 DSH 自己的审批界面。它绝不默认同意。
+- 这一轮在 DSH 里被取消（`req.signal`）时，插件同步放弃等待。
+- 插件不用 prepend 注册，所以排在 `dsh-approval-gate` 之后，被它自动放行的请求不会打扰你。
 
-```sh
-dsh plugin --profile web add ./plugins/dsh-qisland
+没有让岛和 DSH 的弹窗同时出来、谁先点算谁，原因是 DSH 目前没有接口能让输掉的那个弹窗自己关掉，见 [discussion #12923](https://github.com/deepseek-ai/deepseek-harness/discussions/12923)。同时弹的话，会留下一张关不掉的旧卡片。
+
+### 安装
+
+桌面版的 `desktop` 配置由应用自己管理，所以 `dsh plugin --profile desktop` 会被拒绝。下面的做法和应用插件页一样，用 DSH 自带的 pnpm 来装：
+
+```powershell
+cd $env:USERPROFILE\.dsh\profiles\desktop
+$env:ELECTRON_RUN_AS_NODE = '1'
+& "D:\Program Files (x86)\DSH\DeepSeek Harness.exe" --expose-internals "D:\Program Files (x86)\DSH\resources\runtime\primary-runtime\dependencies\pnpm\bin\pnpm.mjs" add "dsh-qisland-bridge@file:D:/Qiuizi/project/Qisland/integrations/dsh-qisland-bridge"
+Remove-Item Env:ELECTRON_RUN_AS_NODE
 ```
 
-这条命令是否被已安装的桌面版接受，要以那一版的插件页为准。接不上就继续用进程和通知。
+装完以后，在同一目录 `package.json` 的 `dsh.profile.bundles` 里加上 `"dsh-qisland-bridge"`，然后重启 DSH。改之前先备份 `package.json` 和 `cordis.patch.yml`。
+
+旧的 `plugins/dsh-qisland/` 草稿只做旁路通知，已经由这个插件取代。
