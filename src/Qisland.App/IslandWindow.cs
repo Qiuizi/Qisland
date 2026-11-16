@@ -136,7 +136,7 @@ public sealed partial class IslandWindow : Window
             _shadowPaths.Add(sp);
             _root.Children.Add(sp);
         }
-        _glass = new GlassBackdrop(this, GlassArea, WinW, WinH) { ShiftY = () => _rootShift.Y, Animating = () => _animating && (!_w.IsSettled || !_h.IsSettled) };
+        _glass = new GlassBackdrop(this, GlassArea, WinW, WinH) { ShiftY = () => _rootShift.Y, Animating = () => _animating && (!_w.IsSettled || !_h.IsSettled), Slow = () => _mode != Mode.Expanded && !_animating };
         _glass.Host.Clip = _pillGeo;
         _root.Children.Add(_glass.Host);
         _pill.Data = _pillGeo;

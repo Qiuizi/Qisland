@@ -282,6 +282,15 @@ public sealed partial class IslandWindow
     /// 组件图标：渐变圆角方块 + 手画的实心矢量图形（24×24 坐标），照 iOS 小组件 / SF Symbols 的填充风格。
     /// 原来用的是 Segoe 线框字形，小尺寸下像占位符，所以改成自己画。日历仿 iOS：白底红色日期数字。
     /// </summary>
+    // 图标路径每次翻页都要画一遍：解析一次后冻结复用，省掉重复的字符串解析
+    private static readonly Dictionary<string, Geometry> GeoCache = new();
+    private static Geometry Geo(string data)
+    {
+        if (GeoCache.TryGetValue(data, out var g)) return g;
+        g = Geometry.Parse(data); g.Freeze();
+        return GeoCache[data] = g;
+    }
+
     private static Border WidgetIcon(string id, double size)
     {
         static Color C(uint v) => Color.FromRgb((byte)(v >> 16), (byte)(v >> 8), (byte)v);
@@ -320,12 +329,12 @@ public sealed partial class IslandWindow
         var canvas = new Canvas { Width = 24, Height = 24 };
         void Fill(string data, double opacity = 1, Brush? brush = null)
         {
-            var path = new System.Windows.Shapes.Path { Data = Geometry.Parse(data), Fill = brush ?? Brushes.White, Opacity = opacity };
+            var path = new System.Windows.Shapes.Path { Data = Geo(data), Fill = brush ?? Brushes.White, Opacity = opacity };
             canvas.Children.Add(path);
         }
         void Stroke(string data, double w)
         {
-            canvas.Children.Add(new System.Windows.Shapes.Path { Data = Geometry.Parse(data), Stroke = Brushes.White, StrokeThickness = w, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round });
+            canvas.Children.Add(new System.Windows.Shapes.Path { Data = Geo(data), Stroke = Brushes.White, StrokeThickness = w, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round });
         }
         switch (id)
         {

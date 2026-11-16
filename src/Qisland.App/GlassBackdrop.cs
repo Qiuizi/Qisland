@@ -67,6 +67,8 @@ public sealed class GlassBackdrop
         // 但最多沿用 150 ms：鼠标在展开的岛上移动、翻页时也会触发动画，如果一直沿用，
         // 背后切了窗口、滚了页面，玻璃里还是展开那一刻的旧画面，看起来就像影子错了位。
         if (Animating() && _wb != null && Covers(_lastArea, a) && Environment.TickCount64 - _lastCap < 150) return;
+        // 收起静止时不必 20 fps 盯着背后：降到约 4 fps，背后真变了也只晚 1/4 秒，CPU 省下大半
+        if (!Animating() && Slow() && _wb != null && Covers(_lastArea, a) && Environment.TickCount64 - _lastCap < 240) return;
         var hwnd = new System.Windows.Interop.WindowInteropHelper(_win).Handle;
         if (!Native.GetWindowRect(hwnd, out var wr)) return;
         var s = VisualTreeHelper.GetDpi(_win).DpiScaleX;
@@ -87,6 +89,9 @@ public sealed class GlassBackdrop
     private byte[]? _ready, _spare;
     private int _readyW, _readyH;
     private Req? _readyReq;
+    private byte[]? _prev;
+    private Req? _prevReq;
+    private volatile bool _same;
     private int _applyQueued;
 
     private void EnsureWorker()
@@ -117,7 +122,10 @@ public sealed class GlassBackdrop
         a.Left >= big.Left - 0.5 && a.Top >= big.Top - 0.5 && a.Right <= big.Right + 0.5 && a.Bottom <= big.Bottom + 0.5;
 
     /// <summary>岛的目标尺寸刚变：立刻按新范围补一张背景，赶在动画前几帧之内。</summary>
-    public void Refresh() => Capture();
+    public void Refresh() { _lastCap = 0; _same = false; Capture(); }
+
+    /// <summary>岛收起且没在动时返回 true，截屏降频。</summary>
+    public Func<bool> Slow { get; set; } = () => false;
 
     // 后台线程：截屏、缩小、模糊，结果交给 UI 线程只做一次 WritePixels（约 60 KB，很便宜）
     private void CaptureCore(Req r)
@@ -135,6 +143,12 @@ public sealed class GlassBackdrop
         GdiFlush();
         var n = bw * bh * 4;
         Marshal.Copy(_bits, _buf, 0, n);
+        // 背后没变（桌面静止是常态）就什么都不做：不模糊、不 WritePixels，WPF 也就不用重画整个窗口
+        if (_prev is { } pv && pv.Length == n && r.Sx == _prevReq?.Sx && r.Sy == _prevReq?.Sy && r.Sw == _prevReq?.Sw && r.Sh == _prevReq?.Sh
+            && _buf.AsSpan(0, n).SequenceEqual(pv)) { _same = true; return; }
+        if (_prev == null || _prev.Length != n) _prev = new byte[n];
+        Buffer.BlockCopy(_buf, 0, _prev, 0, n);
+        _prevReq = r; _same = false;
         Blur(_buf, _tmp, bw, bh, 2); Blur(_buf, _tmp, bw, bh, 2); Blur(_buf, _tmp, bw, bh, 1);
         Saturate(_buf, n, 1.35);
         lock (_gate)
