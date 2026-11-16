@@ -18,7 +18,7 @@ public sealed class App : Application
     private ApiServer? _api;
     private System.Windows.Forms.NotifyIcon? _tray;
     private FileSystemWatcher? _inboxWatcher;
-    private readonly DispatcherTimer _trim = new() { Interval = TimeSpan.FromSeconds(30) };
+    private readonly DispatcherTimer _trim = new() { Interval = TimeSpan.FromMinutes(3) }; // 收起后闲 3 分钟才压工作集，免得刚收起又展开时把页面一页页换回来（展开卡顿）
     private ToastMirror? _toasts;
     private MessengerFlash? _flash;
     private HarnessWatcher? _harness;
@@ -154,6 +154,7 @@ public sealed class App : Application
             _approvals = new ApprovalBroker(a => Dispatcher.BeginInvoke(a));
             _window.Approvals = _approvals; _approvals.Changed += _window.OnApprovalsChanged;
             if (_api != null) _api.Approval = _approvals.Request;
+            if (_api != null) _api.Bench = () => _window?.RunBench();
             _quota = new CodexQuota(a => Dispatcher.BeginInvoke(a));
             _window.Quota = _quota; _quota.Changed += _window.OnQuotaChanged;
         }

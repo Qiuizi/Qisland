@@ -49,6 +49,8 @@ public sealed class MediaWatcher
     private MediaState? _ncmCur;
     private int _ncmBusy;
     private string? _ncmLogged;
+    private long _ncmCheckedAt;
+    private bool _ncmEligible;
     private readonly Dictionary<string, (string title, string artist, string pic, double dur)> _ncmMeta = [];
     private readonly HashSet<string> _ncmMetaLoading = [];
     private string? _ncmArtId;
@@ -70,7 +72,10 @@ public sealed class MediaWatcher
         try
         {
             MediaState? st = null;
-            if (!SmtcHasCloudMusic() && NcmElog.ClientRunning())
+            // 查进程和系统会话比读文件贵：每 3 秒才查一次，中间沿用结果
+            var now = Environment.TickCount64;
+            if (now - _ncmCheckedAt > 3000) { _ncmCheckedAt = now; _ncmEligible = !SmtcHasCloudMusic() && NcmElog.ClientRunning(); }
+            if (_ncmEligible)
             {
                 _ncm.Poll();
                 if (_ncm.Current() is { } c) st = NcmState(c);

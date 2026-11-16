@@ -61,6 +61,17 @@ public sealed partial class IslandWindow
         }
     }
 
+    /// <summary>性能测试：展开 1.2 秒再收起，重复 3 次（日志里看 anim → Expanded 的帧数据）。</summary>
+    public void RunBench()
+    {
+        var i = 0;
+        var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2.6) };
+        void Step() { if (i++ >= 3) { t.Stop(); return; } App.Log($"bench {i}"); Peek(1.2); }
+        t.Tick += (_, _) => Step();
+        Step();
+        t.Start();
+    }
+
     private void Peek(double seconds)
     {
         _lastPeek = DateTime.Now;

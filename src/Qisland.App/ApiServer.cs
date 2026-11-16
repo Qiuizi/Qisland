@@ -13,6 +13,8 @@ namespace Qisland.App;
 public sealed class ApiServer : IDisposable
 {
     private readonly TcpListener _listener;
+    /// <summary>本机调试：连续展开收起几次，帧数据写进日志。</summary>
+    public Action? Bench;
     private readonly Action<Action> _post;
     private readonly ActivityStore _store;
     private readonly CancellationTokenSource _cts = new();
@@ -115,6 +117,12 @@ public sealed class ApiServer : IDisposable
             var drafts = QislandIngest.Parse(body);
             _post(() => { foreach (var d in drafts) _store.Upsert(d); });
             return (200, $"{{\"ok\":true,\"accepted\":{drafts.Count}}}");
+        }
+
+        if (method == "POST" && path == "/v1/debug/bench" && Bench != null)
+        {
+            _post(Bench);
+            return (200, "{\"ok\":true}");
         }
 
         if (method == "POST" && (path is "/v1/island/push" or "/v3/island/push" or "/push"))
