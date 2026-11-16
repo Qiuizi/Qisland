@@ -62,6 +62,7 @@ public sealed class GlassBackdrop
         var area = _area();
         if (area is not { } a || a.Width < 4 || a.Height < 4) return;
         var now = Environment.TickCount64;
+        if (Animating() && Perf.Has("glassnone") && _wb != null) return;
         if (Animating() && a == _lastArea && now - _lastCap < (Perf.Has("glassfast") ? 0 : 400)) return;
         _lastArea = a; _lastCap = now;
         var sw0 = System.Diagnostics.Stopwatch.StartNew();
