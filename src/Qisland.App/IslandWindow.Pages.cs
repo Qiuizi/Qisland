@@ -76,7 +76,7 @@ public sealed partial class IslandWindow
     private readonly Spring _pageX = new(0) { Response = 0.46, DampingRatio = 0.74, Epsilon = 0.2 };
     private readonly TranslateTransform _pageTT = new();
     private double _scrollAcc;
-    private DateTime _scrollLast = DateTime.MinValue, _scrollSwitched = DateTime.MinValue;
+    private DateTime _scrollLast = DateTime.MinValue, _scrollSwitched = DateTime.MinValue, _pageFlippedAt = DateTime.MinValue;
     private bool _scrollLocked;
     private System.Windows.Threading.DispatcherTimer? _gestureEnd;
 
@@ -114,7 +114,11 @@ public sealed partial class IslandWindow
         _scrollLast = now;
         RestartGestureEnd();
         if (_mode != Mode.Expanded) { SetMode(Mode.Expanded); _scrollLocked = true; return; }
-        if (ScrollWidgets(delta)) { _scrollAcc = 0; _scrollSwitched = now; return; }
+        // 翻到组件页的那一下滑动（含触控板惯性）不能接着拿去滚组件，否则一翻过来就自己往下滑。
+        // 要等这串手势停下（200 ms 没事件）再滚；鼠标滚轮翻页后也空 400 ms。
+        if (quiet) { _scrollLocked = false; _scrollAcc = 0; }
+        var flipping = _scrollLocked || (now - _pageFlippedAt).TotalMilliseconds < 400;
+        if (!flipping && ScrollWidgets(delta)) { _scrollAcc = 0; _scrollSwitched = now; return; }
 
         var discrete = Math.Abs(delta) >= 120 && delta % 120 == 0;
         if (discrete)
@@ -188,7 +192,9 @@ public sealed partial class IslandWindow
 
     private void GoTo(Page p, int dir)
     {
+        _pageFlippedAt = DateTime.Now;
         if (p == _page) return;
+        if (p == Page.Widgets) { _wScroll = 0; _wScrollTT.BeginAnimation(TranslateTransform.YProperty, null); _wScrollTT.Y = 0; } // 每次翻进来都从顶部开始
         if (_page == Page.Widgets && _widgetEdit) { _widgetEdit = false; _pageCache.Remove(Page.Widgets); }
         _page = p;
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -358,7 +364,7 @@ public sealed partial class IslandWindow
         _shelf.Prune();
         var head = new Grid { Margin = new Thickness(2, 0, 2, 8) };
         var title = new StackPanel { Orientation = Orientation.Horizontal };
-        title.Children.Add(Glyph("\uE7B8", 14, Theme.Blue));
+        title.Children.Add(PageIcon("shelf"));
         var tt = Txt(13, FontWeights.SemiBold, Theme.Primary); tt.Text = "文件架"; tt.Margin = new Thickness(7, 0, 0, 0);
         title.Children.Add(tt);
         if (_shelf.Items.Count > 0)

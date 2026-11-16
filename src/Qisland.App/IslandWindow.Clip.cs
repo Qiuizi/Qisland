@@ -91,7 +91,7 @@ public sealed partial class IslandWindow
     {
         var head = new Grid { Margin = new Thickness(2, 0, 2, 8) };
         var title = new StackPanel { Orientation = Orientation.Horizontal };
-        title.Children.Add(Glyph("\uE77F", 14, Theme.Blue));
+        title.Children.Add(PageIcon("clip"));
         var tt = Txt(13, FontWeights.SemiBold, Theme.Primary); tt.Text = "剪贴板"; tt.Margin = new Thickness(7, 0, 0, 0);
         title.Children.Add(tt);
         var n = Txt(12, FontWeights.Normal, Theme.Tertiary);

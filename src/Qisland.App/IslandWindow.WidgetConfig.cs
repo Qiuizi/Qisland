@@ -192,6 +192,7 @@ public sealed partial class IslandWindow
             "clip" => (C(0x9C9BFF), C(0x5E5CE6)),
             "calendar" => (C(0xFFFFFF), C(0xE9E9EE)),
             "timer" => (C(0xFFC34D), C(0xFF8A00)),
+            "shelf" => (C(0x5FD4DA), C(0x149FB5)),
             _ => (C(0x5EE07A), C(0x24AE45)),
         };
         var bg = new LinearGradientBrush(top, bottom, 90); bg.Freeze();
@@ -244,6 +245,10 @@ public sealed partial class IslandWindow
                 Stroke("M12 5.8a7.6 7.6 0 1 1 0 15.2a7.6 7.6 0 1 1 0-15.2Z", 2.3);
                 Stroke("M12 13.4V9.4", 2.3);
                 break;
+            case "shelf": // 文件架：收纳盒（盖 + 盒身 + 把手槽）
+                Fill("M3.5 3.8h17a1.5 1.5 0 0 1 1.5 1.5v2.2a1.5 1.5 0 0 1-1.5 1.5h-17A1.5 1.5 0 0 1 2 7.5V5.3a1.5 1.5 0 0 1 1.5-1.5Z");
+                Fill("F1 M3.4 10.2h17.2v8.4a2 2 0 0 1-2 2H5.4a2 2 0 0 1-2-2Z M9.5 12.4a1.1 1.1 0 0 0 0 2.2h5a1.1 1.1 0 0 0 0-2.2Z");
+                break;
             default: // 系统：芯片
                 Fill("F1 M8.5 5h7A3.5 3.5 0 0 1 19 8.5v7a3.5 3.5 0 0 1-3.5 3.5h-7A3.5 3.5 0 0 1 5 15.5v-7A3.5 3.5 0 0 1 8.5 5Z M9.5 9.5v5h5v-5Z");
                 Fill("M9 1.8h1.6V4H9Z M13.4 1.8H15V4h-1.6Z M9 20h1.6v2.2H9Z M13.4 20H15v2.2h-1.6Z M1.8 9H4v1.6H1.8Z M1.8 13.4H4V15H1.8Z M20 9h2.2v1.6H20Z M20 13.4h2.2V15H20Z");
@@ -251,6 +256,14 @@ public sealed partial class IslandWindow
         }
         tile.Child = new Viewbox { Child = canvas, Margin = new Thickness(size * 0.19), Stretch = Stretch.Uniform };
         return tile;
+    }
+
+    /// <summary>整页（待办 / 剪贴板 / 文件架）标题左边的图标，和组件页同一套。</summary>
+    private static Border PageIcon(string id)
+    {
+        var t = WidgetIcon(id, 22);
+        t.VerticalAlignment = VerticalAlignment.Center;
+        return t;
     }
 
     /// <summary>行悬停：整行一层很淡的圆角底，左右各外扩 6 px，和文字对齐但不贴边。</summary>

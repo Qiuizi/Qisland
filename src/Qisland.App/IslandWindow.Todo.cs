@@ -79,7 +79,7 @@ public sealed partial class IslandWindow
 
         var head = new Grid { Margin = new Thickness(2, 0, 2, 8) };
         var title = new StackPanel { Orientation = Orientation.Horizontal };
-        title.Children.Add(Glyph("\uE73A", 14, Theme.Red));
+        title.Children.Add(PageIcon("todo"));
         var tt = Txt(13, FontWeights.SemiBold, Theme.Primary); tt.Text = "待办"; tt.Margin = new Thickness(7, 0, 0, 0);
         title.Children.Add(tt);
         var n = Txt(12, FontWeights.Normal, Theme.Tertiary); n.Text = open.Count > 0 ? $"  {open.Count} 件" : "  全部完成"; title.Children.Add(n);
