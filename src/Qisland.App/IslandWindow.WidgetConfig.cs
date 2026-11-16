@@ -75,7 +75,8 @@ public sealed partial class IslandWindow
         _wView = null;
         if (_widgetEdit) { BuildWidgetEditor(stack); return; }
 
-        var inner = new StackPanel();
+        // 内容比视口高时必须顶端对齐：WPF 默认会把超高的子元素居中，上面的天气和下面的系统行会被同时裁掉
+        var inner = new StackPanel { VerticalAlignment = VerticalAlignment.Top };
         var on = Widgets().Where(w => w.On).Select(w => w.Id).ToList();
         for (var i = 0; i < on.Count;)
         {
@@ -112,7 +113,11 @@ public sealed partial class IslandWindow
         inner.RenderTransform = _wScrollTT;
         if (_wScrollMax > 0)
         {
-            _wView = new Border { Height = WidgetViewMax, ClipToBounds = true, Child = inner };
+            // Canvas 不约束子元素高度，内容按自己的完整高度排版，视口只负责裁切
+            var host = new Canvas { Height = WidgetViewMax, Width = ExpandedW - 32 };
+            inner.Width = ExpandedW - 32;
+            host.Children.Add(inner);
+            _wView = new Border { Height = WidgetViewMax, ClipToBounds = true, Child = host };
             // 底部渐隐，提示下面还有
             var mask = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
             mask.GradientStops.Add(new GradientStop(Colors.Black, 0));
