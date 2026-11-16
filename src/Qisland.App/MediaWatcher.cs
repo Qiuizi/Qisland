@@ -146,35 +146,18 @@ public sealed class MediaWatcher
 
     // 播放控制：只给网易云自己的主窗口发 WM_APPCOMMAND（媒体键消息），不模拟全局键盘输入
     [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
-    private delegate bool EnumWindowsProc(IntPtr h, IntPtr l);
-    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc cb, IntPtr l);
-    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
-    [DllImport("user32.dll")] private static extern int GetWindowTextLength(IntPtr h);
-    [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr h, uint cmd);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr h, System.Text.StringBuilder sb, int max);
 
-    // 网易云最小化到托盘时 MainWindowHandle 是 0，所以把它所有进程的顶层窗口都找出来，逐个发媒体键消息
+    [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+
+    // 网易云不接受发给它窗口的 WM_APPCOMMAND（实测主窗口、渲染窗口都没反应），也不注册系统媒体会话。
+    // 经棋同意（2026-11-16），改为按一下系统媒体键：和用户自己按键盘上的媒体键效果一样。
     private static void NcmCommand(int cmd)
     {
-        var pids = new HashSet<uint>();
-        foreach (var p in System.Diagnostics.Process.GetProcessesByName("cloudmusic")) using (p) pids.Add((uint)p.Id);
-        if (pids.Count == 0) { App.Log("网易云控制：没找到进程"); return; }
-        var hits = new List<(IntPtr h, string cls)>();
-        EnumWindows((h, _) =>
-        {
-            GetWindowThreadProcessId(h, out var pid);
-            if (pids.Contains(pid) && GetWindow(h, 4) == IntPtr.Zero) // 不要有 owner 的弹窗
-            {
-                var sb = new System.Text.StringBuilder(128); GetClassName(h, sb, 128);
-                hits.Add((h, sb.ToString()));
-            }
-            return true;
-        }, IntPtr.Zero);
-        // 只发给一个窗口，否则「播放/暂停」可能被处理两次又切回去：主窗口类名（OrpheusBrowserHost）优先，其次有标题的窗口
-        var target = hits.OrderByDescending(x => x.cls.Contains("Orpheus", StringComparison.OrdinalIgnoreCase))
-                         .ThenByDescending(x => GetWindowTextLength(x.h) > 0).Select(x => x.h).FirstOrDefault();
-        if (target != IntPtr.Zero) PostMessage(target, 0x0319, target, (IntPtr)(cmd << 16));
-        App.Log($"网易云控制 {cmd}：候选 {hits.Count} 个窗口 [{string.Join(",", hits.Select(x => x.cls).Distinct())}]");
+        byte vk = cmd switch { 11 => 0xB0, 12 => 0xB1, _ => 0xB3 }; // 下一首 / 上一首 / 播放暂停
+        const uint Extended = 0x1, KeyUp = 0x2;
+        keybd_event(vk, 0, Extended, UIntPtr.Zero);
+        keybd_event(vk, 0, Extended | KeyUp, UIntPtr.Zero);
+        App.Log($"网易云控制：媒体键 0x{vk:X2}");
     }
     private bool CurrentIsNcm => Current is { AppSource: "music", SongId: not null } && _ncmCur != null;
 
