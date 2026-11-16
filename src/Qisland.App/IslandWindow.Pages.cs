@@ -181,8 +181,12 @@ public sealed partial class IslandWindow
     {
         if (p == _page) return;
         _page = p;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         ShowPage();
+        var t1 = sw.Elapsed.TotalMilliseconds;
         if (p == Page.Widgets) EnterWidgets();
+        var t2 = sw.Elapsed.TotalMilliseconds;
+        if (t2 > 8) App.Log($"翻页到{PageNames[(int)p]}：换页 {t1:0} ms，进入 {t2 - t1:0} ms");
         // 新页从运动方向那一侧滑进来，弹簧收尾时会轻轻过冲一下再停住
         _pageX.Value = dir * 110;
         _pageX.Velocity = 0;

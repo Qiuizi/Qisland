@@ -1,4 +1,4 @@
-using System.Net.NetworkInformation;
+﻿using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 
 namespace Qisland.App;
@@ -54,26 +54,32 @@ internal sealed class SystemStats
             Battery = p.Flag == 128 || p.Percent == 255 ? null : p.Percent;
             Charging = p.AcLine == 1;
         }
-        try
+        // 网速：GetAllNetworkInterfaces + GetIPStatistics 在装了 WSL/Hyper-V（一堆虚拟网卡）的机器上要几十到上百毫秒，
+        // 放 UI 线程会让翻到组件页那一下卡住，所以丢到后台，界面先用上一次的读数。
+        if (Interlocked.Exchange(ref _netBusy, 1) == 0)
+            _ = Task.Run(() => { try { SampleNet(); } catch { } finally { _netBusy = 0; } });
+    }
+
+    private int _netBusy;
+
+    private void SampleNet()
+    {
+        long rx = 0, tx = 0;
+        foreach (var n in NetworkInterface.GetAllNetworkInterfaces())
         {
-            long rx = 0, tx = 0;
-            foreach (var n in NetworkInterface.GetAllNetworkInterfaces())
-            {
-                if (n.OperationalStatus != OperationalStatus.Up) continue;
-                if (n.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel) continue;
-                var s = n.GetIPStatistics();
-                rx += s.BytesReceived; tx += s.BytesSent;
-            }
-            var now = DateTime.UtcNow;
-            if (_netAt != default)
-            {
-                var sec = Math.Max(0.2, (now - _netAt).TotalSeconds);
-                DownBps = Math.Max(0, (rx - _rx) / sec);
-                UpBps = Math.Max(0, (tx - _tx) / sec);
-            }
-            _rx = rx; _tx = tx; _netAt = now;
+            if (n.OperationalStatus != OperationalStatus.Up) continue;
+            if (n.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel) continue;
+            var s = n.GetIPStatistics();
+            rx += s.BytesReceived; tx += s.BytesSent;
         }
-        catch { }
+        var now = DateTime.UtcNow;
+        if (_netAt != default)
+        {
+            var sec = Math.Max(0.2, (now - _netAt).TotalSeconds);
+            DownBps = Math.Max(0, (rx - _rx) / sec);
+            UpBps = Math.Max(0, (tx - _tx) / sec);
+        }
+        _rx = rx; _tx = tx; _netAt = now;
     }
 
     public static string Speed(double bps) => bps switch
