@@ -1,0 +1,11 @@
+{
+  "name": "dsh-qisland-bridge",
+  "version": "0.2.0",
+  "description": "把 DeepSeek Harness 需要人工确认的审批同步到 Qisland 灵动岛（只通知，不替你批准）",
+  "type": "module",
+  "main": "./src/index.mjs",
+  "exports": { ".": "./src/index.mjs", "./package.json": "./package.json" },
+  "files": ["src", "cordis.patch.yml", "README.md"],
+  "keywords": ["deepseek-harness", "dsh", "dsh-plugin", "qisland"],
+  "license": "MIT"
+}

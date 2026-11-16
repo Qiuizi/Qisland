@@ -1,0 +1,4 @@
+# dsh-qisland-bridge bundle patch: inserts the Qisland bridge plugin row.
+- insert:
+    - id: dsh-qisland-bridge
+      name: 'dsh-qisland-bridge'

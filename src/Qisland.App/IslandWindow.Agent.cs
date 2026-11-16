@@ -58,8 +58,9 @@ public partial class IslandWindow
         var tile = Tile(p.Source, 22, 6.5);
         head.Children.Add(tile);
         var h = Txt(12.5, FontWeights.SemiBold, Theme.Primary);
-        var name = p.Source == "codex" ? "Codex" : p.Source;
-        h.Text = $"{name} 请求{(p.Tool is "Bash" or "shell" or "exec_command" ? "执行命令" : "使用 " + p.Tool)}" + (p.Project.Length > 0 ? "  ·  " + p.Project : "");
+        var dsh = p.Source == "deepseek-harness";
+        var name = p.Source switch { "codex" => "Codex", "deepseek-harness" => "DeepSeek", "claude-code" => "Claude", _ => p.Source };
+        h.Text = $"{name} 请求{(p.Tool is "Bash" or "shell" or "exec_command" or "exec" or "bash" ? "执行命令" : "使用 " + p.Tool)}" + (p.Project.Length > 0 ? "  ·  " + p.Project : "");
         h.Margin = new Thickness(8, 0, 0, 0); h.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(h, 1);
         head.Children.Add(h);
@@ -80,11 +81,11 @@ public partial class IslandWindow
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var left = (int)Math.Max(0, (ApprovalBroker.Wait - (DateTime.Now - p.At)).TotalSeconds);
         var hint = Txt(11, FontWeights.Medium, Theme.Tertiary);
-        hint.Text = $"{left} 秒内不点就回终端问你";
+        hint.Text = dsh ? $"{left} 秒内不点就回 DSH 里问你" : $"{left} 秒内不点就回终端问你";
         hint.VerticalAlignment = VerticalAlignment.Center;
         foot.Children.Add(hint);
         var btns = new StackPanel { Orientation = Orientation.Horizontal };
-        btns.Children.Add(Pill("回终端", Theme.Fill, Theme.Primary, () => Approvals?.Decide(p.Id, "")));
+        btns.Children.Add(Pill(dsh ? "回 DSH" : "回终端", Theme.Fill, Theme.Primary, () => Approvals?.Decide(p.Id, "")));
         btns.Children.Add(Pill("拒绝", Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x45, 0x3A))), Theme.Red, () => Approvals?.Decide(p.Id, "deny")));
         btns.Children.Add(Pill("允许", Theme.Green, Brushes.White, () => Approvals?.Decide(p.Id, "allow")));
         Grid.SetColumn(btns, 1);
