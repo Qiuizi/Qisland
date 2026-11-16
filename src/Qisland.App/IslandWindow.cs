@@ -376,6 +376,7 @@ public sealed partial class IslandWindow : Window
             _animating = false;
             StopPacer();
             ApplyFrame(); // 停稳后把窗口区域收回到最终大小
+            if (_afterSettle is { } after) { _afterSettle = null; after(); }
             App.Log($"anim → {_mode}: {_frames} 帧 / {(_lastRender - _animStart).TotalSeconds:0.00}s, 掉帧 {_slowFrames}, 最长 {_maxDt * 1000:0} ms");
             _frames = 0; _slowFrames = 0; _maxDt = 0;
             if (_mode != Mode.Expanded) App.TrimSoon();
@@ -453,6 +454,7 @@ public sealed partial class IslandWindow : Window
     // 系统模糊（亚克力/背景模糊）在这台 Win11 24H2 上不吃窗口区域裁剪：要么糊满整块窗口，要么关掉透明扩展后露出黑块。
     // 所以玻璃外观不用系统模糊，只用半透明白 + 高光描边 + 顶部反光，窗口始终保持透明扩展。
     private GlassBackdrop _glass = null!;
+    private Action? _afterSettle;
     private void SetGlass(bool on) { if (!_layered && !SnapshotMode) _glass.Enable(_hwnd, on); }
 
     /// <summary>要截的那块：当前尺寸和弹簧目标尺寸里更大的那个，再外扩一点，动画途中边缘也有底。</summary>

@@ -86,8 +86,9 @@ public sealed partial class IslandWindow
         if (_expStack.RenderTransform != _pageTT) _expStack.RenderTransform = _pageTT;
         var x = _pageX.Value;
         _pageTT.X = x;
-        _expStack.Opacity = Perf.Has("nopagefade") ? 1 : 1 - Math.Min(0.55, Math.Abs(x) / 260);
-        if (Perf.Has("pagecache"))
+        _expStack.Opacity = 1 - Math.Min(0.55, Math.Abs(x) / 260);
+        // 翻页滑动期间把整页栅格化成一张位图，GPU 只做平移和淡入；否则每帧都要按 300% 缩放把整页重画一遍
+        // （组件页的渐变卡片、半透明天空最重，实测从 ~62 帧提到 ~90 帧）。停稳后撤掉，避免文字发糊。
         {
             var want = Math.Abs(x) > 0.5;
             if (want && _expStack.CacheMode == null) _expStack.CacheMode = new BitmapCache(VisualTreeHelper.GetDpi(this).DpiScaleX);

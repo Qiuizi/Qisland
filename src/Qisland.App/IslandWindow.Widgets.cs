@@ -125,14 +125,10 @@ public sealed partial class IslandWindow
             if (_memT is { } m) m.ring.AnimateTo(_stats.MemFraction, 760, 0);
             if (_batT is { } b) b.ring.AnimateTo(_stats.Battery is int p ? p / 100.0 : 1, 820, 0);
         }
-        if (Perf.Has("ringdelay"))
-        {
-            foreach (var r in new[] { _cpuT?.ring, _memT?.ring, _batT?.ring }) r?.AnimateTo(0, 1, 0);
-            var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(380) };
-            t.Tick += (_, _) => { t.Stop(); if (_page == Page.Widgets) Rings(); };
-            t.Start();
-        }
-        else Rings();
+        // 圆环等页面滑稳了再长：和翻页同时动会让整页位图缓存每帧失效
+        foreach (var r in new[] { _cpuT?.ring, _memT?.ring, _batT?.ring }) r?.AnimateTo(0, 1, 0);
+        _afterSettle = () => { if (_page == Page.Widgets) Rings(); };
+        Kick(); // 保证会有一次“停稳”来触发它
         RefreshWidgets(sample: false);
     }
 
