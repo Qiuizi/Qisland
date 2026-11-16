@@ -405,7 +405,7 @@ public sealed partial class IslandWindow : Window
 
         Fade(_idle, _idleOp.Value);
         Fade(_compact, _compactOp.Value);
-        Fade(_expanded, _expOp.Value, !Perf.Has("noscale"));
+        Fade(_expanded, _expOp.Value, !Perf.Has("noscale"), Perf.Has("keepvis"));
         if (Perf.Has("cache"))
         {
             var want = _animating && _expOp.Value > 0.01;
@@ -529,11 +529,11 @@ public sealed partial class IslandWindow : Window
 
     private static void Place(FrameworkElement layer, double width) => Canvas.SetLeft(layer, Math.Round((WinW - width) / 2));
 
-    private static void Fade(FrameworkElement layer, double v, bool scale = true)
+    private static void Fade(FrameworkElement layer, double v, bool scale = true, bool keepVisible = false)
     {
         var o = Math.Clamp(v, 0, 1);
         layer.Opacity = o;
-        var vis = o < 0.01 ? Visibility.Hidden : Visibility.Visible;
+        var vis = o < 0.01 && !keepVisible ? Visibility.Hidden : Visibility.Visible;
         if (layer.Visibility != vis) layer.Visibility = vis;
         var st = (ScaleTransform)layer.RenderTransform;
         var k = scale ? 0.94 + 0.06 * o : 1;
