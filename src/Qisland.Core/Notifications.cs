@@ -1,10 +1,13 @@
-namespace Qisland.Core;
+﻿namespace Qisland.Core;
 
 public enum ChatApp
 {
     WeChat,
     QQ,
     DeepSeekHarness,
+    Doubao,
+    Trae,
+    WorkBuddy,
 }
 
 public sealed record NotificationPolicy(bool Enabled, bool WeChat, bool QQ, bool Privacy);
@@ -17,6 +20,7 @@ public static class NotificationMirror
     public static ChatApp? Detect(string? appName, string? appUserModelId)
     {
         if (DeepSeekHarnessSignals.IsHarnessToast(appName, appUserModelId)) return ChatApp.DeepSeekHarness;
+        if (AgentToasts.Detect(appName, appUserModelId) is { } agent) return agent;
         var text = (appName ?? "") + " " + (appUserModelId ?? "");
         if (text.Contains("WeChat", StringComparison.OrdinalIgnoreCase)
             || text.Contains("Weixin", StringComparison.OrdinalIgnoreCase)

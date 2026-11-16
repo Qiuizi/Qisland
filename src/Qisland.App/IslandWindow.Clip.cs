@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -60,7 +60,7 @@ public sealed partial class IslandWindow
             _clips.Insert(0, item);
             foreach (var old in _clips.Where(c => c.Image != null).Skip(4).ToList()) _clips.Remove(old);
             if (_clips.Count > 30) _clips.RemoveRange(30, _clips.Count - 30);
-            if (_mode == Mode.Expanded && _page == Page.Clip && !_animating) RebuildExpanded(); else _expDirty = true;
+            if (_mode == Mode.Expanded && _page is Page.Clip or Page.Widgets && !_animating && !_widgetEdit) RebuildExpanded(); else _expDirty = true;
         }
         catch { /* 剪贴板被别的程序占着，忽略这一次 */ }
     }

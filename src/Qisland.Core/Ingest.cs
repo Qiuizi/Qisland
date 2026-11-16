@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace Qisland.Core;
 
@@ -74,7 +74,7 @@ public static class QislandIngest
             && AgentEventParser.Parse(root.GetRawText()) is { } codex)
             return new[] { codex };
         var source = AgentEventParser.NormalizeSource(Text(root, "source"));
-        if (source is "claude-code" or "codex" or "deepseek-harness")
+        if (source is "claude-code" or "codex" or "deepseek-harness" or "doubao" or "trae" or "workbuddy")
             return One(AgentEventParser.Parse(root.GetRawText()));
         if (root.TryGetProperty("yuketang", out _) || root.TryGetProperty("chaoxing", out _))
             return CourseDeskProvider.ReadSnapshot(root.GetRawText());

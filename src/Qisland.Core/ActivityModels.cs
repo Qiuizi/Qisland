@@ -1,4 +1,4 @@
-namespace Qisland.Core;
+﻿namespace Qisland.Core;
 
 /// <summary>岛上一条活动的状态。数值越大越靠前。</summary>
 public enum ActivityKind
@@ -97,7 +97,7 @@ public static class PushMapping
 
     public static string IconFor(IslandActivity activity) => activity.Source switch
     {
-        "claude-code" or "codex" or "deepseek-harness" or "agents" => "\uE943",
+        "claude-code" or "codex" or "deepseek-harness" or "doubao" or "trae" or "workbuddy" or "agents" => "\uE943",
         "info-station" => "\uE8A5",
         "coursedesk" => "\uE7BE",
         "jarvis" => "\uE8F1",

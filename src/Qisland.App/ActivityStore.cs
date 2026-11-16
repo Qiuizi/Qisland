@@ -1,4 +1,4 @@
-using Qisland.Core;
+﻿using Qisland.Core;
 
 namespace Qisland.App;
 
@@ -39,7 +39,7 @@ public sealed class ActivityStore
             "progress" or "running" => ActivityKind.Running,
             _ => progress is null ? ActivityKind.Info : ActivityKind.Running,
         };
-        if (d.Source is "claude-code" or "codex" or "deepseek-harness" && kind == ActivityKind.Info)
+        if (d.Source is "claude-code" or "codex" or "deepseek-harness" or "doubao" or "trae" or "workbuddy" && kind == ActivityKind.Info)
             kind = ActivityKind.Running;
         var prio = d.Priority switch { "high" => 90, "low" => 20, _ => 50 };
         Upsert(new IslandActivity(d.Id, d.Source, d.Title, d.Body, kind, prio, d.Icon, d.Subtitle,

@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace Qisland.Core;
 
@@ -36,7 +36,7 @@ public static class AgentEventParser
         }
 
         source = NormalizeSource(source);
-        if (source is not ("claude-code" or "codex" or "deepseek-harness")) return null;
+        if (source is not ("claude-code" or "codex" or "deepseek-harness" or "doubao" or "trae" or "workbuddy")) return null;
 
         // 会话刚打开、模型请求这类事件不代表在干活，不上岛
         if (hook is "SessionStart" or "PreModelRequest" or "PostModelRequest" or "PreCompact" or "PostCompact") return null;
@@ -104,6 +104,9 @@ public static class AgentEventParser
             "claude" or "claude-code" or "claudecode" => "claude-code",
             "codex" or "codex-cli" => "codex",
             "deepseek" or "deepseek-harness" or "dsh" or "dsh-desktop" => "deepseek-harness",
+            "doubao" or "豆包" => "doubao",
+            "trae" or "trae-cn" => "trae",
+            "workbuddy" or "work-buddy" => "workbuddy",
             _ => s,
         };
     }
@@ -169,7 +172,7 @@ public static class AgentEventParser
             "claude-code" => "Claude Code",
             "codex" => "Codex",
             "deepseek-harness" => "DeepSeek Harness",
-            _ => source,
+            _ => AgentToasts.Name(source) ?? source,
         };
         return kind switch
         {

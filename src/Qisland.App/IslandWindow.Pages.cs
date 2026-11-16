@@ -113,6 +113,7 @@ public sealed partial class IslandWindow
         _scrollLast = now;
         RestartGestureEnd();
         if (_mode != Mode.Expanded) { SetMode(Mode.Expanded); _scrollLocked = true; return; }
+        if (ScrollWidgets(delta)) { _scrollAcc = 0; _scrollSwitched = now; return; }
 
         var discrete = Math.Abs(delta) >= 120 && delta % 120 == 0;
         if (discrete)
@@ -187,6 +188,7 @@ public sealed partial class IslandWindow
     private void GoTo(Page p, int dir)
     {
         if (p == _page) return;
+        if (_page == Page.Widgets && _widgetEdit) { _widgetEdit = false; _pageCache.Remove(Page.Widgets); }
         _page = p;
         var sw = System.Diagnostics.Stopwatch.StartNew();
         ShowPage();

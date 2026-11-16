@@ -59,12 +59,10 @@ public sealed partial class IslandWindow
 
     private static void SetBody(Border card, UIElement? child) => ((Border)card.Child).Child = child;
 
-    private void BuildWidgets(StackPanel stack)
+    /// <summary>系统一行：CPU / 内存 / 电池 / 网络。</summary>
+    private FrameworkElement SystemRow()
     {
-        _wxTabs.Clear();
-        stack.Children.Add(WeatherCard());
-
-        var sys = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+        var sys = new Grid();
         for (var i = 0; i < 4; i++) sys.ColumnDefinitions.Add(new ColumnDefinition());
         var cpu = StatTile("CPU", "\uE950", (Color.FromRgb(0x64, 0xD2, 0xFF), Color.FromRgb(0x0A, 0x84, 0xFF)), "taskmgr.exe", "打开任务管理器", out var c);
         var mem = StatTile("内存", "\uE964", (Color.FromRgb(0xFF, 0x7A, 0xC8), Color.FromRgb(0xBF, 0x5A, 0xF2)), "taskmgr.exe", "打开任务管理器", out var m);
@@ -73,22 +71,7 @@ public sealed partial class IslandWindow
         var net = NetTile();
         Grid.SetColumn(mem, 1); Grid.SetColumn(bat, 2); Grid.SetColumn(net, 3);
         sys.Children.Add(cpu); sys.Children.Add(mem); sys.Children.Add(bat); sys.Children.Add(net);
-        stack.Children.Add(sys);
-
-        var row = new Grid { Margin = new Thickness(0, 10, 0, 0) };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.3, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
-        row.ColumnDefinitions.Add(new ColumnDefinition());
-        _calHost = WCard(CalendarView());
-        _calHost.Height = 168;
-        row.Children.Add(_calHost);
-        _timerCard = WCard(null);
-        _timerCard.Height = 168;
-        Grid.SetColumn(_timerCard, 2);
-        row.Children.Add(_timerCard);
-        stack.Children.Add(row);
-        _timerState = "";
-        RefreshWidgets(sample: false);
+        return sys;
     }
 
     /// <summary>每秒一次（只在组件页可见时）：改值，不重建。</summary>

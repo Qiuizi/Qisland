@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 using Qisland.Core;
 
@@ -111,6 +111,9 @@ internal static class Theme
         "claude-code" or "claude" => (Color.FromRgb(0xD9, 0x77, 0x57), "", "✻"),
         "codex" => (Color.FromRgb(0x2B, 0x2B, 0x2E), "\uE756", null),
         "deepseek-harness" or "deepseek" => (Color.FromRgb(0x4D, 0x6B, 0xFE), "\uE756", null),
+        "doubao" => (Color.FromRgb(0x2F, 0x6B, 0xFF), "\uE756", null),
+        "trae" => (Color.FromRgb(0x32, 0xD7, 0x6B), "\uE756", null),
+        "workbuddy" => (Color.FromRgb(0x00, 0x82, 0xFF), "\uE756", null),
         "agents" => (Color.FromRgb(0x5E, 0x5C, 0xE6), "\uE756", null),
         "info-station" => (Color.FromRgb(0x63, 0x66, 0xF1), "\uE8A5", null),
         "info-deadline" => (Color.FromRgb(0x63, 0x66, 0xF1), "\uE787", null),
@@ -149,6 +152,9 @@ internal static class Theme
         "claude-code" or "claude" => "Claude Code",
         "codex" => "Codex",
         "deepseek-harness" or "deepseek" => "DeepSeek",
+        "doubao" => "豆包",
+        "trae" => "Trae",
+        "workbuddy" => "WorkBuddy",
         "info-station" => "信息站",
         "info-deadline" => "截止",
         "coursedesk" or "course" => "课程",

@@ -86,6 +86,13 @@ public sealed class ToastMirror
             _store.Upsert(a);
             return a.Id;
         }
+        if (AgentToasts.Source(app) != null)
+        {
+            var g = AgentToasts.FromToast(app, title, body);
+            if (g is null) return "";
+            _store.Upsert(g);
+            return g.Id;
+        }
         var d = NotificationMirror.Present(app, title, body, new NotificationPolicy(true, true, true, false));
         if (!d.Show) return "";
         var source = app == ChatApp.WeChat ? "wechat" : "qq";

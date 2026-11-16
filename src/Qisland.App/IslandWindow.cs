@@ -110,7 +110,7 @@ public sealed partial class IslandWindow : Window
             RebuildBubble(_store.Ranked());
             if (_mode == Mode.Expanded && !_animating) RebuildExpanded(); else _expDirty = true;
         });
-        foreach (var src in new[] { "wechat", "qq", "music", "qqmusic", "codex", "deepseek-harness", "info-station", "spotify", "kugou", "kuwo", "potplayer" })
+        foreach (var src in new[] { "wechat", "qq", "music", "qqmusic", "codex", "deepseek-harness", "doubao", "trae", "workbuddy", "info-station", "spotify", "kugou", "kuwo", "potplayer" })
             AppIcons.Warm(src);
         _poll.Tick += (_, _) => Poll();
         _tick.Tick += (_, _) => OnSecond();
@@ -290,7 +290,7 @@ public sealed partial class IslandWindow : Window
     {
         _todos = todos;
         _expDirty = true;
-        if (_mode == Mode.Expanded && (!_animating || _page == Page.Todo)) RebuildExpanded();
+        if (_mode == Mode.Expanded && (!_animating || _page == Page.Todo) && _page is Page.Todo or Page.Widgets or Page.Home) RebuildExpanded();
     }
 
     public void SetWeather(WeatherSnapshot w, WeatherDetail? detail)
