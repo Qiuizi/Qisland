@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -119,9 +119,20 @@ public sealed partial class IslandWindow
     private void EnterWidgets()
     {
         _stats.Sample();
-        if (_cpuT is { } c) c.ring.AnimateTo(_stats.Cpu, 700, 0);
-        if (_memT is { } m) m.ring.AnimateTo(_stats.MemFraction, 760, 0);
-        if (_batT is { } b) b.ring.AnimateTo(_stats.Battery is int p ? p / 100.0 : 1, 820, 0);
+        void Rings()
+        {
+            if (_cpuT is { } c) c.ring.AnimateTo(_stats.Cpu, 700, 0);
+            if (_memT is { } m) m.ring.AnimateTo(_stats.MemFraction, 760, 0);
+            if (_batT is { } b) b.ring.AnimateTo(_stats.Battery is int p ? p / 100.0 : 1, 820, 0);
+        }
+        if (Perf.Has("ringdelay"))
+        {
+            foreach (var r in new[] { _cpuT?.ring, _memT?.ring, _batT?.ring }) r?.AnimateTo(0, 1, 0);
+            var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(380) };
+            t.Tick += (_, _) => { t.Stop(); if (_page == Page.Widgets) Rings(); };
+            t.Start();
+        }
+        else Rings();
         RefreshWidgets(sample: false);
     }
 

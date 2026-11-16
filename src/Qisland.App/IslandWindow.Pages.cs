@@ -86,7 +86,13 @@ public sealed partial class IslandWindow
         if (_expStack.RenderTransform != _pageTT) _expStack.RenderTransform = _pageTT;
         var x = _pageX.Value;
         _pageTT.X = x;
-        _expStack.Opacity = 1 - Math.Min(0.55, Math.Abs(x) / 260);
+        _expStack.Opacity = Perf.Has("nopagefade") ? 1 : 1 - Math.Min(0.55, Math.Abs(x) / 260);
+        if (Perf.Has("pagecache"))
+        {
+            var want = Math.Abs(x) > 0.5;
+            if (want && _expStack.CacheMode == null) _expStack.CacheMode = new BitmapCache(VisualTreeHelper.GetDpi(this).DpiScaleX);
+            else if (!want && _expStack.CacheMode != null) _expStack.CacheMode = null;
+        }
     }
 
     /// <summary>橡皮筋：拉得越远阻力越大，永远拉不过 limit。</summary>
