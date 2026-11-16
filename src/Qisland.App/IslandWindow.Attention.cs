@@ -1,4 +1,4 @@
-using Qisland.Core;
+﻿using Qisland.Core;
 
 namespace Qisland.App;
 
@@ -67,6 +67,16 @@ public sealed partial class IslandWindow
         Perf.Load();
         App.Log("bench flags: " + Perf.Text);
         var i = 0;
+        if (Perf.Has("pages"))
+        {
+            // 翻页测速：展开后左右各翻两次
+            Peek(8);
+            var dirs = new[] { 1, 1, -1, -1 };
+            var pt = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1.3) };
+            pt.Tick += (_, _) => { if (i >= dirs.Length) { pt.Stop(); return; } App.Log($"bench page {i}"); this.Step(dirs[i++]); };
+            pt.Start();
+            return;
+        }
         var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2.6) };
         void Step() { if (i++ >= 3) { t.Stop(); return; } App.Log($"bench {i}"); Peek(1.2); }
         t.Tick += (_, _) => Step();

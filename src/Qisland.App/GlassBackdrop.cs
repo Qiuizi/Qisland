@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using System.Threading;
 
 namespace Qisland.App;
 
@@ -53,7 +54,7 @@ public sealed class GlassBackdrop
         // 把自己排除在截屏之外，否则会截到自己、越叠越糊。副作用：录屏/截图里看不到岛（只在玻璃主题下）。
         SetWindowDisplayAffinity(hwnd, on ? 0x11u : 0u);
         Host.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
-        if (on) { Capture(); _timer.Start(); } else { _timer.Stop(); _img.Source = null; _wb = null; Free(); }
+        if (on) { Capture(); _timer.Start(); } else { _timer.Stop(); lock (_gate) _req = null; _img.Source = null; _wb = null; }
     }
 
     private void Capture()
@@ -61,41 +62,72 @@ public sealed class GlassBackdrop
         if (!_on) return;
         var area = _area();
         if (area is not { } a || a.Width < 4 || a.Height < 4) return;
-        var now = Environment.TickCount64;
-        // 变形动画期间，只要上一张截图还盖得住岛的最终范围就沿用它：每次 GDI 截屏要在 UI 线程上花 10ms+，
-        // 逐帧截会把 120 帧的动画压到 60 帧。范围变大（展开）时必须先补一张够大的，否则新长出来的部分是空的。
+        // 变形动画期间，只要上一张截图还盖得住岛的最终范围就沿用它（省电，轻薄本上尤其明显）；
+        // 范围变大（展开）时必须先补一张够大的，否则新长出来的部分是空的。
         if (Animating() && _wb != null && Covers(_lastArea, a)) return;
-        _lastArea = a; _lastCap = now;
-        var sw0 = System.Diagnostics.Stopwatch.StartNew();
-        try { CaptureCore(a); }
-        finally
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(_win).Handle;
+        if (!Native.GetWindowRect(hwnd, out var wr)) return;
+        var s = VisualTreeHelper.GetDpi(_win).DpiScaleX;
+        int sx = wr.Left + (int)Math.Floor(a.X * s), sy = wr.Top + (int)Math.Floor((a.Y + ShiftY()) * s);
+        int sw = (int)Math.Ceiling(a.Width * s), sh = (int)Math.Ceiling(a.Height * s);
+        _lastArea = a; _lastCap = Environment.TickCount64;
+        // 截屏 + 模糊放到后台线程：GDI 读屏要等 DWM，在 UI 线程上做会直接吃掉动画帧。
+        lock (_gate) _req = new Req(sx, sy, sw, sh, a, s);
+        EnsureWorker();
+        _kick.Set();
+    }
+
+    private sealed record Req(int Sx, int Sy, int Sw, int Sh, Rect A, double S);
+    private readonly object _gate = new();
+    private readonly AutoResetEvent _kick = new(false);
+    private Req? _req;
+    private Thread? _worker;
+    private byte[]? _ready, _spare;
+    private int _readyW, _readyH;
+    private Req? _readyReq;
+    private int _applyQueued;
+
+    private void EnsureWorker()
+    {
+        if (_worker != null) return;
+        _worker = new Thread(WorkerLoop) { IsBackground = true, Name = "Qisland glass", Priority = ThreadPriority.BelowNormal };
+        _worker.Start();
+    }
+
+    private void WorkerLoop()
+    {
+        while (true)
         {
+            _kick.WaitOne();
+            Req? r;
+            lock (_gate) { r = _req; _req = null; }
+            if (r == null) continue;
+            var sw0 = System.Diagnostics.Stopwatch.StartNew();
+            try { CaptureCore(r); }
+            catch (Exception ex) { App.Log("glass: " + ex.Message); }
             var ms = sw0.Elapsed.TotalMilliseconds;
-            if (ms > 8 && now - _slowLogged > 60000) { _slowLogged = now; App.Log($"glass capture {ms:0.0} ms ({a.Width:0}×{a.Height:0})"); }
+            var now = Environment.TickCount64;
+            if (ms > 12 && now - _slowLogged > 60000) { _slowLogged = now; App.Log($"glass capture {ms:0.0} ms（后台线程）"); }
         }
     }
 
     private static bool Covers(Rect big, Rect a) =>
         a.Left >= big.Left - 0.5 && a.Top >= big.Top - 0.5 && a.Right <= big.Right + 0.5 && a.Bottom <= big.Bottom + 0.5;
 
-    /// <summary>岛的目标尺寸刚变：立刻按新范围补一张背景，赶在动画第一帧之前。</summary>
+    /// <summary>岛的目标尺寸刚变：立刻按新范围补一张背景，赶在动画前几帧之内。</summary>
     public void Refresh() => Capture();
 
-    private void CaptureCore(Rect a)
+    // 后台线程：截屏、缩小、模糊，结果交给 UI 线程只做一次 WritePixels（约 60 KB，很便宜）
+    private void CaptureCore(Req r)
     {
-        var hwnd = new System.Windows.Interop.WindowInteropHelper(_win).Handle;
-        if (!Native.GetWindowRect(hwnd, out var wr)) return;
-        var s = VisualTreeHelper.GetDpi(_win).DpiScaleX;
-        int sx = wr.Left + (int)Math.Floor(a.X * s), sy = wr.Top + (int)Math.Floor((a.Y + ShiftY()) * s);
-        int sw = (int)Math.Ceiling(a.Width * s), sh = (int)Math.Ceiling(a.Height * s);
-        int bw = Math.Max(4, sw / Down), bh = Math.Max(4, sh / Down);
+        int bw = Math.Max(4, r.Sw / Down), bh = Math.Max(4, r.Sh / Down);
         if (bw != _bw || bh != _bh) Alloc(bw, bh);
         var screen = GetDC(IntPtr.Zero);
         try
         {
             SetStretchBltMode(_memDc, 4); // HALFTONE：缩小时取平均，不会闪烁
             SetBrushOrgEx(_memDc, 0, 0, IntPtr.Zero);
-            StretchBlt(_memDc, 0, 0, bw, bh, screen, sx, sy, sw, sh, 0x00CC0020);
+            StretchBlt(_memDc, 0, 0, bw, bh, screen, r.Sx, r.Sy, r.Sw, r.Sh, 0x00CC0020);
         }
         finally { ReleaseDC(IntPtr.Zero, screen); }
         GdiFlush();
@@ -103,14 +135,34 @@ public sealed class GlassBackdrop
         Marshal.Copy(_bits, _buf, 0, n);
         Blur(_buf, _tmp, bw, bh, 2); Blur(_buf, _tmp, bw, bh, 2); Blur(_buf, _tmp, bw, bh, 1);
         Saturate(_buf, n, 1.35);
+        lock (_gate)
+        {
+            var dst = _spare is { } sp && sp.Length == n ? sp : new byte[n];
+            _spare = null;
+            Buffer.BlockCopy(_buf, 0, dst, 0, n);
+            if (_ready != null && _ready.Length == n) _spare = _ready;
+            _ready = dst; _readyW = bw; _readyH = bh; _readyReq = r;
+        }
+        if (Interlocked.Exchange(ref _applyQueued, 1) == 0)
+            _win.Dispatcher.BeginInvoke(DispatcherPriority.Render, Apply);
+    }
+
+    private void Apply()
+    {
+        Interlocked.Exchange(ref _applyQueued, 0);
+        byte[]? px; int bw, bh; Req? r;
+        lock (_gate) { px = _ready; bw = _readyW; bh = _readyH; r = _readyReq; _ready = null; }
+        if (px == null || r == null || !_on) return;
         if (_wb == null || _wb.PixelWidth != bw || _wb.PixelHeight != bh)
         {
             _wb = new WriteableBitmap(bw, bh, 96, 96, PixelFormats.Bgr32, null);
             _img.Source = _wb;
         }
-        _wb.WritePixels(new Int32Rect(0, 0, bw, bh), _buf, bw * 4, 0);
-        Canvas.SetLeft(_img, Math.Floor(a.X * s) / s);
-        Canvas.SetTop(_img, Math.Floor(a.Y * s) / s);
+        _wb.WritePixels(new Int32Rect(0, 0, bw, bh), px, bw * 4, 0);
+        lock (_gate) if (_spare == null) _spare = px;
+        var s = r.S;
+        Canvas.SetLeft(_img, Math.Floor(r.A.X * s) / s);
+        Canvas.SetTop(_img, Math.Floor(r.A.Y * s) / s);
         _img.Width = bw * Down / s; _img.Height = bh * Down / s;
     }
 
