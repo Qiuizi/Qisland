@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Runtime.InteropServices;
@@ -207,6 +207,8 @@ public sealed class InfoStationWatcher
     public string BaseUrl { get; set; } = "http://127.0.0.1:8765";
 
     public InfoStationWatcher(ActivityStore store, HttpClient http) { _store = store; _http = http; }
+    private static string BriefFile => Path.Combine(App.DataDir, "infostation-brief.txt");
+    private static string BriefShown() { try { return File.ReadAllText(BriefFile).Trim(); } catch { return ""; } }
 
     public async Task Loop()
     {
@@ -238,8 +240,13 @@ public sealed class InfoStationWatcher
         }
 
         var brief = await _http.GetStringAsync(BaseUrl + "/api/briefs/today?refresh=false", cts.Token);
-        if (InfoStationProvider.ReadBrief(brief, DateOnly.FromDateTime(DateTime.Now)) is { } b && _seen.Add(b.Id) && _primed)
+        // 简报每天只提醒一次，但不要求“在 Qisland 运行期间才生成”：早上 0 点生成、9 点开机也要提醒。
+        // 已提醒过的日期记在文件里，重启不会重复弹。
+        if (InfoStationProvider.ReadBrief(brief, DateOnly.FromDateTime(DateTime.Now)) is { } b && _seen.Add(b.Id) && BriefShown() != b.Id)
+        {
             _store.Upsert(b with { DurationSeconds = 10 * 60 });
+            try { File.WriteAllText(BriefFile, b.Id); } catch { }
+        }
         _primed = true;
     }
 }
