@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Windows;
@@ -259,7 +259,6 @@ public sealed partial class IslandWindow
     {
         if (_expStack == null) return;
         _pageX.Snap(0);
-        if (Perf.Has("nostagger")) { ApplyPageOffset(); return; }
         ApplyPageOffset();
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
         var i = 0;

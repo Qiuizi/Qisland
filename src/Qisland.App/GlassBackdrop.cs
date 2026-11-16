@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -62,8 +62,8 @@ public sealed class GlassBackdrop
         var area = _area();
         if (area is not { } a || a.Width < 4 || a.Height < 4) return;
         var now = Environment.TickCount64;
-        if (Animating() && Perf.Has("glassnone") && _wb != null) return;
-        if (Animating() && a == _lastArea && now - _lastCap < (Perf.Has("glassfast") ? 0 : 400)) return;
+        // 变形动画期间沿用上一帧背景：每次 GDI 截屏要在 UI 线程上花 10ms+，会把 120 帧的动画压到 60 帧。
+        if (Animating() && _wb != null) return;
         _lastArea = a; _lastCap = now;
         var sw0 = System.Diagnostics.Stopwatch.StartNew();
         try { CaptureCore(a); }

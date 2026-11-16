@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -51,10 +51,9 @@ public sealed class MediaWatcher
     private string? _ncmLogged;
     private long _ncmCheckedAt;
     private bool _ncmEligible;
-    private readonly Dictionary<string, (string title, string artist, string pic, double dur)> _ncmMeta = [];
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string title, string artist, string pic, double dur)> _ncmMeta = new();
     private readonly HashSet<string> _ncmMetaLoading = [];
-    private string? _ncmArtId;
-    private BitmapSource? _ncmArt;
+    private volatile Tuple<string, BitmapSource>? _ncmArt; // 封面和它的 songId 一起换，避免串歌
     private static readonly HttpClient NcmHttp = MakeHttp();
     private static HttpClient MakeHttp()
     {
@@ -107,7 +106,7 @@ public sealed class MediaWatcher
         if (title.Length == 0) title = "网易云音乐";
         var pos = c.Position;
         if (dur > TimeSpan.Zero && pos > dur) pos = dur;
-        return new MediaState(title, artist, "网易云音乐", "music", c.Playing, _ncmArtId == id ? _ncmArt : null,
+        return new MediaState(title, artist, "网易云音乐", "music", c.Playing, _ncmArt is { } art && art.Item1 == id ? art.Item2 : null,
             pos, dur, DateTime.Now, false, 1, false, id);
     }
 
@@ -137,7 +136,7 @@ public sealed class MediaWatcher
                     bmp.StreamSource = new MemoryStream(bytes);
                     bmp.EndInit();
                     bmp.Freeze();
-                    _ncmArt = bmp; _ncmArtId = id;
+                    _ncmArt = Tuple.Create(id, (BitmapSource)bmp);
                 }
                 _ncmCur = null; // 让下一拍按“有变化”刷新
             }
