@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Runtime;
@@ -380,8 +380,14 @@ public sealed class App : Application
         keys.CheckedChanged += (_, _) => _volume?.HookKeys(keys.Checked);
         menu.Items.Add(keys);
         var auto = new System.Windows.Forms.ToolStripMenuItem("开机自启");
-        auto.Click += (_, _) => Autostart.Set(!Autostart.Enabled);
-        menu.Opening += (_, _) => auto.Checked = Autostart.Enabled;
+        // 只走 Run 键时（排队启动，会晚几分钟）点一下是升级成登录计划任务，而不是关掉
+        auto.Click += (_, _) => { if (Autostart.TaskOk()) Autostart.Set(false); else Autostart.Set(true); };
+        menu.Opening += (_, _) =>
+        {
+            var task = Autostart.TaskOk();
+            auto.Checked = task || Autostart.Enabled;
+            auto.Text = task ? "开机自启" : auto.Checked ? "开机自启（排队中，点击改为登录即启动）" : "开机自启";
+        };
         menu.Items.Add(auto);
         menu.Items.Add("编辑待办", null, (_, _) => Process.Start(new ProcessStartInfo("notepad.exe", "\"" + TodoFile.PathName + "\"") { UseShellExecute = true }));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
