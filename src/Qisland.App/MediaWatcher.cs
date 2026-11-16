@@ -48,6 +48,7 @@ public sealed class MediaWatcher
     private Timer? _ncmTimer;
     private MediaState? _ncmCur;
     private int _ncmBusy;
+    private string? _ncmLogged;
     private readonly Dictionary<string, (string title, string artist, string pic, double dur)> _ncmMeta = [];
     private readonly HashSet<string> _ncmMetaLoading = [];
     private string? _ncmArtId;
@@ -78,6 +79,7 @@ public sealed class MediaWatcher
             _ncmCur = st;
             var drift = st != null && prev != null && Current?.SongId == st.SongId && Current?.AppSource == "music"
                 && Math.Abs((LivePosition() - st.Position).TotalSeconds) > 1.5;
+            if (st?.SongId != null && st.SongId != _ncmLogged) { _ncmLogged = st.SongId; App.Log($"网易云(日志): {st.SongId} {st.Title} - {st.Artist} {(st.Playing ? "播放" : "暂停")} {st.Position:mm\\:ss}"); }
             if (!Same(prev, st) || prev?.SongId != st?.SongId || drift) _ = RefreshAsync();
         }
         catch (Exception ex) { App.Log("网易云: " + ex.Message); }
@@ -258,8 +260,7 @@ public sealed class MediaWatcher
         var n = _ncmCur;
         if (n == null) return smtc;
         if (smtc is { Playing: true } && !n.Playing) return smtc with { Sessions = smtc.Sessions + 1 };
-        if (n.Playing || smtc == null) return smtc == null ? n : n with { Sessions = smtc.Sessions + 1 };
-        return smtc with { Sessions = smtc.Sessions + 1 };
+        return smtc == null ? n : n with { Sessions = smtc.Sessions + 1 }; // 都没在放时网易云优先（浏览器标签页常年挂着暂停的会话）
     }
 
     // 只有界面上要换的东西变了才算变化。进度不算：浏览器每隔几秒就推一次时间轴，
