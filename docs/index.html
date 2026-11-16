@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Qisland · Windows 灵动岛 V1 前瞻</title>
+<title>Qisland 2.0 · Windows 灵动岛</title>
 <meta name="description" content="给 Windows 做的灵动岛：顺滑、安静，不挡事。">
 <meta property="og:image" content="assets/shots/03-home.png">
 <style>
@@ -49,34 +49,43 @@ footer{border-top:1px solid var(--line);color:var(--mute);font-size:13px;padding
 </style>
 </head>
 <body>
-<nav><b>Qisland</b><div><a href="#pain">痛点</a><a href="#look">界面</a><a href="#start">开始使用</a><a href="https://github.com/Qiuizi/Qisland">GitHub</a></div></nav>
+<nav><b>Qisland</b><div><a href="#new">新功能</a><a href="#pain">痛点</a><a href="#look">界面</a><a href="#start">开始使用</a><a href="https://github.com/Qiuizi/Qisland">GitHub</a></div></nav>
 
 <section class="hero">
-  <span class="tag">V1 前瞻</span>
+  <span class="tag">2.0 正式版</span>
   <h1>Qisland</h1>
-  <p class="sub">给 Windows 做的灵动岛。<span class="grad">顺滑、安静，不挡事。</span></p>
+  <p class="sub">给 Windows 做的灵动岛。<span class="grad">现在，它开始替你记事。</span></p>
   <div class="island"><img src="assets/shots/02-compact.png" alt="Qisland 紧凑态"></div>
   <div class="cta">
-    <a class="btn" href="https://github.com/Qiuizi/Qisland/releases/tag/v1.0.0-preview">下载 V1 前瞻</a>
+    <a class="btn" href="https://github.com/Qiuizi/Qisland/releases/tag/v2.0.0">下载 2.0</a>
     <a class="btn ghost" href="#film">观看宣传片</a>
   </div>
 </section>
 
 <section id="film" class="reveal">
   <h2>一条胶囊，<br>装下你正在等的事。</h2>
-  <p class="sub">AI 助手要确认、作业要截止、群里有新消息。它们按轻重排好，只在需要时展开。</p>
-  <video src="assets/qisland-v1-preview.mp4" poster="assets/poster.png" controls playsinline muted loop preload="metadata"></video>
+  <p class="sub">下节课、快截止的作业、Codex 要你点头的命令、正在放的歌。它们按轻重排好，只在需要时展开。</p>
+  <video src="assets/qisland-v2.mp4" poster="assets/poster.png" controls playsinline muted loop preload="metadata"></video>
+</section>
+
+<section id="new">
+  <span class="tag reveal">2.0 新功能</span>
+  <h2 class="reveal">课表、作业、审批、歌词，<br>都上岛了。</h2>
+  <div class="two reveal"><img src="assets/shots/11-class-home.png" alt="课表"><div><h3 style="font-size:30px">课表，导进来就好</h3><p>托盘里导入 <code>.ics</code> 课表。上课时胶囊显示进度，课前 10 分钟轻轻弹一下，主页告诉你今天还有几节课。</p></div></div>
+  <div class="two reveal"><div><h3 style="font-size:30px">作业 DDL，不再漏</h3><p>雨课堂、学习通扫码登录，低频只读获取作业截止时间。24 小时内上岛，3 小时内变红。凭据加密存在本机，不存密码，不签到、不刷课、不答题。</p></div><img src="assets/shots/15-homework-home.png" alt="作业"></div>
+  <div class="two reveal"><img src="assets/shots/17-codex-approval.png" alt="Codex 审批"><div><h3 style="font-size:30px">Codex 要跑命令？在岛上点允许</h3><p>允许、拒绝或回终端，一次点击。额度圆环显示 5 小时和本周用量。默认关闭，托盘里打开。</p></div></div>
+  <div class="two reveal"><div><h3 style="font-size:30px">网易云，也有歌词了</h3><p>网易云音乐 3.x 不接系统媒体控件，Qisland 只读解析它自己的播放日志，拿到曲目、进度、封面和逐行歌词。</p></div><img src="assets/shots/14-lyrics-home.png" alt="网易云歌词"></div>
 </section>
 
 <section id="pain">
   <h2 class="reveal">先把地基打牢。</h2>
-  <p class="sub reveal">Windows 灵动岛用一天就会遇到的问题，V1 前瞻先解决。</p>
+  <p class="sub reveal">Windows 灵动岛用一天就会遇到的问题，先解决，再加功能。</p>
   <div class="pains">
     <div class="pain reveal"><div class="q">岛下面的按钮点不到？</div><h3>只占岛那么大</h3><p>透明大窗口会吞掉点击。Qisland 把可点击区域收紧到岛本身，其余像素全部穿透给下面的程序。</p></div>
     <div class="pain reveal"><div class="q">游戏和全屏视频被挡住？</div><h3>全屏自动让路</h3><p>识别全屏游戏和演示模式自动隐藏，<code>Ctrl+Alt+Q</code> 随时叫回。按进程名配置白名单和黑名单。</p></div>
     <div class="pain reveal"><div class="q">闲着也在耗电？</div><h3>不动就不画</h3><p>只有动画在跑时才启动帧循环，其余时间几乎不占资源。</p><div class="n">≈0.5%<small>闲置 CPU（作者机器实测）</small></div></div>
-    <div class="pain reveal"><div class="q">动画发涩？</div><h3>跟上屏幕刷新率</h3><p>读取显示器刷新率驱动弹簧动画，页面预热缓存，滑动不重建。</p><div class="n">116 fps<small>120 Hz 屏实测</small></div></div>
-    <div class="pain reveal"><div class="q">玻璃效果留下黑块？</div><h3>不靠系统模糊</h3><p>Win11 24H2 的亚克力无法裁切。Qisland 用磨砂填充、高光和分层阴影做出质感，不再出黑块。</p></div>
+    <div class="pain reveal"><div class="q">动画发涩？</div><h3>跟上屏幕刷新率</h3><p>读取显示器刷新率驱动弹簧动画，页面预热缓存，翻页时整页转成位图只做平移。</p><div class="n">110+ fps<small>展开动画 · 120 Hz 屏实测</small></div></div>
+    <div class="pain reveal"><div class="q">玻璃效果卡顿、留黑块？</div><h3>模糊在后台算</h3><p>系统亚克力裁不出胶囊。Qisland 自己截取岛背后的画面做模糊，截屏和模糊都在后台线程，展开全程都有通透质感。</p></div>
     <div class="pain reveal"><div class="q">崩了就没了？</div><h3>自己爬起来</h3><p>开机自启，崩溃后自动重启；一分钟内重复崩溃就停下，不会死循环。</p></div>
   </div>
 </section>
@@ -96,8 +105,9 @@ footer{border-top:1px solid var(--line);color:var(--mute);font-size:13px;padding
     <div class="reveal"><h4><i style="background:#30d158"></i>电量与充电</h4><p>插拔电源、20% 和 10% 低电量、充满提醒。</p></div>
     <div class="reveal"><h4><i style="background:#0a84ff"></i>多显示器</h4><p>跟随前台窗口所在的屏幕，按每块屏的 DPI 居中。</p></div>
     <div class="reveal"><h4><i style="background:#ff9f0a"></i>复制与下载进度</h4><p>资源管理器复制和浏览器下载显示进度，完成后一键定位文件。</p></div>
-    <div class="reveal"><h4><i style="background:#bf5af2"></i>媒体</h4><p>QQ 音乐、Spotify、酷狗、酷我和浏览器视频，拖动即可跳转。</p></div>
+    <div class="reveal"><h4><i style="background:#bf5af2"></i>媒体与歌词</h4><p>网易云、QQ 音乐、Spotify、酷狗、酷我和浏览器视频，带逐行歌词。</p></div>
     <div class="reveal"><h4><i style="background:#ff375f"></i>考试倒计时</h4><p>三天内的考试直接显示在胶囊上。</p></div>
+    <div class="reveal"><h4><i style="background:#ffd60a"></i>剪贴板与农历</h4><p>图片也进历史，文字一键翻译；日历显示农历和节日。</p></div>
     <div class="reveal"><h4><i style="background:#64d2ff"></i>本机上岛 API</h4><p><code>127.0.0.1:9840</code>，兼容 WinIslands 协议，脚本一行推送。</p></div>
   </div>
 </section>
@@ -105,10 +115,10 @@ footer{border-top:1px solid var(--line);color:var(--mute);font-size:13px;padding
 <section id="start" class="reveal">
   <h2>三十秒开始。</h2>
   <p class="sub">需要 Windows 10/11 和 .NET 8 桌面运行时。下载、解压、运行 <code>Qisland.exe</code>。</p>
-  <div class="cta"><a class="btn" href="https://github.com/Qiuizi/Qisland/releases/tag/v1.0.0-preview">下载 V1 前瞻</a><a class="btn ghost" href="https://github.com/Qiuizi/Qisland#readme">阅读文档</a></div>
+  <div class="cta"><a class="btn" href="https://github.com/Qiuizi/Qisland/releases/tag/v2.0.0">下载 2.0</a><a class="btn ghost" href="https://github.com/Qiuizi/Qisland#readme">阅读文档</a></div>
 </section>
 
-<footer>Qisland V1 前瞻 · MIT · 基于 <a href="https://github.com/JudeKwong/WinIslands">WinIslands</a> 起步 · 由 <a href="https://github.com/Qiuizi">Qiuizi</a> 制作</footer>
+<footer>Qisland 2.0 · MIT · 基于 <a href="https://github.com/JudeKwong/WinIslands">WinIslands</a> 起步 · 由 <a href="https://github.com/Qiuizi">Qiuizi</a> 制作</footer>
 <script>
 const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('on');io.unobserve(e.target)}}),{threshold:.15});
 document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
