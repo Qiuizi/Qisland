@@ -569,6 +569,7 @@ public sealed partial class IslandWindow : Window
         {
             FontFamily = Theme.Text, FontSize = 13, VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(10, 0, 10, 1),
+            HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, // 文字在图标和右侧状态之间居中，不贴着图标
         };
         title.Inlines.Add(new Run(src) { Foreground = Theme.Secondary, FontWeight = FontWeights.Medium });
         title.Inlines.Add(new Run("  " + a.Title) { Foreground = Theme.Primary, FontWeight = FontWeights.SemiBold });
@@ -948,6 +949,7 @@ public sealed partial class IslandWindow : Window
         {
             FontFamily = Theme.Text, FontSize = 13, VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(10, 0, 10, 1),
+            HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, // 文字在图标和右侧状态之间居中，不贴着图标
         };
         var lyr = LiveLyrics;
         _compactLyric = null;
