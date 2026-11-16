@@ -64,6 +64,8 @@ public sealed partial class IslandWindow
     /// <summary>性能测试：展开 1.2 秒再收起，重复 3 次（日志里看 anim → Expanded 的帧数据）。</summary>
     public void RunBench()
     {
+        Perf.Load();
+        App.Log("bench flags: " + Perf.Text);
         var i = 0;
         var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2.6) };
         void Step() { if (i++ >= 3) { t.Stop(); return; } App.Log($"bench {i}"); Peek(1.2); }
@@ -100,5 +102,16 @@ public sealed partial class IslandWindow
             _held.Clear();
         }
         _wasFocusing = f;
+    }
+}
+
+/// <summary>调试用开关（%APPDATA%\Qisland\perf.txt，空格分隔），只在测速时读一次，方便对比不同渲染做法。</summary>
+internal static class Perf
+{
+    public static string Text = "";
+    public static bool Has(string f) => (" " + Text + " ").Contains(" " + f + " ");
+    public static void Load()
+    {
+        try { var p = System.IO.Path.Combine(App.DataDir, "perf.txt"); Text = System.IO.File.Exists(p) ? System.IO.File.ReadAllText(p).Trim() : ""; } catch { Text = ""; }
     }
 }

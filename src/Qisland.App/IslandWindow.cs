@@ -405,7 +405,18 @@ public sealed partial class IslandWindow : Window
 
         Fade(_idle, _idleOp.Value);
         Fade(_compact, _compactOp.Value);
-        Fade(_expanded, _expOp.Value);
+        Fade(_expanded, _expOp.Value, !Perf.Has("noscale"));
+        if (Perf.Has("cache"))
+        {
+            var want = _animating && _expOp.Value > 0.01;
+            if (want && _expanded.CacheMode == null) _expanded.CacheMode = new BitmapCache(VisualTreeHelper.GetDpi(this).DpiScaleX);
+            else if (!want && _expanded.CacheMode != null) _expanded.CacheMode = null;
+        }
+        if (Perf.Has("noshadow"))
+        {
+            var vis = _animating ? Visibility.Hidden : Visibility.Visible;
+            foreach (var sp in _shadowPaths) if (sp.Visibility != vis) sp.Visibility = vis;
+        }
 
         var bo = Math.Clamp(_bubbleOp.Value, 0, 1);
         _bubble.Opacity = bo;
@@ -518,14 +529,15 @@ public sealed partial class IslandWindow : Window
 
     private static void Place(FrameworkElement layer, double width) => Canvas.SetLeft(layer, Math.Round((WinW - width) / 2));
 
-    private static void Fade(FrameworkElement layer, double v)
+    private static void Fade(FrameworkElement layer, double v, bool scale = true)
     {
         var o = Math.Clamp(v, 0, 1);
         layer.Opacity = o;
         var vis = o < 0.01 ? Visibility.Hidden : Visibility.Visible;
         if (layer.Visibility != vis) layer.Visibility = vis;
         var st = (ScaleTransform)layer.RenderTransform;
-        st.ScaleX = st.ScaleY = 0.94 + 0.06 * o;
+        var k = scale ? 0.94 + 0.06 * o : 1;
+        if (st.ScaleX != k) st.ScaleX = st.ScaleY = k;
     }
 
     // ───────────────────────────── 内容 ─────────────────────────────
