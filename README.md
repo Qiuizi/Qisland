@@ -29,10 +29,11 @@ Agent 跑完了吗？要我批准命令吗？谁发了消息？下节课几点�
 
 | 痛点 | Qisland 怎么做 |
 |---|---|
-| **等 AI 编程助手，要一直切回终端看** | Claude Code、Codex 跑完、出错、等你批准时，胶囊会变。Codex 的命令请求可以直接在岛上点允许或拒绝，旁边一圈显示额度还剩多少 |
+| **等 AI Agent，要一直切回去看** | 主流 Agent 都适配：Claude Code、Codex、DeepSeek Harness（DSH）、豆包、Trae、WorkBuddy。跑完、出错、等你确认时，胶囊会变。Codex 的命令请求可以直接在岛上点允许或拒绝，旁边一圈显示额度还剩多少 |
 | **通知要么太吵，要么会漏** | 分四档：可以不管的什么都不做；微信和 QQ 消息只让胶囊轻弹一下、换上发消息软件的图标；时间敏感的展开几秒；必须处理的才停留 |
 | **课表、作业截止散在三个 App 里** | 导入课表 `.ics`，课前 10 分钟提醒，上课时显示进度；雨课堂、学习通扫码登录后只读取作业截止时间，24 小时内上岛，3 小时内变红 |
-| **想看一眼在放什么，要把播放器翻出来** | 网易云、QQ 音乐、Spotify、浏览器视频等都会显示封面、进度和逐行歌词，岛上就能暂停和切歌 |
+| **想看一眼在放什么，要把播放器翻出来** | 主流音乐平台都适配：QQ 音乐、网易云、酷狗、酷我、Spotify、Apple Music，以及浏览器里的视频。封面、进度和逐行歌词都在岛上，也能直接暂停和切歌 |
+| **想要的组件和别人不一样** | 天气、待办、剪贴板、日历、专注、系统状态都是小组件，开哪些、怎么排自己定，在岛上点「编辑组件」就能改 |
 | **常驻的东西自己成了负担** | 只有胶囊本身能点，旁边照常点击；打游戏和全屏视频时自动隐藏；闲置约 0.5% CPU；120 Hz 屏上动画跑到 99–118 帧 |
 | **怕它碰隐私** | 全在本机。不存任何密码，登录凭据用 Windows DPAPI 加密；不读微信消息内容；不自动签到、刷课或答题；剪贴板历史只在内存里 |
 
@@ -56,14 +57,15 @@ Agent 跑完了吗？要我批准命令吗？谁发了消息？下节课几点�
 powershell -ExecutionPolicy Bypass -File scripts\install-codex-hooks.ps1
 ```
 
-Claude Code 用 `scripts\install-claude-hooks.ps1`，WSL2 里用 `scripts/qisland-push`。别的程序想上岛，可以往本机 `http://127.0.0.1:9840` 发一个请求，协议见 [docs/push-api.md](docs/push-api.md)。
+Claude Code 用 `scripts\install-claude-hooks.ps1`，WSL2 里用 `scripts/qisland-push`。DeepSeek Harness、豆包、Trae、WorkBuddy 不用装任何东西：它们弹出的系统通知会被岛接住，按「完成 / 等你确认 / 出错」显示。别的程序想上岛，可以往本机 `http://127.0.0.1:9840` 发一个请求，协议见 [docs/push-api.md](docs/push-api.md)。
 
 ## 用法
 
 - 鼠标移上去展开，移开收起；滚轮切换主页、组件、待办、剪贴板、文件架。
 - `Ctrl+Alt+Q`：全屏时把岛叫回来，平时临时隐藏。
 - 托盘右键：导入课表、登录雨课堂和学习通、切换外观、开机自启、接管音量键。
-- 配置都是 `%APPDATA%\Qisland\` 下的纯文本，比如 `todo.md`、`countdown.txt`、`fullscreen.txt`，可以直接改。
+- 组件页底部点「编辑组件」：开关每个组件、上下调整顺序；相邻的两个半宽组件会并排。
+- 配置都是 `%APPDATA%\Qisland\` 下的纯文本，比如 `todo.md`、`widgets.txt`、`countdown.txt`、`fullscreen.txt`，可以直接改。
 
 ## 已知限制
 
