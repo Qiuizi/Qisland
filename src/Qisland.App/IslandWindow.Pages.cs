@@ -124,6 +124,8 @@ public sealed partial class IslandWindow
         if (quiet) { _scrollLocked = false; _scrollAcc = 0; }
         var flipping = _scrollLocked || (now - _pageFlippedAt).TotalMilliseconds < 400;
         if (!horizontal && !flipping && ScrollWidgets(delta)) { _scrollAcc = 0; _scrollSwitched = now; return; }
+        // 触控板竖滑只用来滚内容，永远不翻页；翻页交给横滑（鼠标滚轮没有横向，仍然可以竖滚翻页）
+        if (!horizontal && !(Math.Abs(delta) >= 120 && delta % 120 == 0)) { _scrollAcc = 0; return; }
 
         var discrete = Math.Abs(delta) >= 120 && delta % 120 == 0;
         if (discrete)

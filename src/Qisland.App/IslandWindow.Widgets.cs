@@ -38,6 +38,7 @@ public sealed partial class IslandWindow
     private static readonly Brush W3 = Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x99, 0xFF, 0xFF, 0xFF)));
     private static readonly Brush WFill = Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF)));
     private static readonly Brush WFillHi = Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x38, 0xFF, 0xFF, 0xFF)));
+    private static readonly Brush WRim = Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x1C, 0xFF, 0xFF, 0xFF)));
     private static readonly Brush RainBlue = Theme.Freeze(new SolidColorBrush(Color.FromRgb(0x9F, 0xDB, 0xFF)));
 
     private static TextBlock T(string text, double size, FontWeight weight, Brush fg, bool display = false) => new()
@@ -131,11 +132,14 @@ public sealed partial class IslandWindow
         if (Theme.IsGlass && w != null) { sky = sky.CloneCurrentValue(); sky.Opacity = 0.74; sky.Freeze(); }
         var card = WCard(null, sky);
         ((Border)card.Child).Padding = new Thickness(18, 14, 18, 12);
+        if (w != null) { card.BorderBrush = Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x2E, 0xFF, 0xFF, 0xFF))); card.BorderThickness = new Thickness(1); ((Border)card.Child).CornerRadius = new CornerRadius(21); }
         var sp = new StackPanel();
         SetBody(card, sp);
         if (w == null)
         {
-            var t = T("天气加载中…", 13, FontWeights.Medium, Theme.Secondary); t.Margin = new Thickness(0, 30, 0, 30); t.HorizontalAlignment = HorizontalAlignment.Center;
+            var ic = new WeatherIcon { Code = 2, Width = 34, Height = 34, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 18, 0, 6), Opacity = 0.55 };
+            sp.Children.Add(ic);
+            var t = T("正在获取成都天气", 12.5, FontWeights.Medium, Theme.Secondary); t.Margin = new Thickness(0, 0, 0, 20); t.HorizontalAlignment = HorizontalAlignment.Center;
             sp.Children.Add(t);
             return card;
         }
@@ -185,7 +189,7 @@ public sealed partial class IslandWindow
         var bar = new Grid { Margin = new Thickness(0, 12, 0, 8) };
         var upd = T($"{x.Fetched:HH:mm} 更新", 10.5, FontWeights.Medium, W3); upd.VerticalAlignment = VerticalAlignment.Center;
         bar.Children.Add(upd);
-        var seg = new Border { Background = WFill, CornerRadius = new CornerRadius(10), Padding = new Thickness(2), HorizontalAlignment = HorizontalAlignment.Right };
+        var seg = new Border { Background = WFill, BorderBrush = WRim, BorderThickness = new Thickness(0.6), CornerRadius = new CornerRadius(10), Padding = new Thickness(2), HorizontalAlignment = HorizontalAlignment.Right };
         var tabs = new StackPanel { Orientation = Orientation.Horizontal };
         seg.Child = tabs;
         string[] names = ["逐时", "详情", "三天"];
@@ -233,7 +237,13 @@ public sealed partial class IslandWindow
 
     private static FrameworkElement SkyCell(string label, int code, string temp, int rain, bool night, bool now)
     {
-        var c = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center };
+        var c = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 3, 0, 3) };
+        if (now) return new Border { Background = WFill, BorderBrush = WRim, BorderThickness = new Thickness(0.6), CornerRadius = new CornerRadius(12), Margin = new Thickness(1, 0, 3, 0), Child = SkyBody(c, label, code, temp, rain, night, now) };
+        return SkyBody(c, label, code, temp, rain, night, now);
+    }
+
+    private static FrameworkElement SkyBody(StackPanel c, string label, int code, string temp, int rain, bool night, bool now)
+    {
         var l = T(label, 11, now ? FontWeights.Bold : FontWeights.Medium, now ? W1 : W2); l.HorizontalAlignment = HorizontalAlignment.Center;
         c.Children.Add(l);
         c.Children.Add(new WeatherIcon { Code = code, Night = night, Width = 24, Height = 24, Margin = new Thickness(0, 4, 0, 2) });
@@ -256,13 +266,15 @@ public sealed partial class IslandWindow
                 string Uv(double u) => u switch { < 3 => "弱", < 6 => "中等", < 8 => "强", _ => "很强" };
                 void Add(string glyph, string label, string value)
                 {
-                    var b = new Border { Background = WFill, CornerRadius = new CornerRadius(10), Margin = new Thickness(0, 0, 6, 6), Padding = new Thickness(9, 2, 6, 2) };
-                    var c = new StackPanel();
+                    var b = new Border { Background = WFill, CornerRadius = new CornerRadius(11), Margin = new Thickness(0, 0, 6, 6), Padding = new Thickness(8, 3, 6, 3), BorderBrush = WRim, BorderThickness = new Thickness(0.6) };
+                    var c = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
                     var head = new StackPanel { Orientation = Orientation.Horizontal };
-                    var l = T(label, 9, FontWeights.Medium, W3);
+                    var ig = Glyph(glyph, 8.5, W3); ig.Margin = new Thickness(0, 1, 3, 0);
+                    head.Children.Add(ig);
+                    var l = T(label, 9, FontWeights.SemiBold, W3);
                     head.Children.Add(l);
                     c.Children.Add(head);
-                    var vt = T(value, 11.5, FontWeights.Medium, W1); vt.Margin = new Thickness(0, -1, 0, 0); c.Children.Add(vt);
+                    var vt = T(value, 12, FontWeights.SemiBold, W1); vt.Margin = new Thickness(0, -1, 0, 0); c.Children.Add(vt);
                     b.Child = c;
                     g.Children.Add(b);
                 }

@@ -33,6 +33,30 @@ public sealed partial class IslandWindow
     private readonly TranslateTransform _wScrollTT = new();
     private double _wScroll, _wScrollMax;
     private DateTime _wScrolledAt = DateTime.MinValue;
+    private readonly List<(FrameworkElement El, double Top, double H)> _wRows = [];
+    private bool _wRevealHooked;
+
+    /// <summary>
+    /// 滚动渐显：从视口底边进来的卡片由淡、略小逐渐变成完整，从顶边出去的反过来，像 iOS 小组件栈那样"浮出来"。
+    /// 跟着 _wScrollTT 的实时值走（包括滚轮的缓动动画），所以每一帧都对得上。
+    /// </summary>
+    private void ApplyReveal()
+    {
+        if (_wRows.Count == 0) return;
+        var s = -_wScrollTT.Y;
+        foreach (var (el, top, h) in _wRows)
+        {
+            var span = Math.Max(40, Math.Min(120, h * 0.8));
+            var vt = top - s;
+            var enter = Math.Clamp((WidgetViewMax - vt) / span, 0, 1);
+            var exit = Math.Clamp((vt + h) / span, 0, 1);
+            var p = Math.Min(enter, exit);
+            var e = 1 - (1 - p) * (1 - p) * (1 - p);
+            var sc = p >= 1 ? 1 : 0.9 + 0.1 * e;      // 完全可见时严格等于 1，否则文字会发糊
+            el.Opacity = p >= 1 ? 1 : 0.1 + 0.9 * e;
+            if (el.RenderTransform is ScaleTransform st) st.ScaleX = st.ScaleY = sc;
+        }
+    }
 
     private List<(string Id, bool On)> Widgets()
     {
@@ -112,8 +136,21 @@ public sealed partial class IslandWindow
         _wScrollTT.BeginAnimation(TranslateTransform.YProperty, null);
         _wScrollTT.Y = -_wScroll;
         inner.RenderTransform = _wScrollTT;
+        _wRows.Clear();
         if (_wScrollMax > 0)
         {
+            // 记下每一行在内容里的位置，滚动时按它离视口上下边的距离做渐显 + 放大
+            var y = 0.0;
+            foreach (FrameworkElement el in inner.Children)
+            {
+                var top = y + el.Margin.Top;
+                y += el.DesiredSize.Height;
+                el.RenderTransformOrigin = new Point(0.5, 0.5);
+                el.RenderTransform = new ScaleTransform();
+                _wRows.Add((el, top, el.DesiredSize.Height - el.Margin.Top));
+            }
+            if (!_wRevealHooked) { _wRevealHooked = true; _wScrollTT.Changed += (_, _) => ApplyReveal(); }
+            ApplyReveal();
             // Canvas 不约束子元素高度，内容按自己的完整高度排版，视口只负责裁切
             var host = new Canvas { Height = WidgetViewMax, Width = ExpandedW - 32 };
             inner.Width = ExpandedW - 32;
