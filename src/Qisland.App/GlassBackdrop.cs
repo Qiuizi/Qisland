@@ -30,6 +30,10 @@ public sealed class GlassBackdrop
     public Canvas Host { get; } = new() { IsHitTestVisible = false };
     /// <summary>岛整体被平移（全屏自动隐藏的滑出）时，截屏位置要跟着挪。</summary>
     public Func<double> ShiftY { get; set; } = () => 0;
+    /// <summary>岛正在变形时为 true：这时背后的画面基本不变，不必每 50 ms 截一次屏（截屏会和动画抢 UI 线程）。</summary>
+    public Func<bool> Animating { get; set; } = () => false;
+    private Rect _lastArea;
+    private long _lastCap, _slowLogged;
 
     public GlassBackdrop(Window win, Func<Rect?> area, double width, double height)
     {
@@ -57,6 +61,20 @@ public sealed class GlassBackdrop
         if (!_on) return;
         var area = _area();
         if (area is not { } a || a.Width < 4 || a.Height < 4) return;
+        var now = Environment.TickCount64;
+        if (Animating() && a == _lastArea && now - _lastCap < (Perf.Has("glassfast") ? 0 : 400)) return;
+        _lastArea = a; _lastCap = now;
+        var sw0 = System.Diagnostics.Stopwatch.StartNew();
+        try { CaptureCore(a); }
+        finally
+        {
+            var ms = sw0.Elapsed.TotalMilliseconds;
+            if (ms > 8 && now - _slowLogged > 60000) { _slowLogged = now; App.Log($"glass capture {ms:0.0} ms ({a.Width:0}×{a.Height:0})"); }
+        }
+    }
+
+    private void CaptureCore(Rect a)
+    {
         var hwnd = new System.Windows.Interop.WindowInteropHelper(_win).Handle;
         if (!Native.GetWindowRect(hwnd, out var wr)) return;
         var s = VisualTreeHelper.GetDpi(_win).DpiScaleX;
