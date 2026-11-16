@@ -64,7 +64,9 @@ public sealed class GlassBackdrop
         if (area is not { } a || a.Width < 4 || a.Height < 4) return;
         // 变形动画期间，只要上一张截图还盖得住岛的最终范围就沿用它（省电，轻薄本上尤其明显）；
         // 范围变大（展开）时必须先补一张够大的，否则新长出来的部分是空的。
-        if (Animating() && _wb != null && Covers(_lastArea, a)) return;
+        // 但最多沿用 150 ms：鼠标在展开的岛上移动、翻页时也会触发动画，如果一直沿用，
+        // 背后切了窗口、滚了页面，玻璃里还是展开那一刻的旧画面，看起来就像影子错了位。
+        if (Animating() && _wb != null && Covers(_lastArea, a) && Environment.TickCount64 - _lastCap < 150) return;
         var hwnd = new System.Windows.Interop.WindowInteropHelper(_win).Handle;
         if (!Native.GetWindowRect(hwnd, out var wr)) return;
         var s = VisualTreeHelper.GetDpi(_win).DpiScaleX;

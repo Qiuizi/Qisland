@@ -134,7 +134,7 @@ public sealed partial class IslandWindow : Window
             _shadowPaths.Add(sp);
             _root.Children.Add(sp);
         }
-        _glass = new GlassBackdrop(this, GlassArea, WinW, WinH) { ShiftY = () => _rootShift.Y, Animating = () => _animating };
+        _glass = new GlassBackdrop(this, GlassArea, WinW, WinH) { ShiftY = () => _rootShift.Y, Animating = () => _animating && (!_w.IsSettled || !_h.IsSettled) };
         _glass.Host.Clip = _pillGeo;
         _root.Children.Add(_glass.Host);
         _pill.Data = _pillGeo;
@@ -385,6 +385,7 @@ public sealed partial class IslandWindow : Window
             _animating = false;
             StopPacer();
             ApplyFrame(); // 停稳后把窗口区域收回到最终大小
+            if (_glass.Host.Visibility == Visibility.Visible) _glass.Refresh(); // 停稳立刻补一张当前背景，不等下一个 50 ms
             if (_afterSettle is { } after) { _afterSettle = null; after(); }
             App.Log($"anim → {_mode}: {_frames} 帧 / {(_lastRender - _animStart).TotalSeconds:0.00}s, 掉帧 {_slowFrames}, 最长 {_maxDt * 1000:0} ms");
             _frames = 0; _slowFrames = 0; _maxDt = 0;
