@@ -381,6 +381,8 @@ public sealed partial class IslandWindow : Window
         ApplyFrame();
         if (settled)
         {
+            // 停稳时把弹簧精确归位：否则透明度停在 0.97、缩放停在 0.998，整页文字会被缩放采样而发糊
+            foreach (var s in Springs) s.Snap(s.Target);
             CompositionTarget.Rendering -= OnRendering;
             _animating = false;
             StopPacer();
@@ -534,6 +536,7 @@ public sealed partial class IslandWindow : Window
     private static void Fade(FrameworkElement layer, double v, bool scale = true, bool keepVisible = false)
     {
         var o = Math.Clamp(v, 0, 1);
+        if (o > 0.995) o = 1;
         layer.Opacity = o;
         var vis = o < 0.01 && !keepVisible ? Visibility.Hidden : Visibility.Visible;
         if (layer.Visibility != vis) layer.Visibility = vis;
@@ -635,11 +638,32 @@ public sealed partial class IslandWindow : Window
         ApplyPageOffset();
         _expanded.Children.Add(stack);
         stack.Measure(new Size(ExpandedW, double.PositiveInfinity));
-        _expandedH = Math.Ceiling(stack.DesiredSize.Height + 14 + 10);
+        _expandedH = Math.Min(MaxIslandH, Math.Ceiling(stack.DesiredSize.Height + 14 + 10));
         _expanded.Height = _expandedH;
         if (_mode == Mode.Expanded) _h.Target = _expandedH;
         _pageCache[_page] = (stack, _expandedH, _mediaFill, _mediaTime);
         if (sw.Elapsed.TotalMilliseconds > 6) App.Log($"rebuild {_page}: {sw.Elapsed.TotalMilliseconds:0.0} ms");
+    }
+
+    /// <summary>岛最高能长到多高：窗口高度减去顶部间距，再给底部阴影留一点。</summary>
+    private const double MaxIslandH = WinH - TopGap - 22;
+
+    /// <summary>
+    /// 内容在页面建好之后还会变高（天气、剪贴板图片、待办陆续到位），缓存的高度就会偏小，下半截被裁掉。
+    /// 这里重新量一次：变了就让高度弹簧跟过去；组件页超出窗口就重建，改用可滚动视口。
+    /// </summary>
+    private void RefitExpanded()
+    {
+        if (_expStack == null || _widgetEdit && _page != Page.Widgets) return;
+        _expStack.Measure(new Size(ExpandedW, double.PositiveInfinity));
+        var want = Math.Ceiling(_expStack.DesiredSize.Height + 14 + 10);
+        if (want > MaxIslandH && _page == Page.Widgets && _wView == null && !_widgetEdit) { RebuildExpanded(); return; }
+        want = Math.Min(MaxIslandH, want);
+        if (Math.Abs(want - _expandedH) < 1) return;
+        _expandedH = want;
+        _expanded.Height = want;
+        if (_pageCache.TryGetValue(_page, out var c)) _pageCache[_page] = (c.stack, want, c.fill, c.time);
+        if (_mode == Mode.Expanded) { _h.Target = want; Kick(); }
     }
 
     // 翻页时优先复用已经建好的页面（组件页每秒刷新，始终现建）
@@ -657,6 +681,7 @@ public sealed partial class IslandWindow : Window
         _expanded.Height = c.h;
         if (_mode == Mode.Expanded) _h.Target = c.h;
         UpdateMediaProgress();
+        RefitExpanded();
         if (_page == Page.Todo && _todoBox != null && _editing) Dispatcher.BeginInvoke(() => _todoBox.Focus(), System.Windows.Threading.DispatcherPriority.Input);
     }
 

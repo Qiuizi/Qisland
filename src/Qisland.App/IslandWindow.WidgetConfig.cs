@@ -27,7 +27,7 @@ public sealed partial class IslandWindow
     private static string WidgetFile => System.IO.Path.Combine(App.DataDir, "widgets.txt");
     private List<(string Id, bool On)>? _widgetList;
     private bool _widgetEdit;
-    private const double WidgetViewMax = 480, HalfH = 168;
+    private const double WidgetViewMax = 440, HalfH = 168;
     private Border? _wView;
     private readonly TranslateTransform _wScrollTT = new();
     private double _wScroll, _wScrollMax;
@@ -105,7 +105,7 @@ public sealed partial class IslandWindow
         // 一屏放不下：裁成一个可滚动的视口
         inner.Measure(new Size(ExpandedW - 32, double.PositiveInfinity));
         var h = inner.DesiredSize.Height;
-        _wScrollMax = Math.Max(0, h - WidgetViewMax);
+        _wScrollMax = Math.Ceiling(Math.Max(0, h - WidgetViewMax));
         _wScroll = Math.Clamp(_wScroll, 0, _wScrollMax);
         _wScrollTT.BeginAnimation(TranslateTransform.YProperty, null);
         _wScrollTT.Y = -_wScroll;
@@ -343,7 +343,7 @@ public sealed partial class IslandWindow
         if (_page != Page.Widgets || _widgetEdit || _wView == null || _wScrollMax <= 0) return false;
         var now = DateTime.Now;
         var step = Math.Abs(delta) >= 120 && delta % 120 == 0 ? delta * 0.9 : delta * 0.8;
-        var target = Math.Clamp(_wScroll + step, 0, _wScrollMax);
+        var target = Math.Round(Math.Clamp(_wScroll + step, 0, _wScrollMax));
         if (Math.Abs(target - _wScroll) < 0.5)
             return (now - _wScrolledAt).TotalMilliseconds < 350; // 刚滚到头：这一串滚动不翻页
         _wScroll = target;

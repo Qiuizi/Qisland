@@ -85,6 +85,7 @@ public sealed partial class IslandWindow
         if (_expStack == null) return;
         if (_expStack.RenderTransform != _pageTT) _expStack.RenderTransform = _pageTT;
         var x = _pageX.Value;
+        if (Math.Abs(x) < 0.5) x = 0; // 停在小数像素上文字会糊
         _pageTT.X = x;
         _expStack.Opacity = 1 - Math.Min(0.55, Math.Abs(x) / 260);
         // 翻页滑动期间把整页栅格化成一张位图，GPU 只做平移和淡入；否则每帧都要按 300% 缩放把整页重画一遍
@@ -322,7 +323,7 @@ public sealed partial class IslandWindow
 
     private void OnPageSecond()
     {
-        if (_mode == Mode.Expanded && _page == Page.Widgets) RefreshWidgets();
+        if (_mode == Mode.Expanded && _page == Page.Widgets) { RefreshWidgets(); if (!_animating) RefitExpanded(); }
     }
 
     private void OnCollapsed()

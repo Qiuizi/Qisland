@@ -146,16 +146,35 @@ public sealed class MediaWatcher
 
     // 播放控制：只给网易云自己的主窗口发 WM_APPCOMMAND（媒体键消息），不模拟全局键盘输入
     [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+    private delegate bool EnumWindowsProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc cb, IntPtr l);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] private static extern int GetWindowTextLength(IntPtr h);
+    [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr h, uint cmd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr h, System.Text.StringBuilder sb, int max);
+
+    // 网易云最小化到托盘时 MainWindowHandle 是 0，所以把它所有进程的顶层窗口都找出来，逐个发媒体键消息
     private static void NcmCommand(int cmd)
     {
-        foreach (var p in System.Diagnostics.Process.GetProcessesByName("cloudmusic"))
-            using (p)
+        var pids = new HashSet<uint>();
+        foreach (var p in System.Diagnostics.Process.GetProcessesByName("cloudmusic")) using (p) pids.Add((uint)p.Id);
+        if (pids.Count == 0) { App.Log("网易云控制：没找到进程"); return; }
+        var hits = new List<(IntPtr h, string cls)>();
+        EnumWindows((h, _) =>
+        {
+            GetWindowThreadProcessId(h, out var pid);
+            if (pids.Contains(pid) && GetWindow(h, 4) == IntPtr.Zero) // 不要有 owner 的弹窗
             {
-                var h = p.MainWindowHandle;
-                if (h == IntPtr.Zero) continue;
-                PostMessage(h, 0x0319, h, (IntPtr)(cmd << 16));
-                return;
+                var sb = new System.Text.StringBuilder(128); GetClassName(h, sb, 128);
+                hits.Add((h, sb.ToString()));
             }
+            return true;
+        }, IntPtr.Zero);
+        // 只发给一个窗口，否则「播放/暂停」可能被处理两次又切回去：主窗口类名（OrpheusBrowserHost）优先，其次有标题的窗口
+        var target = hits.OrderByDescending(x => x.cls.Contains("Orpheus", StringComparison.OrdinalIgnoreCase))
+                         .ThenByDescending(x => GetWindowTextLength(x.h) > 0).Select(x => x.h).FirstOrDefault();
+        if (target != IntPtr.Zero) PostMessage(target, 0x0319, target, (IntPtr)(cmd << 16));
+        App.Log($"网易云控制 {cmd}：候选 {hits.Count} 个窗口 [{string.Join(",", hits.Select(x => x.cls).Distinct())}]");
     }
     private bool CurrentIsNcm => Current is { AppSource: "music", SongId: not null } && _ncmCur != null;
 
