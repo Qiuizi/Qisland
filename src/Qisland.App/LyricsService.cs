@@ -46,20 +46,20 @@ public sealed class LyricsService
         _key = key;
         Lines = null;
         Changed?.Invoke();
-        _ = LoadAsync(key, m.Title, m.Artist, m.Duration);
+        _ = LoadAsync(key, m.Title, m.Artist, m.Duration, m.SongId);
     }
 
-    private async Task LoadAsync(string key, string title, string artist, TimeSpan dur)
+    private async Task LoadAsync(string key, string title, string artist, TimeSpan dur, string? songId)
     {
         List<LyricLine>? lines = null;
-        try { lines = await Task.Run(() => Fetch(title, artist, dur)); }
+        try { lines = await Task.Run(() => Fetch(title, artist, dur, songId)); }
         catch (Exception ex) { App.Log("歌词: " + ex.Message); }
         if (key != _key) return;      // 已经切歌了
         Lines = lines is { Count: > 0 } ? lines : null;
         Changed?.Invoke();
     }
 
-    private static async Task<List<LyricLine>?> Fetch(string title, string artist, TimeSpan dur)
+    private static async Task<List<LyricLine>?> Fetch(string title, string artist, TimeSpan dur, string? songId = null)
     {
         Directory.CreateDirectory(Dir);
         var name = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(Lrc.Norm(title) + "|" + Lrc.Norm(artist))))[..16];
@@ -69,7 +69,7 @@ public sealed class LyricsService
         if (File.Exists(file)) return Lrc.Parse(File.ReadAllText(file), File.Exists(tfile) ? File.ReadAllText(tfile) : null);
         if (File.Exists(none) && DateTime.Now - File.GetLastWriteTime(none) < TimeSpan.FromDays(3)) return null;
 
-        var (lrc, tr) = await NetEase(title, artist, dur);
+        var (lrc, tr) = await NetEase(title, artist, dur, songId);
         if (lrc == null) (lrc, tr) = (await LrcLib(title, artist, dur), null);
         if (lrc == null || Lrc.Parse(lrc).Count(l => l.Text.Length > 0) < 3)
         {
@@ -95,26 +95,30 @@ public sealed class LyricsService
         return have.Any(h => { var n = Lrc.Norm(h); return n.Length > 0 && (w.Contains(n) || n.Contains(w)); });
     }
 
-    private static async Task<(string?, string?)> NetEase(string title, string artist, TimeSpan dur)
+    private static async Task<(string?, string?)> NetEase(string title, string artist, TimeSpan dur, string? songId = null)
     {
         try
         {
-            var q = Uri.EscapeDataString($"{title} {artist}".Trim());
-            using var doc = JsonDocument.Parse(await Http.GetStringAsync($"https://music.163.com/api/search/get?s={q}&type=1&limit=10"));
-            if (!doc.RootElement.TryGetProperty("result", out var res) || !res.TryGetProperty("songs", out var songs)) return (null, null);
-            long id = 0; var bestScore = int.MaxValue;
-            foreach (var s in songs.EnumerateArray())
+            long id = 0;
+            if (!long.TryParse(songId, out id)) // 网易云日志直接给了歌曲 id 就不用搜
             {
-                var n = s.GetProperty("name").GetString() ?? "";
-                var ars = s.TryGetProperty("artists", out var a) ? a.EnumerateArray().Select(x => x.GetProperty("name").GetString() ?? "").ToList() : [];
-                if (!NameOk(n, title) || !ArtistOk(artist, ars)) continue;
-                var d = s.TryGetProperty("duration", out var dd) ? dd.GetInt64() / 1000.0 : 0;
-                var diff = dur > TimeSpan.FromSeconds(5) && d > 0 ? Math.Abs(d - dur.TotalSeconds) : 0;
-                if (diff > 6) continue;
-                var score = (int)diff + (Lrc.Norm(n) == Lrc.Norm(title) ? 0 : 3);
-                if (score < bestScore) { bestScore = score; id = s.GetProperty("id").GetInt64(); }
+                var q = Uri.EscapeDataString($"{title} {artist}".Trim());
+                using var doc = JsonDocument.Parse(await Http.GetStringAsync($"https://music.163.com/api/search/get?s={q}&type=1&limit=10"));
+                if (!doc.RootElement.TryGetProperty("result", out var res) || !res.TryGetProperty("songs", out var songs)) return (null, null);
+                var bestScore = int.MaxValue;
+                foreach (var s in songs.EnumerateArray())
+                {
+                    var n = s.GetProperty("name").GetString() ?? "";
+                    var ars = s.TryGetProperty("artists", out var a) ? a.EnumerateArray().Select(x => x.GetProperty("name").GetString() ?? "").ToList() : [];
+                    if (!NameOk(n, title) || !ArtistOk(artist, ars)) continue;
+                    var d = s.TryGetProperty("duration", out var dd) ? dd.GetInt64() / 1000.0 : 0;
+                    var diff = dur > TimeSpan.FromSeconds(5) && d > 0 ? Math.Abs(d - dur.TotalSeconds) : 0;
+                    if (diff > 6) continue;
+                    var score = (int)diff + (Lrc.Norm(n) == Lrc.Norm(title) ? 0 : 3);
+                    if (score < bestScore) { bestScore = score; id = s.GetProperty("id").GetInt64(); }
+                }
+                if (id == 0) return (null, null);
             }
-            if (id == 0) return (null, null);
             using var ly = JsonDocument.Parse(await Http.GetStringAsync($"https://music.163.com/api/song/lyric?id={id}&lv=1&tv=-1"));
             string? Get(string k) => ly.RootElement.TryGetProperty(k, out var o) && o.TryGetProperty("lyric", out var l) ? l.GetString() : null;
             var lrc = Get("lrc");

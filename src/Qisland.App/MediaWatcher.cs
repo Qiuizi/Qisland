@@ -1,4 +1,7 @@
 using System.IO;
+using System.Net.Http;
+using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Windows.Media.Control;
@@ -8,7 +11,7 @@ namespace Qisland.App;
 public sealed record MediaState(
     string Title, string Artist, string App, string AppSource, bool Playing,
     BitmapSource? Art, TimeSpan Position, TimeSpan Duration, DateTime PositionAt,
-    bool Video = false, int Sessions = 1, bool CanSeek = false);
+    bool Video = false, int Sessions = 1, bool CanSeek = false, string? SongId = null);
 
 /// <summary>系统媒体会话（网易云、QQ 音乐、Spotify、浏览器都会上报）：读歌名/封面/进度，并能切歌暂停。</summary>
 public sealed class MediaWatcher
@@ -37,7 +40,118 @@ public sealed class MediaWatcher
             App.Log("media: 已连接系统媒体会话");
         }
         catch (Exception ex) { App.Log("media: " + ex.Message); }
+        _ncmTimer = new Timer(_ => NcmTick(), null, 800, 700);
     }
+
+    // ---------- 网易云（不报 SMTC，靠读它自己的日志） ----------
+    private readonly NcmElog _ncm = new();
+    private Timer? _ncmTimer;
+    private MediaState? _ncmCur;
+    private int _ncmBusy;
+    private readonly Dictionary<string, (string title, string artist, string pic, double dur)> _ncmMeta = [];
+    private readonly HashSet<string> _ncmMetaLoading = [];
+    private string? _ncmArtId;
+    private BitmapSource? _ncmArt;
+    private static readonly HttpClient NcmHttp = MakeHttp();
+    private static HttpClient MakeHttp()
+    {
+        var h = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        h.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 Qisland");
+        h.DefaultRequestHeaders.Referrer = new Uri("https://music.163.com/");
+        return h;
+    }
+
+    private bool SmtcHasCloudMusic() => All().Any(x => (x.SourceAppUserModelId ?? "").Contains("cloudmusic", StringComparison.OrdinalIgnoreCase));
+
+    private void NcmTick()
+    {
+        if (Interlocked.Exchange(ref _ncmBusy, 1) == 1) return;
+        try
+        {
+            MediaState? st = null;
+            if (!SmtcHasCloudMusic() && NcmElog.ClientRunning())
+            {
+                _ncm.Poll();
+                if (_ncm.Current() is { } c) st = NcmState(c);
+            }
+            var prev = _ncmCur;
+            _ncmCur = st;
+            var drift = st != null && prev != null && Current?.SongId == st.SongId && Current?.AppSource == "music"
+                && Math.Abs((LivePosition() - st.Position).TotalSeconds) > 1.5;
+            if (!Same(prev, st) || prev?.SongId != st?.SongId || drift) _ = RefreshAsync();
+        }
+        catch (Exception ex) { App.Log("网易云: " + ex.Message); }
+        finally { _ncmBusy = 0; }
+    }
+
+    private MediaState NcmState(NcmElog.State c)
+    {
+        var id = c.Track.SongId;
+        string title = c.Track.Title, artist = c.Track.Artist;
+        var dur = c.Duration;
+        if (_ncmMeta.TryGetValue(id, out var meta))
+        {
+            if (title.Length == 0) title = meta.title;
+            if (artist.Length == 0) artist = meta.artist;
+            if (dur <= TimeSpan.Zero && meta.dur > 0) dur = TimeSpan.FromMilliseconds(meta.dur);
+        }
+        else NcmLoadMeta(id);
+        if (title.Length == 0 && NcmElog.WindowTitle() is { } w) { title = w.title; if (artist.Length == 0) artist = w.artist; }
+        if (title.Length == 0) title = "网易云音乐";
+        var pos = c.Position;
+        if (dur > TimeSpan.Zero && pos > dur) pos = dur;
+        return new MediaState(title, artist, "网易云音乐", "music", c.Playing, _ncmArtId == id ? _ncmArt : null,
+            pos, dur, DateTime.Now, false, 1, false, id);
+    }
+
+    // songId → 歌名、歌手、封面（公开接口，不带任何账号信息）
+    private void NcmLoadMeta(string id)
+    {
+        lock (_ncmMetaLoading) if (!_ncmMetaLoading.Add(id)) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(await NcmHttp.GetStringAsync($"https://music.163.com/api/song/detail/?id={id}&ids=%5B{id}%5D"));
+                if (!doc.RootElement.TryGetProperty("songs", out var songs) || songs.GetArrayLength() == 0) return;
+                var s = songs[0];
+                var title = s.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+                var artist = s.TryGetProperty("artists", out var ars) ? string.Join(" / ", ars.EnumerateArray().Select(a => a.TryGetProperty("name", out var an) ? an.GetString() : null).Where(x => !string.IsNullOrEmpty(x))) : "";
+                var pic = s.TryGetProperty("album", out var al) && al.TryGetProperty("picUrl", out var pu) ? pu.GetString() ?? "" : "";
+                var dur = s.TryGetProperty("duration", out var d) && d.TryGetDouble(out var dd) ? dd : 0;
+                _ncmMeta[id] = (title, artist, pic, dur);
+                if (pic.Length > 0)
+                {
+                    var bytes = await NcmHttp.GetByteArrayAsync(pic.Replace("http://", "https://") + "?param=132y132");
+                    var bmp = new BitmapImage();
+                    bmp.BeginInit();
+                    bmp.CacheOption = BitmapCacheOption.OnLoad;
+                    bmp.DecodePixelWidth = 132;
+                    bmp.StreamSource = new MemoryStream(bytes);
+                    bmp.EndInit();
+                    bmp.Freeze();
+                    _ncmArt = bmp; _ncmArtId = id;
+                }
+                _ncmCur = null; // 让下一拍按“有变化”刷新
+            }
+            catch (Exception ex) { App.Log("网易云详情: " + ex.Message); lock (_ncmMetaLoading) _ncmMetaLoading.Remove(id); }
+        });
+    }
+
+    // 播放控制：只给网易云自己的主窗口发 WM_APPCOMMAND（媒体键消息），不模拟全局键盘输入
+    [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+    private static void NcmCommand(int cmd)
+    {
+        foreach (var p in System.Diagnostics.Process.GetProcessesByName("cloudmusic"))
+            using (p)
+            {
+                var h = p.MainWindowHandle;
+                if (h == IntPtr.Zero) continue;
+                PostMessage(h, 0x0319, h, (IntPtr)(cmd << 16));
+                return;
+            }
+    }
+    private bool CurrentIsNcm => Current is { AppSource: "music", SongId: not null } && _ncmCur != null;
 
     private void Attach()
     {
@@ -124,7 +238,7 @@ public sealed class MediaWatcher
             do
             {
                 _again = false;
-                var st = await Read(_session);
+                var st = Choose(await Read(_session));
                 await _ui.InvokeAsync(() =>
                 {
                     var changed = !Same(Current, st);
@@ -138,12 +252,22 @@ public sealed class MediaWatcher
     }
     private volatile bool _again;
 
+    // 系统会话在播就用它；否则网易云日志里有歌就用网易云（播放中优先，暂停时也比没有强）
+    private MediaState? Choose(MediaState? smtc)
+    {
+        var n = _ncmCur;
+        if (n == null) return smtc;
+        if (smtc is { Playing: true } && !n.Playing) return smtc with { Sessions = smtc.Sessions + 1 };
+        if (n.Playing || smtc == null) return smtc == null ? n : n with { Sessions = smtc.Sessions + 1 };
+        return smtc with { Sessions = smtc.Sessions + 1 };
+    }
+
     // 只有界面上要换的东西变了才算变化。进度不算：浏览器每隔几秒就推一次时间轴，
     // 以前每推一次就整块重建展开视图，正是播放视频时一顿一顿、闪一下的原因。进度条每秒自己按 LivePosition 走。
     private static bool Same(MediaState? a, MediaState? b) =>
         a is null ? b is null : b is not null && a.Title == b.Title && a.Artist == b.Artist && a.Playing == b.Playing
             && ReferenceEquals(a.Art, b.Art) && a.Duration == b.Duration && a.App == b.App
-            && a.Video == b.Video && a.Sessions == b.Sessions && a.CanSeek == b.CanSeek;
+            && a.Video == b.Video && a.Sessions == b.Sessions && a.CanSeek == b.CanSeek && a.SongId == b.SongId;
 
     private async Task<MediaState?> Read(GlobalSystemMediaTransportControlsSession? s)
     {
@@ -261,9 +385,9 @@ public sealed class MediaWatcher
     /// <summary>截图演示用：直接塞一个播放状态，不连系统会话。</summary>
     public void ShowDemo(MediaState s) { Current = s; Changed?.Invoke(); }
 
-    public void Toggle() => Run(s => s.TryTogglePlayPauseAsync());
-    public void Next() => Run(s => s.TrySkipNextAsync());
-    public void Previous() => Run(s => s.TrySkipPreviousAsync());
+    public void Toggle() { if (CurrentIsNcm) NcmCommand(14); else Run(s => s.TryTogglePlayPauseAsync()); }
+    public void Next() { if (CurrentIsNcm) NcmCommand(11); else Run(s => s.TrySkipNextAsync()); }
+    public void Previous() { if (CurrentIsNcm) NcmCommand(12); else Run(s => s.TrySkipPreviousAsync()); }
 
     private void Run(Func<GlobalSystemMediaTransportControlsSession, Windows.Foundation.IAsyncOperation<bool>> op)
     {
