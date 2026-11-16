@@ -401,40 +401,15 @@ public sealed partial class IslandWindow
 
     // ───────────── 日历 ─────────────
 
-    /// <summary>左边是 macOS 日历小组件那样的大号今天，右边是月历；翻月时只换右边。</summary>
+    /// <summary>
+    /// 半宽日历，照 macOS 小号日历组件：上面一行「星期 + 农历 / 最近的倒计时」，下面整块月历。
+    /// 原来左边还塞了一列大号日期，半宽里只剩 100 px 给月历，数字挤、最后一行被裁，所以去掉。
+    /// </summary>
     private FrameworkElement CalendarView()
     {
-        var today = DateTime.Today;
-        var g = new Grid();
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
-        g.ColumnDefinitions.Add(new ColumnDefinition());
-
-        var left = new StackPanel();
-        left.Children.Add(T("星期" + "日一二三四五六"[(int)today.DayOfWeek], 12, FontWeights.Bold, Theme.Red));
-        var big = T(today.Day.ToString(CultureInfo.InvariantCulture), 44, FontWeights.Light, Theme.Primary, display: true); big.Margin = new Thickness(-2, -8, 0, -4);
-        left.Children.Add(big);
-        left.Children.Add(T($"{today.Month}月", 11, FontWeights.SemiBold, Theme.Secondary));
-        var lunar = Lunar.Festival(today) ?? Lunar.Text(today);
-        if (lunar.Length > 0) left.Children.Add(T(lunar, 10.5, FontWeights.Medium, Lunar.Festival(today) != null ? Theme.Red : Theme.Tertiary));
-        var next = (Countdown?.Items ?? []).Where(c => c.At.Date >= today).OrderBy(c => c.At).FirstOrDefault();
-        if (next != null)
-        {
-            var days = (next.At.Date - today).Days;
-            var chip = new Border { Background = Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0x9F, 0x0A))), CornerRadius = new CornerRadius(8), Padding = new Thickness(6, 3, 6, 4), Margin = new Thickness(0, 10, 8, 0), HorizontalAlignment = HorizontalAlignment.Left };
-            var csp = new StackPanel();
-            csp.Children.Add(T(next.Short.Length > 0 ? next.Short : next.Name, 10, FontWeights.SemiBold, Theme.Orange));
-            csp.Children.Add(T(days == 0 ? "就是今天" : $"还有 {days} 天", 11.5, FontWeights.Bold, Theme.Primary));
-            chip.Child = csp;
-            chip.ToolTip = next.Name;
-            left.Children.Add(chip);
-        }
-        g.Children.Add(left);
-
         var right = new Border { Child = MonthGrid() };
-        Grid.SetColumn(right, 1);
-        g.Children.Add(right);
         _calMonth = right;
-        return g;
+        return right;
     }
 
     private Border? _calMonth;
@@ -444,38 +419,62 @@ public sealed partial class IslandWindow
         var today = DateTime.Today;
         var month = new DateTime(today.Year, today.Month, 1).AddMonths(_calOffset);
         var sp = new StackPanel();
-        var head = new Grid { Margin = new Thickness(0, -3, 0, 0) };
-        var m = T(month.Year == today.Year ? $"{month.Month}月" : $"{month.Year}年{month.Month}月", 11.5, FontWeights.Bold, _calOffset == 0 ? Theme.Secondary : Theme.Orange);
-        m.VerticalAlignment = VerticalAlignment.Center;
+
+        // 标题行：月份（红，本月）+ 副标题（今天的星期和农历，或最近的倒计时）+ 翻月
+        var head = new Grid { Height = 20, Margin = new Thickness(0, 0, 0, 4) };
+        var title = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        var m = T(month.Year == today.Year ? $"{month.Month}月" : $"{month.Year}.{month.Month}", 13, FontWeights.Bold, _calOffset == 0 ? Theme.Red : Theme.Orange);
         if (_calOffset != 0) { m.Cursor = Cursors.Hand; m.ToolTip = "回到本月"; m.MouseLeftButtonUp += (_, e) => { FlipMonth(-_calOffset); e.Handled = true; }; }
-        head.Children.Add(m);
-        var nav = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        title.Children.Add(m);
+        if (_calOffset == 0)
+        {
+            var next = (Countdown?.Items ?? []).Where(c => c.At.Date >= today).OrderBy(c => c.At).FirstOrDefault();
+            TextBlock sub;
+            if (next != null)
+            {
+                var days = (next.At.Date - today).Days;
+                sub = T($"{(next.Short.Length > 0 ? next.Short : next.Name)} {(days == 0 ? "今天" : days + " 天")}", 11, FontWeights.SemiBold, Theme.Orange);
+                sub.ToolTip = next.Name;
+            }
+            else
+            {
+                var lunar = Lunar.Festival(today) ?? Lunar.Text(today);
+                sub = T("周" + "日一二三四五六"[(int)today.DayOfWeek] + (lunar.Length > 0 ? " · " + lunar : ""), 11, FontWeights.Medium, Theme.Tertiary);
+            }
+            sub.Margin = new Thickness(7, 1, 0, 0); sub.VerticalAlignment = VerticalAlignment.Center; sub.MaxWidth = 100;
+            title.Children.Add(sub);
+        }
+        head.Children.Add(title);
+        var nav = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         nav.Children.Add(RoundIcon("\uE76B", 20, () => FlipMonth(-1)));
         nav.Children.Add(RoundIcon("\uE76C", 20, () => FlipMonth(1)));
         head.Children.Add(nav);
         sp.Children.Add(head);
 
-        var grid = new UniformGrid { Columns = 7, Rows = 7, Margin = new Thickness(0, 2, 0, 0) };
+        var lead = ((int)month.DayOfWeek + 6) % 7;
+        var days0 = DateTime.DaysInMonth(month.Year, month.Month);
+        var rows = (lead + days0 + 6) / 7;              // 只画需要的周数（4~6 行），不留空行
+        const double RowH = 16.5;
+        var grid = new UniformGrid { Columns = 7, Rows = rows + 1 };
         foreach (var d in "一二三四五六日")
         {
             var t = T(d.ToString(), 9.5, FontWeights.SemiBold, Theme.Tertiary); t.HorizontalAlignment = HorizontalAlignment.Center; t.VerticalAlignment = VerticalAlignment.Center;
+            t.Height = 14;
             grid.Children.Add(t);
         }
-        var lead = ((int)month.DayOfWeek + 6) % 7;
-        var days = DateTime.DaysInMonth(month.Year, month.Month);
         var events = (Countdown?.Items ?? []).Where(c => c.At.Year == month.Year && c.At.Month == month.Month).GroupBy(c => c.At.Day).ToDictionary(g => g.Key, g => string.Join("、", g.Select(c => c.Name)));
-        for (var i = 0; i < 42; i++)
+        for (var i = 0; i < rows * 7; i++)
         {
             var d = i - lead + 1;
-            if (d < 1 || d > days) { grid.Children.Add(new Border()); continue; }
+            if (d < 1 || d > days0) { grid.Children.Add(new Border { Height = RowH }); continue; }
             var date = new DateTime(month.Year, month.Month, d);
             var isToday = date == today;
             var weekend = i % 7 >= 5;
-            var cell = new Grid { Height = 17 };
-            if (isToday) cell.Children.Add(new System.Windows.Shapes.Ellipse { Width = 18, Height = 18, Fill = Theme.Red });
+            var cell = new Grid { Height = RowH };
+            if (isToday) cell.Children.Add(new System.Windows.Shapes.Ellipse { Width = 17, Height = 17, Fill = Theme.Red });
             cell.Children.Add(new TextBlock
             {
-                Text = d.ToString(CultureInfo.InvariantCulture), FontFamily = Theme.Text, FontSize = 10,
+                Text = d.ToString(CultureInfo.InvariantCulture), FontFamily = Theme.Text, FontSize = 10.5,
                 FontWeight = isToday ? FontWeights.Bold : FontWeights.Medium,
                 Foreground = isToday ? Brushes.White : date < today ? Theme.Tertiary : weekend ? Theme.Secondary : Theme.Primary,
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
@@ -484,13 +483,12 @@ public sealed partial class IslandWindow
             var lunarTip = (fest != null ? fest + " · " : "") + "农历" + Lunar.Text(date);
             cell.ToolTip = lunarTip; cell.Background = Brushes.Transparent;
             if (fest != null && !isToday)
-                cell.Children.Add(new System.Windows.Shapes.Ellipse { Width = 3, Height = 3, Fill = Theme.Red, VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 1, 3, 0) });
+                cell.Children.Add(new System.Windows.Shapes.Ellipse { Width = 3, Height = 3, Fill = Theme.Red, VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 1, 4, 0) });
             if (events.TryGetValue(d, out var name))
             {
-                cell.Children.Add(new System.Windows.Shapes.Ellipse { Width = 4, Height = 4, Fill = isToday ? Brushes.White : Theme.Orange, VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, -3) });
+                cell.Children.Add(new System.Windows.Shapes.Ellipse { Width = 3.5, Height = 3.5, Fill = isToday ? Brushes.White : Theme.Orange, VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, -1) });
                 var left = (date - today).Days;
                 cell.ToolTip = (left > 0 ? $"{name} · 还有 {left} 天" : left == 0 ? $"{name} · 今天" : name) + "\n" + lunarTip;
-                cell.Background = Brushes.Transparent;
             }
             grid.Children.Add(cell);
         }

@@ -159,10 +159,14 @@ public sealed partial class IslandWindow
     /// <summary>小组件的标题行：图标 + 名字 + 右侧小字，点标题去对应的整页。</summary>
     private FrameworkElement WidgetHead(WidgetDef d, string right, Page? go)
     {
-        var g = new Grid { Margin = new Thickness(0, 0, 0, 6), Background = Brushes.Transparent };
-        var l = new StackPanel { Orientation = Orientation.Horizontal };
-        l.Children.Add(Glyph(d.Glyph, 12, d.Tint));
-        var t = Txt(12.5, FontWeights.SemiBold, Theme.Primary); t.Text = d.Name; t.Margin = new Thickness(6, 0, 0, 0); l.Children.Add(t);
+        var g = new Grid { Height = 20, Margin = new Thickness(0, 0, 0, 6), Background = Brushes.Transparent };
+        var l = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        // iOS 小组件那样的小方块图标：彩色圆角底 + 白色图形
+        var tile = new Border { Width = 18, Height = 18, CornerRadius = new CornerRadius(5.5), Background = d.Tint, VerticalAlignment = VerticalAlignment.Center };
+        var gl = Glyph(d.Glyph, 10, Brushes.White); gl.HorizontalAlignment = HorizontalAlignment.Center; gl.VerticalAlignment = VerticalAlignment.Center;
+        tile.Child = gl;
+        l.Children.Add(tile);
+        var t = Txt(12.5, FontWeights.SemiBold, Theme.Primary); t.Text = d.Name; t.Margin = new Thickness(7, 0, 0, 0); t.VerticalAlignment = VerticalAlignment.Center; l.Children.Add(t);
         g.Children.Add(l);
         var r = Txt(11, FontWeights.Medium, Theme.Tertiary); r.Text = right; r.HorizontalAlignment = HorizontalAlignment.Right; r.VerticalAlignment = VerticalAlignment.Center;
         g.Children.Add(r);
@@ -175,6 +179,25 @@ public sealed partial class IslandWindow
         return g;
     }
 
+    /// <summary>行悬停：整行一层很淡的圆角底，左右各外扩 6 px，和文字对齐但不贴边。</summary>
+    private static void RowHover(Grid row)
+    {
+        var bg = new Border { CornerRadius = new CornerRadius(8), Margin = new Thickness(-6, 1, -6, 1), Background = Brushes.Transparent, IsHitTestVisible = false };
+        Grid.SetColumnSpan(bg, Math.Max(1, row.ColumnDefinitions.Count));
+        row.Children.Insert(0, bg);
+        row.MouseEnter += (_, _) => bg.Background = Theme.Hover;
+        row.MouseLeave += (_, _) => bg.Background = Brushes.Transparent;
+    }
+
+    /// <summary>空状态上方的淡色大图标。</summary>
+    private static FrameworkElement EmptyIcon(string glyph, double top)
+    {
+        var b = new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(18), Background = Theme.Fill, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 14 + top, 0, 0) };
+        var g = Glyph(glyph, 15, Theme.Tertiary); g.HorizontalAlignment = HorizontalAlignment.Center; g.VerticalAlignment = VerticalAlignment.Center;
+        b.Child = g;
+        return b;
+    }
+
     private Border TodoWidget()
     {
         var open = (Todo?.Items ?? []).Where(i => !i.Done).ToList();
@@ -183,7 +206,7 @@ public sealed partial class IslandWindow
         sp.Children.Add(WidgetHead(Def("todo"), open.Count > 0 ? $"{open.Count} 件" : "", Page.Todo));
         foreach (var it in open.Take(4))
         {
-            var row = new Grid { Height = 25, Background = Brushes.Transparent, Cursor = Cursors.Hand, ToolTip = it.Text };
+            var row = new Grid { Height = 24, Background = Brushes.Transparent, Cursor = Cursors.Hand, ToolTip = it.Text };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition());
             var circle = new Grid { Width = 15, Height = 15, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -194,6 +217,7 @@ public sealed partial class IslandWindow
             var tx = Txt(12.5, FontWeights.Normal, Theme.Primary); tx.Text = it.Text; tx.TextTrimming = TextTrimming.CharacterEllipsis; tx.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(tx, 1);
             row.Children.Add(tx);
+            RowHover(row);
             row.MouseLeftButtonDown += (_, e) => e.Handled = true;
             row.MouseLeftButtonUp += (_, e) =>
             {
@@ -214,7 +238,8 @@ public sealed partial class IslandWindow
         }
         if (open.Count == 0)
         {
-            var empty = Txt(12, FontWeights.Normal, Theme.Tertiary); empty.Text = "没有待办"; empty.Margin = new Thickness(0, 18, 0, 6); empty.HorizontalAlignment = HorizontalAlignment.Center;
+            sp.Children.Add(EmptyIcon("\uE73E", 0));
+            var empty = Txt(12, FontWeights.Medium, Theme.Tertiary); empty.Text = "都做完了"; empty.Margin = new Thickness(0, 6, 0, 6); empty.HorizontalAlignment = HorizontalAlignment.Center;
             sp.Children.Add(empty);
             var add = Txt(12, FontWeights.SemiBold, Theme.Blue); add.Text = "＋ 写一件"; add.HorizontalAlignment = HorizontalAlignment.Center; add.Cursor = Cursors.Hand;
             add.MouseLeftButtonDown += (_, e) => e.Handled = true;
@@ -233,7 +258,7 @@ public sealed partial class IslandWindow
         sp.Children.Add(WidgetHead(Def("clip"), copied ? "已复制" : _clips.Count > 0 ? $"{_clips.Count} 条" : "", Page.Clip));
         foreach (var c in _clips.Take(4))
         {
-            var row = new Grid { Height = 25, Background = Brushes.Transparent, Cursor = Cursors.Hand, ToolTip = c.Text.Length > 300 ? c.Text[..300] + "…" : c.Text };
+            var row = new Grid { Height = 24, Background = Brushes.Transparent, Cursor = Cursors.Hand, ToolTip = c.Text.Length > 300 ? c.Text[..300] + "…" : c.Text };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition());
             FrameworkElement icon;
@@ -252,8 +277,7 @@ public sealed partial class IslandWindow
             tx.TextTrimming = TextTrimming.CharacterEllipsis; tx.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(tx, 1);
             row.Children.Add(tx);
-            row.MouseEnter += (_, _) => tx.Foreground = Theme.Blue;
-            row.MouseLeave += (_, _) => tx.Foreground = Theme.Primary;
+            RowHover(row);
             row.MouseLeftButtonDown += (_, e) => e.Handled = true;
             row.MouseLeftButtonUp += (_, e) => { e.Handled = true; CopyBack(c); };
             sp.Children.Add(row);
@@ -261,7 +285,8 @@ public sealed partial class IslandWindow
         if (_clips.Count == 0)
         {
             var empty = Txt(12, FontWeights.Normal, Theme.Tertiary); empty.Text = "复制点什么\n会出现在这里"; empty.TextAlignment = TextAlignment.Center;
-            empty.Margin = new Thickness(0, 22, 0, 0); empty.HorizontalAlignment = HorizontalAlignment.Center;
+            empty.Margin = new Thickness(0, 6, 0, 0); empty.HorizontalAlignment = HorizontalAlignment.Center;
+            sp.Children.Add(EmptyIcon("\uE77F", 0));
             sp.Children.Add(empty);
         }
         SetBody(card, sp);
