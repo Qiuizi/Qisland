@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -53,6 +53,20 @@ public static class Launcher
     };
 
     public static bool CanOpen(string source) => For(source) != null;
+
+    /// <summary>这个来源对应软件的 exe：优先取正在运行的进程，其次登记的安装路径，最后开始菜单快捷方式指向的目标。</summary>
+    public static string? ExePath(string source)
+    {
+        var t = For(source);
+        if (t is null) return null;
+        foreach (var name in t.Processes)
+            foreach (var p in Process.GetProcessesByName(name))
+                using (p)
+                    if (AppIcons.ProcessPath(p.Id) is { } path && File.Exists(path)) return path;
+        foreach (var exe in t.Exes) if (File.Exists(exe)) return exe;
+        if (t.Lnk is { } name2 && FindShortcut(name2) is { } lnk) return lnk; // 快捷方式本身也带着同一个图标
+        return null;
+    }
 
     public static bool Open(LiveActivity a) => Open(a.Source);
 

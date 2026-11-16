@@ -13,7 +13,7 @@ namespace Qisland.App;
 public sealed partial class IslandWindow
 {
     public LyricsService? Lyrics { get; set; }
-    private const double LyricCompactW = 340;
+    private const double LyricCompactW = 330;
     private readonly DispatcherTimer _lyricTimer = new() { Interval = TimeSpan.FromMilliseconds(200) };
     private int _lyricIdx = -2;
     private TextBlock? _compactLyric, _cardLyric, _cardLyric2;

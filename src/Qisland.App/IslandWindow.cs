@@ -22,7 +22,7 @@ public sealed partial class IslandWindow : Window
     private enum Mode { Idle, Compact, Expanded }
 
     private const double WinW = 680, WinH = 600, TopGap = 10;
-    private const double IdleW = 176, IdleH = 34, CompactH = 38, ExpandedW = 452, RowH = 56;
+    private const double IdleW = 176, IdleH = 34, CompactH = 36, ExpandedW = 452, RowH = 56;
     private const int MaxRows = 4;
 
     private readonly ActivityStore _store;
@@ -103,6 +103,15 @@ public sealed partial class IslandWindow : Window
         Content = _root;
 
         _store.Changed += OnStoreChanged;
+        // 真实软件图标在后台读好后，重建一次用到图标的地方
+        AppIcons.Loaded += () => Dispatcher.BeginInvoke(() =>
+        {
+            RebuildCompact();
+            RebuildBubble(_store.Ranked());
+            if (_mode == Mode.Expanded && !_animating) RebuildExpanded(); else _expDirty = true;
+        });
+        foreach (var src in new[] { "wechat", "qq", "music", "qqmusic", "codex", "deepseek-harness", "info-station", "spotify", "kugou", "kuwo", "potplayer" })
+            AppIcons.Warm(src);
         _poll.Tick += (_, _) => Poll();
         _tick.Tick += (_, _) => OnSecond();
         SourceInitialized += (_, _) => SetupHwnd();
@@ -561,7 +570,7 @@ public sealed partial class IslandWindow : Window
         _compact.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var tile = Tile(a.Source, 24, 7);
-        tile.Margin = new Thickness(7, 0, 0, 0);
+        tile.Margin = new Thickness(5, 0, 0, 0);
         _compact.Children.Add(tile);
 
         var src = Theme.SourceName(a.Source);
@@ -577,14 +586,14 @@ public sealed partial class IslandWindow : Window
         _compact.Children.Add(title);
 
         var status = StatusView(a, compact: true);
-        status.Margin = new Thickness(0, 0, 13, 0);
+        status.Margin = new Thickness(0, 0, 12, 0);
         status.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(status, 2);
         _compact.Children.Add(status);
 
         status.Measure(new Size(double.PositiveInfinity, CompactH));
         var textW = MeasureText(src, 13, FontWeights.Medium) + MeasureText("  " + a.Title, 13, FontWeights.SemiBold);
-        _compactW = Math.Clamp(7 + 24 + 10 + Math.Min(textW, 270) + 10 + status.DesiredSize.Width + 13, 230, 420);
+        _compactW = Math.Clamp(5 + 24 + 10 + Math.Min(textW, 260) + 10 + status.DesiredSize.Width + 12, 216, 400);
         _compact.Width = _compactW;
         Place(_compact, _compactW);
         if (_mode == Mode.Compact) _w.Target = _compactW;
@@ -942,7 +951,7 @@ public sealed partial class IslandWindow : Window
         _compact.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var tile = ArtTile(m, 24, 6);
         var tileW = m.Art != null && m.Video ? 43 : 24;
-        tile.Margin = new Thickness(7, 0, 0, 0);
+        tile.Margin = new Thickness(5, 0, 0, 0);
         tile.VerticalAlignment = VerticalAlignment.Center;
         _compact.Children.Add(tile);
         var title = new TextBlock
@@ -973,7 +982,7 @@ public sealed partial class IslandWindow : Window
         Grid.SetColumn(bars, 2);
         _compact.Children.Add(bars);
         var textW = MeasureText(m.Title, 13, FontWeights.SemiBold) + (m.Artist.Length > 0 ? MeasureText("  " + m.Artist, 13, FontWeights.Medium) : 0);
-        _compactW = lyr != null ? LyricCompactW : Math.Clamp(7 + tileW + 10 + Math.Min(textW, 260) + 10 + 14 + 14, 200, 400);
+        _compactW = lyr != null ? LyricCompactW : Math.Clamp(5 + tileW + 10 + Math.Min(textW, 250) + 10 + 14 + 13, 190, 390);
         _compact.Width = _compactW;
         Place(_compact, _compactW);
         if (_mode == Mode.Compact) _w.Target = _compactW;
@@ -1263,6 +1272,13 @@ public sealed partial class IslandWindow : Window
 
     private static FrameworkElement Tile(string source, double size, double radius)
     {
+        // 有真实软件图标就用它（和桌面上的一样），否则用自绘的字形方块
+        if (AppIcons.Get(source) is { } icon)
+        {
+            var img = new System.Windows.Controls.Image { Source = icon, Width = size, Height = size, Stretch = Stretch.Uniform };
+            RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
+            return img;
+        }
         var (color, glyph, text) = Theme.Mark(source);
         var top = Color.FromRgb((byte)Math.Min(255, color.R + 22), (byte)Math.Min(255, color.G + 22), (byte)Math.Min(255, color.B + 22));
         var b = new Border
