@@ -62,23 +62,76 @@ public sealed class HomeworkHub
         if (_byPlatform.Remove(platform)) Update(platform, []);
     }
 
-    /// <summary>每分钟调用：24 小时内截止的作业作为活动上岛，3 小时内升级为警告（会弹一下）。</summary>
+    /// <summary>交了但老师还没批的（雨课堂主观题待批改、学习通「待批阅」），截止前后几天内的。</summary>
+    public IReadOnlyList<HomeworkItem> Submitted()
+    {
+        var since = DateTime.Now.AddDays(-2);
+        return _byPlatform.Values.SelectMany(x => x).Where(i => i.Done && i.Ungraded && i.Deadline > since).OrderBy(i => i.Deadline).ToList();
+    }
+
+    // 每项作业已经提醒到哪一档（24 / 3 / 1 小时），存盘，重启后不重复弹
+    private static string AlertsPath => Path.Combine(App.DataDir, "homework-alerts.json");
+    private Dictionary<string, int>? _alerted;
+    private Dictionary<string, int> Alerted
+    {
+        get
+        {
+            if (_alerted != null) return _alerted;
+            try { _alerted = File.Exists(AlertsPath) ? JsonSerializer.Deserialize<Dictionary<string, int>>(File.ReadAllText(AlertsPath)) : null; } catch { }
+            return _alerted ??= [];
+        }
+    }
+
+    /// <summary>
+    /// 每分钟调用。课业雷达：
+    /// · 24 小时内截止的作业常驻岛上，颜色随紧急程度变：24 小时内普通、3 小时内橙色警告、1 小时内红色；
+    /// · 每项作业跨进 24 / 3 / 1 小时这三档时各弹一次提醒（胶囊展开偷看几秒），一分钟最多弹一条，不刷屏。
+    /// </summary>
     public void Tick()
     {
         var now = DateTime.Now;
-        var soon = Pending().Where(i => i.Deadline - now <= TimeSpan.FromHours(24)).Take(3).ToList();
+        var pending = Pending();
+        var soon = pending.Where(i => i.Tier(now) > 0).Take(3).ToList();
         var ids = new HashSet<string>();
         foreach (var i in soon)
         {
             var id = "hw:" + i.Key.GetHashCode().ToString("x");
             ids.Add(id);
-            var urgent = i.Deadline - now <= TimeSpan.FromHours(3);
+            var tier = i.Tier(now);
+            var (kind, prio) = tier switch { 1 => (ActivityKind.Error, 82), 3 => (ActivityKind.Warning, 78), _ => (ActivityKind.Info, 45) };
             var body = $"{i.Course} · {i.Deadline:M/d HH:mm} 截止 · 还剩 {i.Left(now)}";
-            _store.Upsert(new IslandActivity(id, Source, i.Title, body, urgent ? ActivityKind.Warning : ActivityKind.Info, urgent ? 78 : 45,
-                OpenUri: IslandActivity.SafeUri(i.Url)), sticky: true);
+            _store.Upsert(new IslandActivity(id, Source, i.Title, body, kind, prio, OpenUri: IslandActivity.SafeUri(i.Url)), sticky: true);
         }
         foreach (var gone in _live.Where(x => !ids.Contains(x)).ToList()) _store.Remove(gone);
         _live.Clear();
         _live.UnionWith(ids);
+
+        // 分档提醒：找最急的一条还没在这一档提醒过的
+        var alerted = Alerted;
+        var due = pending.Select(i => (i, t: i.Tier(now))).Where(x => x.t > 0 && (!alerted.TryGetValue(x.i.Key, out var had) || x.t < had)).OrderBy(x => x.t).FirstOrDefault();
+        if (due.i is { } hw)
+        {
+            alerted[hw.Key] = due.t;
+            foreach (var k in alerted.Keys.Where(k => !pending.Any(p => p.Key == k)).ToList()) alerted.Remove(k);
+            try { File.WriteAllText(AlertsPath, JsonSerializer.Serialize(alerted)); } catch { }
+            var head = due.t switch { 1 => "作业 1 小时内截止", 3 => "作业 3 小时内截止", _ => "作业明天前截止" };
+            _store.Upsert(new IslandActivity("hw:alert", Source, $"{head} · {hw.Title}", $"{hw.Course} · {hw.Deadline:M/d HH:mm} · 还剩 {hw.Left(now)}",
+                due.t == 1 ? ActivityKind.Error : ActivityKind.Warning, 88, DurationSeconds: due.t == 24 ? 12 : 30, ResetTtl: true, OpenUri: IslandActivity.SafeUri(hw.Url)));
+            App.Log($"作业提醒: {due.t} 小时档");
+        }
+    }
+
+    /// <summary>登录快过期（3 天内）时常驻一条小提示，过期前就去重新扫码，别等作业突然读不到。</summary>
+    public static void WarnExpiring(ActivityStore store, string id, string name, DateTime? expires)
+    {
+        var now = DateTime.Now;
+        if (expires is not { } e || e - now > TimeSpan.FromDays(3) || e <= now)
+        {
+            if (store.Get(id) != null) store.Remove(id);
+            return;
+        }
+        var left = e - now;
+        var text = left.TotalHours < 24 ? $"{Math.Max(1, (int)left.TotalHours)} 小时后过期" : $"{(int)Math.Ceiling(left.TotalDays)} 天后过期";
+        store.Upsert(new IslandActivity(id, Source, $"{name}登录{text}", "托盘菜单 → 作业 DDL → 重新扫码登录", ActivityKind.Warning, 40), sticky: true);
     }
 }

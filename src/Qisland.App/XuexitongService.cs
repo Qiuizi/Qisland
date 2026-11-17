@@ -33,7 +33,10 @@ public sealed partial class XuexitongService
     public DateTime? LastOk { get; private set; }
     public event Action? Changed;
 
-    private sealed record Ck(string N, string V, string D, string P);
+    private sealed record Ck(string N, string V, string D, string P, long E = 0);
+    /// <summary>登录 Cookie 里最早的过期时间（扫码登录后才记录；会话 Cookie 没有过期时间就是 null）。</summary>
+    public DateTime? ExpiresAt { get; private set; }
+    private static readonly string[] AuthCookies = ["_uid", "UID", "vc3", "_d", "uf", "p_auth_token", "xxtenc"];
 
     public XuexitongService(HomeworkHub hub, ActivityStore store)
     {
@@ -46,7 +49,10 @@ public sealed partial class XuexitongService
                 UserName = doc.GetProperty("name").GetString();
                 _jar = new CookieContainer();
                 foreach (var c in doc.GetProperty("cookies").Deserialize<List<Ck>>() ?? [])
+                {
                     _jar.Add(new Cookie(c.N, c.V, c.P, c.D));
+                    if (c.E > 0 && AuthCookies.Contains(c.N) && DateTimeOffset.FromUnixTimeSeconds(c.E).LocalDateTime is var t && (ExpiresAt == null || t < ExpiresAt)) ExpiresAt = t;
+                }
             }
             catch { _jar = null; }
         }
@@ -60,7 +66,9 @@ public sealed partial class XuexitongService
     {
         if (_jar == null) return;
         var list = _jar.GetAllCookies().Where(c => c.Domain.Contains("chaoxing") || c.Domain.Contains("cldisk"))
-            .Select(c => new Ck(c.Name, c.Value, c.Domain, c.Path)).ToList();
+            .Select(c => new Ck(c.Name, c.Value, c.Domain, c.Path, c.Expires > DateTime.Now ? new DateTimeOffset(c.Expires.ToUniversalTime()).ToUnixTimeSeconds() : 0)).ToList();
+        var auth = list.Where(c => c.E > 0 && AuthCookies.Contains(c.N)).Select(c => DateTimeOffset.FromUnixTimeSeconds(c.E).LocalDateTime).ToList();
+        ExpiresAt = auth.Count > 0 ? auth.Min() : null;
         Dpapi.Save(CredPath, JsonSerializer.Serialize(new { name = UserName ?? "", cookies = list }));
     }
 
@@ -134,7 +142,7 @@ public sealed partial class XuexitongService
 
     public void Logout()
     {
-        _jar = null; UserName = null; Expired = false;
+        _jar = null; UserName = null; Expired = false; ExpiresAt = null;
         try { File.Delete(CredPath); } catch { }
         _hub.Clear(Platform);
         _store.Remove("xxt:expired");
@@ -145,6 +153,7 @@ public sealed partial class XuexitongService
 
     public void Tick()
     {
+        HomeworkHub.WarnExpiring(_store, "xxt:expiring", "学习通", _jar != null && !Expired ? ExpiresAt : null);
         if (_jar == null || _busy || Expired || DateTime.Now < _next) return;
         _ = RefreshAsync();
     }
@@ -226,6 +235,13 @@ public sealed partial class XuexitongService
                 var url = WebUtility.HtmlDecode(Uri.UnescapeDataString(m.Groups[1].Value));
                 var title = WebUtility.HtmlDecode(m.Groups[2].Value.Trim());
                 var state = m.Groups[3].Value.Trim();
+                if (state.Contains("待批阅"))
+                {
+                    // 交了没批：只用列表上现成的剩余时间，不为它多发详情请求
+                    if (LeftFromList(wl, m.Index, now) is { } sd && sd > now)
+                        items.Add(new HomeworkItem(Platform, c.Name, title, sd, true, url.StartsWith("http") ? url : "", "作业", Ungraded: true));
+                    continue;
+                }
                 if (DoneMarks.Any(state.Contains) || state.Contains("已截止") || state.Contains("已过期")) continue;
                 // 列表上有时直接写着「剩余 X 小时」，能省一次详情请求
                 var dl = LeftFromList(wl, m.Index, now);

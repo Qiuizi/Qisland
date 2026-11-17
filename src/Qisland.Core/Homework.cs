@@ -1,8 +1,17 @@
 namespace Qisland.Core;
 
 /// <summary>一条作业 / 测验 / 考试的截止信息（来自雨课堂、学习通等，只读）。</summary>
-public sealed record HomeworkItem(string Platform, string Course, string Title, DateTime Deadline, bool Done, string Url = "", string Kind = "作业")
+/// <param name="Ungraded">交了但老师还没批（主观题待批改）。这类算完成，只在「已交待批」里单独列出来。</param>
+public sealed record HomeworkItem(string Platform, string Course, string Title, DateTime Deadline, bool Done, string Url = "", string Kind = "作业", bool Ungraded = false)
 {
+    /// <summary>截止提醒的档位：24 / 3 / 1 小时内，0 表示还早。</summary>
+    public int Tier(DateTime now)
+    {
+        var d = Deadline - now;
+        if (d <= TimeSpan.Zero) return 0;
+        return d <= TimeSpan.FromHours(1) ? 1 : d <= TimeSpan.FromHours(3) ? 3 : d <= TimeSpan.FromHours(24) ? 24 : 0;
+    }
+
     public string Key => $"{Platform}|{Course}|{Title}|{Deadline:yyyyMMddHHmm}";
 
     public string Left(DateTime now)

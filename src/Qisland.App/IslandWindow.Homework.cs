@@ -15,12 +15,13 @@ public sealed partial class IslandWindow
     /// <summary>首页「作业 DDL」：最近 3 项没交的，3 小时内红、24 小时内橙；点一下打开对应课程页。</summary>
     private FrameworkElement? HomeworkCard()
     {
-        var items = Homework?.Pending();
-        if (items is not { Count: > 0 }) return null;
+        var items = Homework?.Pending() ?? [];
+        var submitted = Homework?.Submitted() ?? [];
+        if (items.Count == 0 && submitted.Count == 0) return null;
         var now = DateTime.Now;
         var sp = new StackPanel { Margin = new Thickness(0, 8, 0, 8) };
         var head = Txt(11.5, FontWeights.Medium, Theme.Secondary);
-        head.Text = items.Count > 3 ? $"待交作业 {items.Count} 项 · 最近 3 项" : $"待交作业 {items.Count} 项";
+        head.Text = items.Count == 0 ? "作业都交了" : items.Count > 3 ? $"待交作业 {items.Count} 项 · 最近 3 项" : $"待交作业 {items.Count} 项";
         head.Margin = new Thickness(0, 0, 0, 4);
         sp.Children.Add(head);
         var purple = Theme.Freeze(new SolidColorBrush(Color.FromRgb(0xAF, 0x52, 0xDE)));
@@ -63,7 +64,25 @@ public sealed partial class IslandWindow
             }
             sp.Children.Add(g);
         }
+        if (submitted.Count > 0) sp.Children.Add(SubmittedLine(submitted));
         return Glassy(sp);
+    }
+
+    /// <summary>「已交待批」：交了、老师还没批的，灰色对勾一行带过，不跟待交的混在一起，也不提醒。</summary>
+    private FrameworkElement SubmittedLine(IReadOnlyList<HomeworkItem> list)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0), Background = Brushes.Transparent };
+        var ok = Glyph("\uE73E", 10, Theme.Green);
+        ok.VerticalAlignment = VerticalAlignment.Center;
+        ok.Margin = new Thickness(0, 1, 6, 0);
+        row.Children.Add(ok);
+        var t = Txt(11.5, FontWeights.Medium, Theme.Secondary);
+        t.Text = list.Count == 1 ? $"已交待批 · {list[0].Title}" : $"已交待批 {list.Count} 项 · {list[0].Title} 等";
+        t.TextTrimming = TextTrimming.CharacterEllipsis;
+        t.MaxWidth = ExpandedW - 90;
+        row.Children.Add(t);
+        row.ToolTip = "交了，老师还没批改（不算未完成，不会提醒）\n" + string.Join("\n", list.Take(8).Select(h => $"{h.Course} · {h.Title}"));
+        return row;
     }
 
     public void OnHomeworkChanged() => OnCountdownChanged();

@@ -30,6 +30,8 @@ public sealed class YuketangService
     public bool LoggedIn => _session != null;
     public bool Expired { get; private set; }
     public DateTime? LastOk { get; private set; }
+    /// <summary>登录 Cookie 的过期时间（扫码登录时记下；更早的登录没有记录就是 null）。</summary>
+    public DateTime? ExpiresAt { get; private set; }
     public event Action? Changed;
 
     public YuketangService(HomeworkHub hub, ActivityStore store)
@@ -43,6 +45,7 @@ public sealed class YuketangService
                 _session = o["sessionid"]?.GetValue<string>();
                 UserName = o["name"]?.GetValue<string>();
                 Host = o["host"]?.GetValue<string>() ?? Host;
+                if (o["expires"]?.GetValue<long>() is { } ex and > 0) ExpiresAt = DateTimeOffset.FromUnixTimeSeconds(ex).LocalDateTime;
             }
             catch { }
         }
@@ -89,12 +92,14 @@ public sealed class YuketangService
                 var o = text.Length > 0 ? JsonNode.Parse(text) : null;
                 if (o?["code"]?.GetValue<int>() == 0 && o["data"] is JsonObject d)
                 {
-                    var sid = jar.GetCookies(new Uri($"https://{Host}/"))["sessionid"]?.Value;
+                    var ck = jar.GetCookies(new Uri($"https://{Host}/"))["sessionid"];
+                    var sid = ck?.Value;
                     if (string.IsNullOrEmpty(sid)) throw new IOException("登录成功但没拿到会话");
+                    ExpiresAt = ck!.Expires > DateTime.Now ? ck.Expires.ToLocalTime() : null;
                     _session = sid;
                     UserName = d["Name"]?.ToString() ?? "";
                     Expired = false;
-                    Dpapi.Save(CredPath, JsonSerializer.Serialize(new { host = Host, sessionid = sid, name = UserName }));
+                    Dpapi.Save(CredPath, JsonSerializer.Serialize(new { host = Host, sessionid = sid, name = UserName, expires = ExpiresAt is { } e ? new DateTimeOffset(e).ToUnixTimeSeconds() : 0 }));
                     App.Log($"雨课堂: 已登录 {UserName}");
                     _next = DateTime.Now;
                     Changed?.Invoke();
@@ -109,7 +114,7 @@ public sealed class YuketangService
 
     public void Logout()
     {
-        _session = null; UserName = null; Expired = false;
+        _session = null; UserName = null; Expired = false; ExpiresAt = null;
         try { File.Delete(CredPath); } catch { }
         _hub.Clear(Platform);
         _store.Remove("ykt:expired");
@@ -121,6 +126,7 @@ public sealed class YuketangService
     /// <summary>每秒的计时器里调用，到点才真正去拉。</summary>
     public void Tick()
     {
+        HomeworkHub.WarnExpiring(_store, "ykt:expiring", "雨课堂", _session != null && !Expired ? ExpiresAt : null);
         if (_session == null || _busy || Expired || DateTime.Now < _next) return;
         _ = RefreshAsync();
     }
@@ -193,8 +199,9 @@ public sealed class YuketangService
             if (n++ < 3) Dump("activities-" + cid, log);
             // 学习日志里不带提交状态（作业交了但老师没批时也看不出来）。
             // 成绩页每个小节有 schedule：作业 / 考试只要交了就是 1，跟有没有批分无关
-            Dictionary<string, double>? sched = null;
-            async Task<Dictionary<string, double>> Schedules(string sku)
+            // no_corrected_subj_count > 0：交了，但还有主观题老师没批 →「已交待批」
+            Dictionary<string, (double sc, bool ungraded)>? sched = null;
+            async Task<Dictionary<string, (double sc, bool ungraded)>> Schedules(string sku)
             {
                 if (sched != null) return sched;
                 sched = new();
@@ -202,7 +209,7 @@ public sealed class YuketangService
                 var sd = await Get(h, $"/c27/online_courseware/schedule/score_detail/single/{sku}/0/", cid);
                 Dump("schedule-" + cid, sd ?? new JsonObject());
                 foreach (var l in sd?["data"]?["leaf_level_infos"]?.AsArray() ?? [])
-                    if (l?["id"]?.ToString() is { Length: > 0 } id) sched[id] = Num(l["schedule"]);
+                    if (l?["id"]?.ToString() is { Length: > 0 } id) sched[id] = (Num(l["schedule"]), Num(l["no_corrected_subj_count"]) > 0);
                 return sched;
             }
             foreach (var a in log["data"]?["activities"]?.AsArray() ?? [])
@@ -215,13 +222,17 @@ public sealed class YuketangService
                 if (dl == null || type is 9 or 14 or 15 || Truthy(ao["is_graph"])) continue;
                 if (dl < DateTime.Now.AddDays(-1)) continue;
                 var done = Truthy(ao["is_finished"]) || Truthy(ao["finished"]) || Truthy(ao["is_submit"]) || Truthy(ao["submitted"]);
-                if (!done && ao["content"] is JsonObject co && co["leaf_id"]?.ToString() is { Length: > 0 } leaf
+                var ungraded = false;
+                if (ao["content"] is JsonObject co && co["leaf_id"]?.ToString() is { Length: > 0 } leaf
                     && co["sku_id"]?.ToString() is { Length: > 0 } sku
-                    && (await Schedules(sku)).TryGetValue(leaf, out var sc))
-                    done = sc >= 1;
+                    && (done ? sched : await Schedules(sku)) is { } sd && sd.TryGetValue(leaf, out var st))
+                {
+                    done |= st.sc >= 1;
+                    ungraded = st.sc >= 1 && st.ungraded;
+                }
                 var kind = type == 5 ? "试卷" : type == 19 ? "章节作业" : "作业";
                 items.Add(new HomeworkItem(Platform, course, ao["title"]?.ToString() ?? kind, dl.Value, done,
-                    $"https://{Host}/v2/web/studentLog/{cid}", kind));
+                    $"https://{Host}/v2/web/studentLog/{cid}", kind, ungraded));
             }
         }
         return items;

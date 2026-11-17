@@ -575,6 +575,8 @@ public sealed partial class IslandWindow : Window
         if (!Native.GetWindowRect(_hwnd, out var wr)) return;
         _winHpx = want;
         SetWindowPos(_hwnd, IntPtr.Zero, 0, 0, wr.Right - wr.Left, want, 0x0002 | 0x0004 | 0x0010 | 0x0200); // NOMOVE | NOZORDER | NOACTIVATE | NOOWNERZORDER
+        Native.GetWindowRect(_hwnd, out var after);
+        App.Log($"window height {wr.Bottom - wr.Top} → {want} px (now {after.Bottom - after.Top})");
     }
 
     private static void Place(FrameworkElement layer, double width) => Canvas.SetLeft(layer, Math.Round((WinW - width) / 2));
