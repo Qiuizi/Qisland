@@ -81,6 +81,15 @@ public sealed partial class IslandWindow : Window
     private readonly TextBlock _idleClock = Txt(13.5, FontWeights.SemiBold, Theme.Primary);
     private readonly TextBlock _idleWeatherGlyph = WxGlyph("", 13, Theme.Secondary);
     private readonly TextBlock _idleTemp = Txt(13, FontWeights.Medium, Theme.Secondary);
+    // 输入法中 / 英：收起时天气左边一个小字，默认关（托盘里开）
+    private readonly TextBlock _idleIme = Txt(11.5, FontWeights.SemiBold, Theme.Tertiary);
+
+    public void SetIme(string state)
+    {
+        _idleIme.Text = state;
+        _idleIme.Foreground = state == "中" ? Theme.Secondary : Theme.Tertiary;
+        _idleIme.Visibility = state.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
     private double _compactW = 260, _expandedH = 140;
 
     public IslandWindow(ActivityStore store)
@@ -174,6 +183,9 @@ public sealed partial class IslandWindow : Window
         _idleClock.VerticalAlignment = VerticalAlignment.Center;
         _idle.Children.Add(_idleClock);
         var wx = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 15, 0), VerticalAlignment = VerticalAlignment.Center };
+        _idleIme.Margin = new Thickness(0, 0, 7, 0);
+        _idleIme.Visibility = Visibility.Collapsed;
+        wx.Children.Add(_idleIme);
         _idleWeatherGlyph.Margin = new Thickness(0, 1, 6, 0);
         wx.Children.Add(_idleWeatherGlyph);
         wx.Children.Add(_idleTemp);
@@ -416,6 +428,7 @@ public sealed partial class IslandWindow : Window
             ApplyFrame(); // 停稳后把窗口区域收回到最终大小
             if (_glass.Host.Visibility == Visibility.Visible) _glass.Refresh(); // 停稳立刻补一张当前背景，不等下一个 50 ms
             if (_afterSettle is { } after) { _afterSettle = null; after(); }
+            if (_mode == Mode.Expanded) SchedulePrebuild();
             App.Log($"anim → {_mode}: {_frames} 帧 / {(_lastRender - _animStart).TotalSeconds:0.00}s, 掉帧 {_slowFrames}, 最长 {_maxDt * 1000:0} ms");
             _frames = 0; _slowFrames = 0; _maxDt = 0;
             if (_mode != Mode.Expanded) App.TrimSoon();
@@ -681,6 +694,8 @@ public sealed partial class IslandWindow : Window
         _mediaFill = null; _mediaTime = null;
         BuildPage(stack);
         _pageCache.Clear(); // 数据变了：其他页的缓存一律作废
+        _pageHosts.Clear();
+        _pageHosts[_page] = (_gaugeHost, _timerHost, _dropZone);
         _expStack = stack;
         ApplyPageOffset();
         _expanded.Children.Add(stack);
@@ -690,6 +705,59 @@ public sealed partial class IslandWindow : Window
         if (_mode == Mode.Expanded) _h.Target = _expandedH;
         _pageCache[_page] = (stack, _expandedH, _mediaFill, _mediaTime);
         if (sw.Elapsed.TotalMilliseconds > 6) App.Log($"rebuild {_page}: {sw.Elapsed.TotalMilliseconds:0.0} ms");
+        SchedulePrebuild();
+    }
+
+    // ── 翻页预建：展开着的时候，趁 UI 空闲把左右相邻的页先建好放进缓存，翻过去直接换上（原来每次翻页现建 30–100 ms）
+    private readonly Dictionary<Page, (Border? gauge, Border? timer, Border? drop)> _pageHosts = [];
+    private bool _prebuildQueued;
+
+    private void SchedulePrebuild()
+    {
+        if (_prebuildQueued || SnapshotMode) return;
+        _prebuildQueued = true;
+        Dispatcher.BeginInvoke(() => { _prebuildQueued = false; PrebuildNeighbor(); }, DispatcherPriority.ApplicationIdle);
+    }
+
+    /// <summary>一次只建一页（不让空闲时的一次预建拖太久），建完如果还有没建的再排下一次。</summary>
+    private void PrebuildNeighbor()
+    {
+        if (_mode != Mode.Expanded || _animating || _swiping || _editing || _widgetEdit || _expDirty || _dragging) return;
+        foreach (var d in new[] { 1, -1 })
+        {
+            var p = (Page)((int)_page + d);
+            if ((int)p < 0 || (int)p > LastPage || _pageCache.ContainsKey(p)) continue;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var keep = (_page, _expStack, _mediaFill, _mediaTime, _gaugeHost, _timerHost, _dropZone);
+            try
+            {
+                _page = p; _mediaFill = null; _mediaTime = null;
+                var stack = new StackPanel { Margin = new Thickness(16, 14, 16, 0) };
+                BuildPage(stack);
+                stack.Measure(new Size(ExpandedW, double.PositiveInfinity));
+                _pageCache[p] = (stack, Math.Min(MaxIslandH, Math.Ceiling(stack.DesiredSize.Height + 14 + 10)), _mediaFill, _mediaTime);
+                _pageHosts[p] = (_gaugeHost, _timerHost, _dropZone);
+            }
+            finally { (_page, _expStack, _mediaFill, _mediaTime, _gaugeHost, _timerHost, _dropZone) = keep; }
+            if (sw.Elapsed.TotalMilliseconds > 6) App.Log($"prebuild {p}: {sw.Elapsed.TotalMilliseconds:0.0} ms");
+            SchedulePrebuild();
+            return;
+        }
+    }
+
+    /// <summary>
+    /// 启动时 UI 线程要花一两秒起各个数据源，这期间排上的第一段形变动画会卡成一帧 1 秒。
+    /// 起完以后直接把弹簧归位到目标状态，不演这段动画。
+    /// </summary>
+    public void SettleNow()
+    {
+        if (!_animating) return;
+        foreach (var s in Springs) s.Snap(s.Target);
+        CompositionTarget.Rendering -= OnRendering;
+        _animating = false;
+        StopPacer();
+        ApplyFrame();
+        _frames = 0; _slowFrames = 0; _maxDt = 0;
     }
 
     /// <summary>岛最高能长到多高：窗口高度减去顶部间距，再给底部阴影留一点。</summary>
@@ -720,7 +788,8 @@ public sealed partial class IslandWindow : Window
         if (_expDirty || !_pageCache.TryGetValue(_page, out var c)) { RebuildExpanded(); return; }
         (c.stack.Parent as Panel)?.Children.Remove(c.stack);
         _expanded.Children.Clear();
-        _mediaFill = c.fill; _mediaTime = c.time; _gaugeHost = null; _timerHost = null;
+        _mediaFill = c.fill; _mediaTime = c.time;
+        (_gaugeHost, _timerHost, _dropZone) = _pageHosts.TryGetValue(_page, out var hosts) ? hosts : (null, null, null);
         _expStack = c.stack;
         ApplyPageOffset();
         _expanded.Children.Add(c.stack);
@@ -729,6 +798,7 @@ public sealed partial class IslandWindow : Window
         if (_mode == Mode.Expanded) _h.Target = c.h;
         UpdateMediaProgress();
         RefitExpanded();
+        SchedulePrebuild();
         if (_page == Page.Todo && _todoBox != null && _editing) Dispatcher.BeginInvoke(() => _todoBox.Focus(), System.Windows.Threading.DispatcherPriority.Input);
     }
 
@@ -872,7 +942,8 @@ public sealed partial class IslandWindow : Window
         Grid.SetColumn(right, 2);
         g.Children.Add(right);
 
-        var canOpen = a.OpenUri != null || Launcher.CanOpen(a.Source) || a.Source is "update" or "system" or "battery" or "device" or "copy" or "download";
+        var canOpen = a.Source == "otp" || a.OpenUri != null || Launcher.CanOpen(a.Source) || a.Source is "update" or "system" or "battery" or "device" or "copy" or "download";
+        if (a.Source == "otp") right.Children.Add(Chip("复制", () => CopyOtp(a)));
         // QQ 等发系统通知的软件：原通知还在时，给一个去通知中心的入口——点原通知，软件自己会跳到那个会话
         if (a.Source is not "wechat" && a.OpenUri == null && ToastMirror.Current?.Alive(a.Id) == true)
             right.Children.Add(ActionCenterButton());
@@ -882,6 +953,7 @@ public sealed partial class IslandWindow : Window
         {
             e.Handled = true;
             App.Log($"点击 {a.Id}");
+            if (a.Source == "otp") { CopyOtp(a); return; }
             if (!canOpen || OpenRequested?.Invoke(a) != true)
             {
                 // 没有对应软件（计时、通知等）：点一下当作「已读」，已完成或非常驻的直接收掉
@@ -1189,6 +1261,25 @@ public sealed partial class IslandWindow : Window
         b.MouseLeftButtonDown += (_, e) => e.Handled = true;
         b.MouseLeftButtonUp += (_, e) => { e.Handled = true; act(); };
         return b;
+    }
+
+    /// <summary>复制验证码：标记成「不进剪贴板历史、不给剪贴板监视器」，岛自己的剪贴板记录也不收；复制后这条收掉。</summary>
+    private void CopyOtp(LiveActivity a)
+    {
+        var code = new string(a.Title.Where(char.IsAsciiDigit).ToArray());
+        if (code.Length < 4) return;
+        try
+        {
+            var d = new DataObject();
+            d.SetData(DataFormats.UnicodeText, code);
+            d.SetData("ExcludeClipboardContentFromMonitorProcessing", new System.IO.MemoryStream(new byte[4]));
+            d.SetData("CanIncludeInClipboardHistory", new System.IO.MemoryStream(BitConverter.GetBytes(0)));
+            d.SetData("CanUploadToCloudClipboard", new System.IO.MemoryStream(BitConverter.GetBytes(0)));
+            Clipboard.SetDataObject(d, true);
+            App.Log("验证码: 已复制");
+        }
+        catch (Exception ex) { App.Log("验证码复制失败: " + ex.Message); return; }
+        _store.Upsert(new IslandActivity(a.Id, "otp", "已复制验证码", "粘贴即可", ActivityKind.Done, 70, "\uE8C8", DurationSeconds: 4, ResetTtl: true));
     }
 
     private static FrameworkElement ActionCenterButton() =>

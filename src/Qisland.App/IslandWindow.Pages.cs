@@ -37,8 +37,9 @@ public sealed partial class IslandWindow
         var warm = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
         warm.Tick += (_, _) =>
         {
+            // 正在动画 / 展开 / 鼠标在岛上时不预热（预热会占住 UI 线程半秒，正在跑的动画就会卡一下），一秒后再看
+            if (_mode == Mode.Expanded || _animating || _hoverSince != DateTime.MaxValue) { warm.Interval = TimeSpan.FromSeconds(1); return; }
             warm.Stop();
-            if (_mode == Mode.Expanded) return;
             var keep = _page;
             foreach (var p in Enum.GetValues<Page>())
             {

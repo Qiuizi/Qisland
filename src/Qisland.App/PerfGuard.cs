@@ -57,7 +57,7 @@ public sealed class PerfGuard
             PrivateMb = _p.PrivateMemorySize64 / 1048576.0;
         }
 
-        if (!Degraded && _samples.Count >= 6 && Avg30 > Budget)
+        if (!Degraded && _n > 12 && _samples.Count >= 6 && Avg30 > Budget)   // 启动后第一分钟（加载、首帧）不算
         {
             Degraded = true; _calm = 0;
             App.Log($"性能护栏: 30 秒平均 CPU {Avg30:0.0}% 超过 {Budget}% → 降级（60 fps、频谱静止、玻璃少截屏）");

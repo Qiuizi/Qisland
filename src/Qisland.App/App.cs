@@ -41,6 +41,7 @@ public sealed class App : Application
     private VolumeWatcher? _volume;
     private SystemWatch _sys = null!;
     private readonly PerfGuard _perf = new();
+    private ImeWatch? _ime;
     private Updater _upd = null!;
     private DateTime _day = DateTime.Today;
     private readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -121,6 +122,8 @@ public sealed class App : Application
         _ = WeatherLoop();
 
         StartProviders();
+        _window.SettleNow();
+        CleanDebugDumps();
         try { var n = ChangeLedger.Sync().Count; if (n > 0) Log($"改动账本: 对其他软件有 {n} 处改动（托盘 → 对其他软件的改动）"); } catch (Exception ex) { Log("改动账本: " + ex.Message); }
         if (args.Contains("--demo")) Demo();
         TrimSoon();
@@ -170,6 +173,9 @@ public sealed class App : Application
         catch (Exception ex) { Log("Codex: " + ex.Message); }
         try { _todo = new TodoFile(_store); _window.Todo = _todo; _todo.Changed += () => _window.SetTodos(_todo.Open); _window.SetTodos(_todo.Open); }
         catch (Exception ex) { Log("待办: " + ex.Message); }
+        _ime = new ImeWatch();
+        _ime.Changed += () => _window.SetIme(_ime.State);
+        _ime.Apply();
         _toasts = new ToastMirror(_store);
         _ = _toasts.StartAsync();
         _ = new InfoStationWatcher(_store, Http).Loop();
@@ -413,6 +419,12 @@ public sealed class App : Application
         var lyr = new System.Windows.Forms.ToolStripMenuItem("显示歌词") { CheckOnClick = true, Checked = LyricsService.Enabled, ToolTipText = "播放音乐时胶囊里滚动显示当前这句歌词（网易云 / LRCLIB）" };
         lyr.CheckedChanged += (_, _) => Dispatcher.BeginInvoke(() => { LyricsService.Enabled = lyr.Checked; _lyrics?.OnTrack(null); _lyrics?.OnTrack(_media?.Current); });
         menu.Items.Add(lyr);
+        var otp = new System.Windows.Forms.ToolStripMenuItem("通知里的验证码一键复制") { CheckOnClick = true, Checked = ToastMirror.OtpEnabled, ToolTipText = "通知预览里有验证码时，岛上单独弹一条带「复制」的卡片；验证码只在内存里，不记日志、不进剪贴板历史" };
+        otp.CheckedChanged += (_, _) => ToastMirror.OtpEnabled = otp.Checked;
+        menu.Items.Add(otp);
+        var ime = new System.Windows.Forms.ToolStripMenuItem("显示输入法中 / 英（实验）") { CheckOnClick = true, Checked = ImeWatch.Enabled, ToolTipText = "收起的岛上，天气左边显示当前输入法是中文还是英文。部分输入法 / 程序里可能不准" };
+        ime.CheckedChanged += (_, _) => Dispatcher.BeginInvoke(() => { ImeWatch.Enabled = ime.Checked; _ime?.Apply(); });
+        menu.Items.Add(ime);
         var keys = new System.Windows.Forms.ToolStripMenuItem("接管音量键") { CheckOnClick = true, Checked = !File.Exists(VolumeWatcher.OffFlag), ToolTipText = "音量键改由灵动岛显示，不再弹出系统音量浮窗" };
         keys.CheckedChanged += (_, _) => _volume?.HookKeys(keys.Checked);
         menu.Items.Add(keys);
@@ -461,6 +473,26 @@ public sealed class App : Application
         _store.Upsert(new PushDraft { Id = "demo:wx", Source = "wechat", Title = "软件工程 2025 级群", Body = "王老师：明天的实验课改到 B403", DurationSeconds = 120 });
         _store.Upsert(new PushDraft { Id = "demo:course", Source = "coursedesk", Type = "running", Title = "离散数学作业 4", Body = "周二 23:59 截止", DurationSeconds = 120 }, 0.62);
         _store.Upsert(new PushDraft { Id = "demo:codex", Source = "codex", Type = "success", Title = "测试全部通过", Body = "info-station · 42 passed", DurationSeconds = 120 });
+    }
+
+    /// <summary>调试开关关着时，把以前调试留下的原始响应（ykt-*.json、xxt-*.html）删掉，只留开关文件。</summary>
+    private static void CleanDebugDumps()
+    {
+        if (DebugDumps) return;
+        try
+        {
+            var dir = Path.Combine(DataDir, "debug");
+            if (!Directory.Exists(dir)) return;
+            var n = 0;
+            foreach (var f in Directory.EnumerateFiles(dir))
+            {
+                var name = Path.GetFileName(f);
+                if (!(name.StartsWith("ykt-") || name.StartsWith("xxt-"))) continue;
+                try { File.Delete(f); n++; } catch { }
+            }
+            if (n > 0) Log($"清掉了 {n} 个旧的调试转储（调试开关没开）");
+        }
+        catch (Exception ex) { Log("清理调试转储: " + ex.Message); }
     }
 
     // ───────────── 内存：动画结束后把空闲页还给系统 ─────────────

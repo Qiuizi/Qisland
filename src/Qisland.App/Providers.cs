@@ -60,12 +60,13 @@ public sealed class ToastMirror
                 string appName = "", aumid = "";
                 try { appName = n.AppInfo?.DisplayInfo?.DisplayName ?? ""; aumid = n.AppInfo?.AppUserModelId ?? ""; } catch { }
                 var app = NotificationMirror.Detect(appName, aumid);
-                if (app is null) { _toastToActivity[n.Id] = ""; continue; }
+                if (!_primed) { _toastToActivity[n.Id] = ""; continue; } // 启动前就在的通知不当新消息
                 var texts = n.Notification?.Visual?.GetBinding(KnownNotificationBindings.ToastGeneric)?.GetTextElements()
                     ?.Select(t => t.Text).Where(t => !string.IsNullOrWhiteSpace(t)).ToList() ?? [];
                 var title = texts.Count > 0 ? texts[0] : "";
                 var body = texts.Count > 1 ? string.Join(" ", texts.Skip(1)) : "";
-                if (!_primed) { _toastToActivity[n.Id] = ""; continue; } // 启动前就在的通知不当新消息
+                PushOtp(n.Id, appName, title + " " + body);
+                if (app is null) { _toastToActivity[n.Id] = ""; continue; }
                 _toastToActivity[n.Id] = Push(app.Value, title, body);
             }
             // 通知中心里被清掉的通知：说明你已经看过，岛上同步移除
@@ -80,6 +81,22 @@ public sealed class ToastMirror
         catch (Exception ex) { App.Log("通知轮询: " + ex.Message); }
         finally { _busy = false; }
     }
+
+    /// <summary>
+    /// 通知里带验证码：岛上单独弹一条「验证码 123456」，点「复制」。验证码只在内存里，
+    /// 不写日志、不进剪贴板历史，3 分钟后自己消失。
+    /// </summary>
+    private void PushOtp(uint toastId, string appName, string text)
+    {
+        if (!OtpEnabled || Otp.Extract(text) is not { } code) return;
+        var id = "otp:" + toastId;
+        _store.Upsert(new IslandActivity(id, "otp", "验证码 " + code, appName.Length > 0 ? appName + " · 点一下复制" : "点一下复制",
+            ActivityKind.Info, 86, "\uE8C8", DurationSeconds: 180, ResetTtl: true));
+        App.Log("验证码通知: 已上岛（内容不记录）");
+    }
+
+    public static string OtpOffFlag => Path.Combine(App.DataDir, "otp-off");
+    public static bool OtpEnabled { get => !File.Exists(OtpOffFlag); set { try { if (value) File.Delete(OtpOffFlag); else File.WriteAllText(OtpOffFlag, ""); } catch { } } }
 
     private string Push(ChatApp app, string title, string body)
     {
