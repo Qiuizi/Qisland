@@ -540,6 +540,7 @@ public sealed partial class IslandWindow : Window
         var bubbleX = bl + bw + 8;
         var key = !visible ? (0, 0, 0, 0, 0, 0)
             : (P(bl - side), P(Math.Max(0, y0 - side)), P(bl + bw + side), P(y0 + bh + below), P((rr + side) * 2), bubble ? P(bubbleX) : -1);
+        if (key.Item3 != 0) FitHeight(key.Item4 + 1, dpi.DpiScaleY);
         if (key == _lastRgn) return;
         _lastRgn = key;
         IntPtr rgn;
@@ -556,6 +557,24 @@ public sealed partial class IslandWindow : Window
             }
         }
         Native.SetWindowRgn(_hwnd, rgn, false); // 系统接管 rgn，不用 DeleteObject
+    }
+
+    // 截图工具（PixPin、Snow Shot…）的「窗口识别」按窗口矩形框选，不看窗口区域：
+    // 收起停稳后把窗口本身的高度收到岛 + 阴影那么高（左上角不动，内容不用挪，不会闪），
+    // 要展开 / 变高的那一帧先放回整高，再开始动画。
+    private int _winHpx;
+    private void FitHeight(int needPx, double scale)
+    {
+        if (SnapshotMode || _layered) return;
+        var full = (int)Math.Round(WinH * scale);
+        if (_winHpx == 0) _winHpx = full;
+        int want;
+        if (_mode == Mode.Expanded || _animating) want = needPx > _winHpx ? full : _winHpx;
+        else want = Math.Min(full, needPx + 4);
+        if (want == _winHpx) return;
+        if (!Native.GetWindowRect(_hwnd, out var wr)) return;
+        _winHpx = want;
+        SetWindowPos(_hwnd, IntPtr.Zero, 0, 0, wr.Right - wr.Left, want, 0x0002 | 0x0004 | 0x0010 | 0x0200); // NOMOVE | NOZORDER | NOACTIVATE | NOOWNERZORDER
     }
 
     private static void Place(FrameworkElement layer, double width) => Canvas.SetLeft(layer, Math.Round((WinW - width) / 2));
