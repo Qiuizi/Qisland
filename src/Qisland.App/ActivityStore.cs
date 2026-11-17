@@ -16,6 +16,8 @@ public sealed class LiveActivity
     public DateTime? Expires { get; set; }
     /// <summary>由轮询型提供方维护（天气、信息站等），不靠过期时间消失。</summary>
     public bool Sticky { get; set; }
+    /// <summary>点这一条时优先打开的链接（Codex 会话、作业网页…）。</summary>
+    public string? OpenUri { get; set; }
 }
 
 /// <summary>
@@ -43,7 +45,7 @@ public sealed class ActivityStore
             kind = ActivityKind.Running;
         var prio = d.Priority switch { "high" => 90, "low" => 20, _ => 50 };
         Upsert(new IslandActivity(d.Id, d.Source, d.Title, d.Body, kind, prio, d.Icon, d.Subtitle,
-            d.DurationSeconds, d.ResetTtl), progress: progress);
+            d.DurationSeconds, d.ResetTtl, IslandActivity.SafeUri(d.OpenUri)), progress: progress);
     }
 
     public void Upsert(IslandActivity a, bool sticky = false, double? progress = null)
@@ -59,6 +61,7 @@ public sealed class ActivityStore
         live.Priority = a.Priority;
         live.Progress = progress;
         live.Sticky = sticky;
+        if (a.OpenUri != null || isNew) live.OpenUri = a.OpenUri;
         if (changed) live.Updated = DateTime.Now;
         // 运行中的会话没有自然终点：给长一点的寿命，靠后续事件刷新。
         if (!sticky && (isNew || a.ResetTtl || changed))

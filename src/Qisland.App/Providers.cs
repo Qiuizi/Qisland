@@ -24,7 +24,11 @@ public sealed class ToastMirror
     private UserNotificationListener? _listener;
     private bool _primed, _busy;
 
-    public ToastMirror(ActivityStore store) { _store = store; _timer.Tick += async (_, _) => await Poll(); }
+    public ToastMirror(ActivityStore store) { _store = store; Current = this; _timer.Tick += async (_, _) => await Poll(); }
+    public static ToastMirror? Current { get; private set; }
+
+    /// <summary>这条活动对应的系统通知还在通知中心里吗（在的话可以去通知中心点原通知，让软件自己跳到那个会话）。</summary>
+    public bool Alive(string activityId) => activityId.Length > 0 && _toastToActivity.ContainsValue(activityId);
 
     public async Task<bool> StartAsync()
     {

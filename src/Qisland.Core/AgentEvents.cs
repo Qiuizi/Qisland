@@ -93,7 +93,9 @@ public static class AgentEventParser
             Priority: priority,
             Subtitle: subtitle,
             DurationSeconds: seconds,
-            ResetTtl: kind is ActivityKind.Done or ActivityKind.Error);
+            ResetTtl: kind is ActivityKind.Done or ActivityKind.Error,
+            OpenUri: IslandActivity.SafeUri(FirstString(root, "open_uri", "openUri", "url"))
+                     ?? (source == "codex" && Guid.TryParse(session, out _) ? "codex://threads/" + session : null));
     }
 
     public static string NormalizeSource(string? source)

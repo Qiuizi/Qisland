@@ -22,7 +22,18 @@ public sealed record IslandActivity(
     string Icon = "",
     string Subtitle = "",
     int DurationSeconds = 20,
-    bool ResetTtl = false);
+    bool ResetTtl = false,
+    string? OpenUri = null)
+{
+    /// <summary>点这一条时优先打开的链接（http(s) / codex:// 等）；只接受白名单里的协议。</summary>
+    public static string? SafeUri(string? uri)
+    {
+        if (string.IsNullOrWhiteSpace(uri)) return null;
+        uri = uri.Trim();
+        if (!Uri.TryCreate(uri, UriKind.Absolute, out var u)) return null;
+        return u.Scheme is "http" or "https" or "codex" or "weixin" or "mailto" or "ms-actioncenter" ? uri : null;
+    }
+}
 
 /// <summary>每个来源一个提供方。设置页按 <see cref="Id"/> 开关。</summary>
 public interface IActivityProvider
@@ -63,6 +74,7 @@ public sealed class PushDraft
     /// <summary>为 true 时同 id 更新要重算过期时间（完成/出错这种短卡片）。</summary>
     public bool ResetTtl { get; set; }
     public string Source { get; set; } = "";
+    public string? OpenUri { get; set; }
 }
 
 public static class PushMapping
@@ -92,6 +104,7 @@ public static class PushMapping
             DurationSeconds = Math.Max(4, activity.DurationSeconds),
             ResetTtl = activity.ResetTtl || activity.Kind is ActivityKind.Done or ActivityKind.Error,
             Source = activity.Source,
+            OpenUri = activity.OpenUri,
         };
     }
 

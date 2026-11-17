@@ -67,7 +67,8 @@ public sealed class InfoStationProvider : IActivityProvider
                 Kind: ActivityKind.Info,
                 Priority: score >= 90 ? 62 : 48,
                 DurationSeconds: 180,
-                ResetTtl: true));
+                ResetTtl: true,
+                OpenUri: IslandActivity.SafeUri(First(item, "url", "link"))));
         }
         return list;
     }
@@ -122,7 +123,8 @@ public sealed class InfoStationProvider : IActivityProvider
                 Kind: days is <= 1 ? ActivityKind.Warning : ActivityKind.Info,
                 Priority: priority,
                 DurationSeconds: 300,
-                ResetTtl: true));
+                ResetTtl: true,
+                OpenUri: IslandActivity.SafeUri(First(item, "url", "link"))));
         }
         return list;
     }

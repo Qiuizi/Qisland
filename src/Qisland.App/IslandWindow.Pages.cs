@@ -187,6 +187,9 @@ public sealed partial class IslandWindow
             handled = true;
             return new IntPtr(1);
         }
+        // WM_MOUSEACTIVATE：点岛（呼出、展开、点按钮）都不激活窗口，不抢前台程序（全屏游戏、视频）的焦点；
+        // 只有在待办输入框里打字时才允许激活（BeginEditing 自己会 Activate）
+        if (msg == 0x0021 && !_editing) { handled = true; return new IntPtr(3); }   // MA_NOACTIVATE
         if (msg == 0x031D) { OnClipboardUpdate(); return IntPtr.Zero; }   // WM_CLIPBOARDUPDATE
         if (msg == 0x0312 && wParam.ToInt32() == HotkeyId) { OnHotkey(); handled = true; return IntPtr.Zero; }
         if (msg == 0x0218) // WM_POWERBROADCAST

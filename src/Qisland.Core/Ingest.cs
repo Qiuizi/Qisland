@@ -88,7 +88,8 @@ public static class QislandIngest
             {
                 new IslandActivity(id, Text(root, "source").Length == 0 ? "push" : Text(root, "source"),
                     Text(root, "title"), Text(root, "body"), ActivityKind.Info, 40,
-                    DurationSeconds: 30, ResetTtl: true),
+                    DurationSeconds: 30, ResetTtl: true,
+                    OpenUri: IslandActivity.SafeUri(Text(root, "open_uri").Length > 0 ? Text(root, "open_uri") : Text(root, "url"))),
             };
         }
         return Array.Empty<IslandActivity>();

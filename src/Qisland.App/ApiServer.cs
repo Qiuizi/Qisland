@@ -178,6 +178,7 @@ public sealed class ApiServer : IDisposable
                 Source = S("source").Length > 0 ? S("source") : "push",
                 DurationSeconds = I("duration_seconds") ?? I("duration") ?? I("durationSeconds") ?? 12,
                 ResetTtl = true,
+                OpenUri = S("open_uri").Length > 0 ? S("open_uri") : S("url"),
             };
         }
         catch (JsonException) { return null; }

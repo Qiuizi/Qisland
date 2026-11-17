@@ -853,7 +853,10 @@ public sealed partial class IslandWindow : Window
         Grid.SetColumn(right, 2);
         g.Children.Add(right);
 
-        var canOpen = Launcher.CanOpen(a.Source) || a.Source is "update" or "system" or "battery" or "device" or "copy" or "download";
+        var canOpen = a.OpenUri != null || Launcher.CanOpen(a.Source) || a.Source is "update" or "system" or "battery" or "device" or "copy" or "download";
+        // QQ 等发系统通知的软件：原通知还在时，给一个去通知中心的入口——点原通知，软件自己会跳到那个会话
+        if (a.Source is not "wechat" && a.OpenUri == null && ToastMirror.Current?.Alive(a.Id) == true)
+            right.Children.Add(ActionCenterButton());
         if (canOpen) g.Cursor = Cursors.Hand;
         AddHover(g);
         g.MouseLeftButtonUp += (_, e) =>
@@ -1151,6 +1154,26 @@ public sealed partial class IslandWindow : Window
     }
 
     private double? _seeking;
+
+    /// <summary>行内的小按钮（复制验证码、去通知中心）：一块淡底的圆角字，点它不会触发整行。</summary>
+    private static FrameworkElement Chip(string text, Action act, string? tip = null)
+    {
+        var tb = Txt(11, FontWeights.SemiBold, Theme.Primary);
+        tb.Text = text;
+        var b = new Border
+        {
+            Child = tb, Padding = new Thickness(8, 2, 8, 3), CornerRadius = new CornerRadius(9), Background = Theme.Fill,
+            Cursor = Cursors.Hand, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 4, 0, 0), ToolTip = tip,
+        };
+        b.MouseEnter += (_, _) => b.Background = PressFill;
+        b.MouseLeave += (_, _) => b.Background = Theme.Fill;
+        b.MouseLeftButtonDown += (_, e) => e.Handled = true;
+        b.MouseLeftButtonUp += (_, e) => { e.Handled = true; act(); };
+        return b;
+    }
+
+    private static FrameworkElement ActionCenterButton() =>
+        Chip("通知中心", () => Launcher.OpenUri("ms-actioncenter:", "action-center"), "原通知还在：去通知中心点它，软件会直接跳到那个会话");
 
     private static FrameworkElement MediaButton(string glyph, double size, Action act)
     {

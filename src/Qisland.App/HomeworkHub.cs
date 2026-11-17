@@ -74,7 +74,8 @@ public sealed class HomeworkHub
             ids.Add(id);
             var urgent = i.Deadline - now <= TimeSpan.FromHours(3);
             var body = $"{i.Course} · {i.Deadline:M/d HH:mm} 截止 · 还剩 {i.Left(now)}";
-            _store.Upsert(new IslandActivity(id, Source, i.Title, body, urgent ? ActivityKind.Warning : ActivityKind.Info, urgent ? 78 : 45), sticky: true);
+            _store.Upsert(new IslandActivity(id, Source, i.Title, body, urgent ? ActivityKind.Warning : ActivityKind.Info, urgent ? 78 : 45,
+                OpenUri: IslandActivity.SafeUri(i.Url)), sticky: true);
         }
         foreach (var gone in _live.Where(x => !ids.Contains(x)).ToList()) _store.Remove(gone);
         _live.Clear();
