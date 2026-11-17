@@ -185,7 +185,6 @@ public sealed class YuketangService
         var terms = list.Select(c => (long?)Num(c?["term"])).Where(t => t > 0).ToList();
         var term = terms.Count > 0 ? terms.Max() : null;
         var items = new List<HomeworkItem>();
-        var n = 0;
         foreach (var c in list)
         {
             if (c == null) continue;
@@ -196,7 +195,7 @@ public sealed class YuketangService
             await Task.Delay(500);
             var log = await Get(h, $"/v2/api/web/logs/learn/{cid}?actype=-1&page=0&offset=50&sort=-1");
             if (log == null) return null;
-            if (n++ < 3) Dump("activities-" + cid, log);
+            Dump("activities-" + cid, log);
             // 学习日志里不带提交状态（作业交了但老师没批时也看不出来）。
             // 成绩页每个小节有 schedule：作业 / 考试只要交了就是 1，跟有没有批分无关
             // no_corrected_subj_count > 0：交了，但还有主观题老师没批 →「已交待批」
@@ -223,6 +222,17 @@ public sealed class YuketangService
                 if (dl < DateTime.Now.AddDays(-1)) continue;
                 var done = Truthy(ao["is_finished"]) || Truthy(ao["finished"]) || Truthy(ao["is_submit"]) || Truthy(ao["submitted"]);
                 var ungraded = false;
+                // 试卷 / 课堂习题（type 5 / 4）没有 content.leaf_id，成绩页里也查不到；它们自己带状态：
+                // status 3 = 已提交（实测：交了的 hw1–hw11 全是 3，没交的「第二章Store Buffer」是 0），
+                // progress = 已答题数，答满 problem_count 也算交了。
+                // 交了但 score 还是 0、总分不为 0：多半是主观题老师还没批 →「已交待批」
+                if (ao["status"] is JsonValue || ao["progress"] is JsonValue)
+                {
+                    var pc = Num(ao["problem_count"]);
+                    var paperDone = (int)Num(ao["status"]) == 3 || (pc > 0 && Num(ao["progress"]) >= pc);
+                    if (paperDone && !done) ungraded = Num(ao["score"]) <= 0 && Num(ao["total_score"]) > 0;
+                    done |= paperDone;
+                }
                 if (ao["content"] is JsonObject co && co["leaf_id"]?.ToString() is { Length: > 0 } leaf
                     && co["sku_id"]?.ToString() is { Length: > 0 } sku
                     && (done ? sched : await Schedules(sku)) is { } sd && sd.TryGetValue(leaf, out var st))

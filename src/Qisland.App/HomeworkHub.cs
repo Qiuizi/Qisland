@@ -72,6 +72,7 @@ public sealed class HomeworkHub
     // 每项作业已经提醒到哪一档（24 / 3 / 1 小时），存盘，重启后不重复弹
     private static string AlertsPath => Path.Combine(App.DataDir, "homework-alerts.json");
     private Dictionary<string, int>? _alerted;
+    private string? _alertKey;
     private Dictionary<string, int> Alerted
     {
         get
@@ -84,35 +85,30 @@ public sealed class HomeworkHub
 
     /// <summary>
     /// 每分钟调用。课业雷达：
-    /// · 24 小时内截止的作业常驻岛上，颜色随紧急程度变：24 小时内普通、3 小时内橙色警告、1 小时内红色；
-    /// · 每项作业跨进 24 / 3 / 1 小时这三档时各弹一次提醒（胶囊展开偷看几秒），一分钟最多弹一条，不刷屏。
+    /// · 不常驻：收起的岛平时就显示时间，作业只在展开的主页卡片里；
+    /// · 每项没交的作业跨进 24 / 3 / 1 小时这三档时各弹一次临时提醒（12 / 30 秒后自己消失），一分钟最多一条；
+    /// · 交了（包括已交待批）的作业不算未完成，不提醒。
     /// </summary>
     public void Tick()
     {
         var now = DateTime.Now;
         var pending = Pending();
-        var soon = pending.Where(i => i.Tier(now) > 0).Take(3).ToList();
-        var ids = new HashSet<string>();
-        foreach (var i in soon)
-        {
-            var id = "hw:" + i.Key.GetHashCode().ToString("x");
-            ids.Add(id);
-            var tier = i.Tier(now);
-            var (kind, prio) = tier switch { 1 => (ActivityKind.Error, 82), 3 => (ActivityKind.Warning, 78), _ => (ActivityKind.Info, 45) };
-            var body = $"{i.Course} · {i.Deadline:M/d HH:mm} 截止 · 还剩 {i.Left(now)}";
-            _store.Upsert(new IslandActivity(id, Source, i.Title, body, kind, prio, OpenUri: IslandActivity.SafeUri(i.Url)), sticky: true);
-        }
-        foreach (var gone in _live.Where(x => !ids.Contains(x)).ToList()) _store.Remove(gone);
+        // 不再常驻：24 小时内的作业只在展开的主页作业卡片里列着，收起的岛照常显示时间。
+        // 旧版本挂上去的常驻活动（以及已经交了的那条的提醒）一律撤掉
+        foreach (var gone in _live.ToList()) _store.Remove(gone);
         _live.Clear();
-        _live.UnionWith(ids);
+        if (_alertKey != null && !pending.Any(p => p.Key == _alertKey)) { _store.Remove("hw:alert"); _alertKey = null; }
 
         // 分档提醒：找最急的一条还没在这一档提醒过的
         var alerted = Alerted;
+        var stale = alerted.Keys.Where(k => !pending.Any(p => p.Key == k)).ToList();
+        foreach (var k in stale) alerted.Remove(k);
+        if (stale.Count > 0) try { File.WriteAllText(AlertsPath, JsonSerializer.Serialize(alerted)); } catch { }
         var due = pending.Select(i => (i, t: i.Tier(now))).Where(x => x.t > 0 && (!alerted.TryGetValue(x.i.Key, out var had) || x.t < had)).OrderBy(x => x.t).FirstOrDefault();
         if (due.i is { } hw)
         {
             alerted[hw.Key] = due.t;
-            foreach (var k in alerted.Keys.Where(k => !pending.Any(p => p.Key == k)).ToList()) alerted.Remove(k);
+            _alertKey = hw.Key;
             try { File.WriteAllText(AlertsPath, JsonSerializer.Serialize(alerted)); } catch { }
             var head = due.t switch { 1 => "作业 1 小时内截止", 3 => "作业 3 小时内截止", _ => "作业明天前截止" };
             _store.Upsert(new IslandActivity("hw:alert", Source, $"{head} · {hw.Title}", $"{hw.Course} · {hw.Deadline:M/d HH:mm} · 还剩 {hw.Left(now)}",

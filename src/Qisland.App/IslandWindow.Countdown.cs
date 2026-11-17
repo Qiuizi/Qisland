@@ -36,14 +36,6 @@ public sealed partial class IslandWindow
                 : cls.Start - now <= TimeSpan.FromMinutes(10) ? Theme.Orange : Theme.Secondary;
             _idleCountdown.Visibility = Visibility.Visible;
         }
-        else if (Homework?.Pending().FirstOrDefault() is { } hw && hw.Deadline - DateTime.Now <= TimeSpan.FromHours(6))
-        {
-            // 6 小时内要交的作业：比考试倒计时更急
-            _idleCountdown.Text = $"作业 {hw.Left(DateTime.Now).Replace(" ", "")}";
-            _idleCountdown.ToolTip = $"{hw.Course} · {hw.Title}  {hw.Deadline:M/d HH:mm} 截止";
-            _idleCountdown.Foreground = hw.Deadline - DateTime.Now <= TimeSpan.FromHours(3) ? Theme.Red : Theme.Orange;
-            _idleCountdown.Visibility = Visibility.Visible;
-        }
         else if (near != null && near.Days <= 3)
         {
             _idleCountdown.Text = $"{near.Short} {near.Left}";
