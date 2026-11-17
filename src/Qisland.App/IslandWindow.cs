@@ -62,7 +62,8 @@ public sealed partial class IslandWindow : Window
     private Mode _mode = Mode.Idle;
     private bool _animating, _clickThrough = true, _pinned, _hidden;
     private TimeSpan _lastRender;
-    private DateTime _hoverSince = DateTime.MaxValue, _outsideSince = DateTime.MinValue;
+    private DateTime _hoverSince = DateTime.MaxValue, _outsideSince = DateTime.MinValue, _edgeSince = DateTime.MaxValue;
+    private bool _edgeArmed = true, _edgeSummoned;
     private DateTime _peekUntil = DateTime.MinValue;
     private string? _lastTopId;
     private DateTime _lastTopUpdated;
@@ -325,22 +326,45 @@ public sealed partial class IslandWindow : Window
         }
 
         var now = DateTime.Now;
+
+        // 鼠标顶到屏幕最上沿（岛所在的那块屏、任意横向位置）停一下就呼出岛；
+        // 按着鼠标键（拖窗口到顶部最大化之类）不算；全屏 / 手动隐藏时不打扰
+        var m = _monRect;
+        var onEdge = _winAtTop && !_hidden && p.Y <= m.Top + 1 && p.X >= m.Left && p.X < m.Right
+                     && (Native.GetAsyncKeyState(0x01) & 0x8000) == 0 && (Native.GetAsyncKeyState(0x02) & 0x8000) == 0;
+        if (!onEdge && p.Y > m.Top + 8) _edgeArmed = true;
+        if (onEdge && _edgeArmed)
+        {
+            if (_edgeSince == DateTime.MaxValue) _edgeSince = now;
+            if (_mode != Mode.Expanded && (now - _edgeSince).TotalMilliseconds > 140)
+            {
+                _edgeArmed = false; _edgeSummoned = true;
+                SetMode(Mode.Expanded);
+            }
+        }
+        else _edgeSince = DateTime.MaxValue;
+        // 从顶边呼出后，鼠标还贴在顶部那一条里就别收回去，给它时间挪进岛
+        var keep = _edgeSummoned && p.Y <= m.Top + 6;
+        if (_mode != Mode.Expanded) _edgeSummoned = false;
+
         if (inside)
         {
             if (_hoverSince == DateTime.MaxValue) _hoverSince = now;
             _outsideSince = DateTime.MinValue;
+            _edgeSummoned = false;
             if (_mode != Mode.Expanded && (now - _hoverSince).TotalMilliseconds > 90) SetMode(Mode.Expanded);
         }
         else
         {
             _hoverSince = DateTime.MaxValue;
-            if (_outsideSince == DateTime.MinValue) _outsideSince = now;
+            if (keep) _outsideSince = now;
+            else if (_outsideSince == DateTime.MinValue) _outsideSince = now;
             if (_mode == Mode.Expanded && !_pinned && !_swiping && !_editing && now > _peekUntil && (now - _outsideSince).TotalMilliseconds > 420)
                 SetMode(DesiredRestMode());
         }
 
         // 鼠标离岛很远时降低轮询频率，空转几乎不耗 CPU
-        var far = y > WinH + 160 || x < -300 || x > WinW + 300;
+        var far = (y > WinH + 160 || x < -300 || x > WinW + 300) && p.Y > m.Top + 8;
         var want = far && !_animating ? 50 : 16;
         if ((int)_poll.Interval.TotalMilliseconds != want) _poll.Interval = TimeSpan.FromMilliseconds(want);
     }

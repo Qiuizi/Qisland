@@ -31,6 +31,7 @@ internal static class Native
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] public static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vk);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT r);
     [DllImport("user32.dll")] public static extern IntPtr GetShellWindow();

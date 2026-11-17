@@ -15,6 +15,8 @@ namespace Qisland.App;
 public sealed partial class IslandWindow
 {
     private IntPtr _monitor;
+    private Native.RECT _monRect;
+    private bool _winAtTop;
     private bool _manualHide;
     private IntPtr _override;           // 用热键叫回来的那个全屏窗口
     private IntPtr _lastFg;
@@ -147,6 +149,7 @@ public sealed partial class IslandWindow
         var x = m.Left + (m.Right - m.Left - widthPx) / 2;
         var y = w.Top > m.Top + 1 ? w.Top : m.Top;   // 任务栏在顶部时让开它
         _monitor = mon;
+        _monRect = m; _winAtTop = y == m.Top;
         SetWindowPos(_hwnd, IntPtr.Zero, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010);
     }
 

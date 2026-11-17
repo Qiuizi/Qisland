@@ -143,9 +143,10 @@ public sealed class YuketangService
         finally { _busy = false; Changed?.Invoke(); }
     }
 
-    private async Task<JsonNode?> Get(HttpClient h, string path)
+    private async Task<JsonNode?> Get(HttpClient h, string path, string? classroom = null)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, $"https://{Host}{path}");
+        if (classroom != null) req.Headers.Add("classroom-id", classroom);
         req.Headers.Add("Cookie", "sessionid=" + _session);
         req.Headers.Add("xtbz", "ykt");
         using var res = await h.SendAsync(req);
@@ -190,15 +191,34 @@ public sealed class YuketangService
             var log = await Get(h, $"/v2/api/web/logs/learn/{cid}?actype=-1&page=0&offset=50&sort=-1");
             if (log == null) return null;
             if (n++ < 3) Dump("activities-" + cid, log);
+            // 学习日志里不带提交状态（作业交了但老师没批时也看不出来）。
+            // 成绩页每个小节有 schedule：作业 / 考试只要交了就是 1，跟有没有批分无关
+            Dictionary<string, double>? sched = null;
+            async Task<Dictionary<string, double>> Schedules(string sku)
+            {
+                if (sched != null) return sched;
+                sched = new();
+                await Task.Delay(500);
+                var sd = await Get(h, $"/c27/online_courseware/schedule/score_detail/single/{sku}/0/", cid);
+                Dump("schedule-" + cid, sd ?? new JsonObject());
+                foreach (var l in sd?["data"]?["leaf_level_infos"]?.AsArray() ?? [])
+                    if (l?["id"]?.ToString() is { Length: > 0 } id) sched[id] = Num(l["schedule"]);
+                return sched;
+            }
             foreach (var a in log["data"]?["activities"]?.AsArray() ?? [])
             {
                 if (a is not JsonObject ao) continue;
                 var type = (int)Num(ao["type"]);
                 // 5 = 试卷 / 作业，19 = 章节作业；其它类型只要带截止时间也收（比如考试）
                 var dl = FindDeadline(ao);
-                if (dl == null || type is 9 or 14) continue;
+                // 9 / 14 是课件和课堂；15（is_graph）是知识图谱节点，带着课程结束时间但不是作业
+                if (dl == null || type is 9 or 14 or 15 || Truthy(ao["is_graph"])) continue;
                 if (dl < DateTime.Now.AddDays(-1)) continue;
                 var done = Truthy(ao["is_finished"]) || Truthy(ao["finished"]) || Truthy(ao["is_submit"]) || Truthy(ao["submitted"]);
+                if (!done && ao["content"] is JsonObject co && co["leaf_id"]?.ToString() is { Length: > 0 } leaf
+                    && co["sku_id"]?.ToString() is { Length: > 0 } sku
+                    && (await Schedules(sku)).TryGetValue(leaf, out var sc))
+                    done = sc >= 1;
                 var kind = type == 5 ? "试卷" : type == 19 ? "章节作业" : "作业";
                 items.Add(new HomeworkItem(Platform, course, ao["title"]?.ToString() ?? kind, dl.Value, done,
                     $"https://{Host}/v2/web/studentLog/{cid}", kind));
