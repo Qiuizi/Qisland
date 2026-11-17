@@ -381,7 +381,7 @@ public sealed partial class IslandWindow : Window
     {
         if (_pacer.Parent == null) _root.Children.Add(_pacer);
         var a = new DoubleAnimation(0, 1, TimeSpan.FromSeconds(1)) { RepeatBehavior = RepeatBehavior.Forever };
-        Timeline.SetDesiredFrameRate(a, App.Hz);
+        Timeline.SetDesiredFrameRate(a, PerfGuard.Hz);
         _pacer.BeginAnimation(WidthProperty, a);
     }
     private void StopPacer() => _pacer.BeginAnimation(WidthProperty, null);
@@ -562,22 +562,20 @@ public sealed partial class IslandWindow : Window
     // 截图工具（PixPin、Snow Shot…）的「窗口识别」按窗口矩形框选，不看窗口区域：
     // 收起停稳后把窗口本身的高度收到岛 + 阴影那么高（左上角不动，内容不用挪，不会闪），
     // 要展开 / 变高的那一帧先放回整高，再开始动画。
-    private int _winHpx;
+    // 改 WPF 自己的 Height（而不是直接 SetWindowPos），否则 WPF 下次布局会按旧的 Height 把窗口改回去
     private void FitHeight(int needPx, double scale)
     {
         if (SnapshotMode || _layered) return;
-        var full = (int)Math.Round(WinH * scale);
-        if (_winHpx == 0) _winHpx = full;
-        int want;
-        if (_mode == Mode.Expanded || _animating) want = needPx > _winHpx ? full : _winHpx;
-        else want = Math.Min(full, needPx + 4);
-        if (want == _winHpx) return;
-        if (!Native.GetWindowRect(_hwnd, out var wr)) return;
-        _winHpx = want;
-        SetWindowPos(_hwnd, IntPtr.Zero, 0, 0, wr.Right - wr.Left, want, 0x0002 | 0x0004 | 0x0010 | 0x0200); // NOMOVE | NOZORDER | NOACTIVATE | NOOWNERZORDER
-        Native.GetWindowRect(_hwnd, out var after);
-        App.Log($"window height {wr.Bottom - wr.Top} → {want} px (now {after.Bottom - after.Top})");
+        var need = Math.Ceiling(needPx / scale) + 2;
+        var cur = Height;
+        double want;
+        if (_mode == Mode.Expanded || _animating) want = need > cur ? WinH : cur;
+        else want = Math.Min(WinH, need);
+        if (Math.Abs(want - cur) < 0.5) return;
+        Height = want;
+        if (DebugHeight) { Native.GetWindowRect(_hwnd, out var r); App.Log($"window height {cur:0} → {want:0} DIP（实际 {r.Bottom - r.Top} px）"); }
     }
+    private static readonly bool DebugHeight = Environment.GetEnvironmentVariable("QISLAND_DEBUG") == "1" || System.IO.File.Exists(System.IO.Path.Combine(App.DataDir, "debug", "height"));
 
     private static void Place(FrameworkElement layer, double width) => Canvas.SetLeft(layer, Math.Round((WinW - width) / 2));
 
@@ -1064,7 +1062,7 @@ public sealed partial class IslandWindow : Window
             var a = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromSeconds(1.2), RepeatBehavior = RepeatBehavior.Forever };
             for (var k = 0; k < 6; k++) a.KeyFrames.Add(new LinearDoubleKeyFrame(seq[i][k], KeyTime.FromTimeSpan(TimeSpan.FromSeconds(k * 0.2))));
             Timeline.SetDesiredFrameRate(a, 12);
-            st.BeginAnimation(ScaleTransform.ScaleYProperty, a);
+            if (!PerfGuard.Degraded) st.BeginAnimation(ScaleTransform.ScaleYProperty, a);   // 性能护栏降级时频谱条静止
             sp.Children.Add(r);
         }
         return sp;

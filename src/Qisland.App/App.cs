@@ -40,6 +40,7 @@ public sealed class App : Application
     private CodexQuota? _quota;
     private VolumeWatcher? _volume;
     private SystemWatch _sys = null!;
+    private readonly PerfGuard _perf = new();
     private Updater _upd = null!;
     private DateTime _day = DateTime.Today;
     private readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -120,6 +121,7 @@ public sealed class App : Application
         _ = WeatherLoop();
 
         StartProviders();
+        try { var n = ChangeLedger.Sync().Count; if (n > 0) Log($"改动账本: 对其他软件有 {n} 处改动（托盘 → 对其他软件的改动）"); } catch (Exception ex) { Log("改动账本: " + ex.Message); }
         if (args.Contains("--demo")) Demo();
         TrimSoon();
     }
@@ -160,6 +162,8 @@ public sealed class App : Application
             _window.Approvals = _approvals; _approvals.Changed += _window.OnApprovalsChanged;
             if (_api != null) _api.Approval = _approvals.Request;
             if (_api != null) _api.Bench = () => _window?.RunBench();
+            if (_api != null) { _api.PerfJson = _perf.Json; _api.Peek = s => _window?.PeekFor(s); }
+            PerfGuard.Changed += () => _window?.OnPerfChanged();
             _quota = new CodexQuota(a => Dispatcher.BeginInvoke(a));
             _window.Quota = _quota; _quota.Changed += _window.OnQuotaChanged;
         }
@@ -183,7 +187,7 @@ public sealed class App : Application
             _sys.Tick(_tickN);
             _flash?.OnForeground(Native.GetForegroundWindow());
             if (_tickN % 3 == 0) { try { _harness.Tick(); } catch (Exception ex) { Log("DSH: " + ex.Message); } }
-            if (_tickN % 5 == 0) _store.Expire();
+            if (_tickN % 5 == 0) { _store.Expire(); _perf.Sample(); }
             if (DateTime.Today != _day) { _day = DateTime.Today; _countdown?.Refresh(); }
             if (_tickN % 30 == 0) { try { _classes?.Tick(); } catch (Exception ex) { Log("课表: " + ex.Message); } }
             if (_tickN % 10 == 0) { try { _ykt?.Tick(); } catch (Exception ex) { Log("雨课堂: " + ex.Message); } }
@@ -234,6 +238,17 @@ public sealed class App : Application
             _store.Upsert(new IslandActivity("xxt:login", HomeworkHub.Source, "学习通已连接", $"{xxt.UserName} · 正在读取作业…", ActivityKind.Done, 60, DurationSeconds: 5));
         };
         w.Show();
+    }
+
+    private void RestoreChanges()
+    {
+        var list = ChangeLedger.Sync();
+        var text = string.Join("\n", list.Select(e => $"· {e.App}：{e.What}"));
+        if (System.Windows.MessageBox.Show($"把 Qisland 对其他软件的改动全部还原：\n\n{text}\n\n只删 Qisland 自己加的条目，你自己的 hook 和插件原样保留，改前会备份。Codex 新开的会话、重启后的 DSH 生效。\n\n确定还原？",
+                "Qisland", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+        _approvals?.CancelAll();
+        var res = ChangeLedger.RestoreAll();
+        System.Windows.MessageBox.Show(res.Count > 0 ? string.Join("\n", res) : "没有需要还原的改动。", "Qisland");
     }
 
     private void ImportTimetable()
@@ -378,6 +393,22 @@ public sealed class App : Application
                 : "额度：还没读到（点击刷新）";
         };
         menu.Items.Add(cdx);
+        var ledger = new System.Windows.Forms.ToolStripMenuItem("对其他软件的改动");
+        ledger.DropDownOpening += (_, _) =>
+        {
+            ledger.DropDownItems.Clear();
+            var list = ChangeLedger.Sync();
+            if (list.Count == 0) ledger.DropDownItems.Add(new System.Windows.Forms.ToolStripMenuItem("没有（Qisland 没改过别的软件）") { Enabled = false });
+            foreach (var e in list)
+                ledger.DropDownItems.Add(new System.Windows.Forms.ToolStripMenuItem($"{e.App} · {e.What}") { Enabled = false, ToolTipText = $"{e.Target}\n{(e.Detected ? "启动时检测到" : "记录于")} {e.At:yyyy-MM-dd HH:mm}" });
+            ledger.DropDownItems.Add(new System.Windows.Forms.ToolStripSeparator());
+            var restore = new System.Windows.Forms.ToolStripMenuItem("一键还原…") { Enabled = list.Any(x => x.Id is "codex-hooks" or "dsh-bridge") };
+            restore.Click += (_, _) => Dispatcher.BeginInvoke(RestoreChanges);
+            ledger.DropDownItems.Add(restore);
+            ledger.DropDownItems.Add("打开账本文件", null, (_, _) => { ChangeLedger.Sync(); if (File.Exists(ChangeLedger.PathName)) Process.Start(new ProcessStartInfo("notepad.exe", "\"" + ChangeLedger.PathName + "\"") { UseShellExecute = true }); });
+        };
+        ledger.DropDownItems.Add("…");
+        menu.Items.Add(ledger);
         menu.Items.Add("编辑倒计时", null, (_, _) => Process.Start(new ProcessStartInfo("notepad.exe", "\"" + Countdowns.PathName + "\"") { UseShellExecute = true }));
         var lyr = new System.Windows.Forms.ToolStripMenuItem("显示歌词") { CheckOnClick = true, Checked = LyricsService.Enabled, ToolTipText = "播放音乐时胶囊里滚动显示当前这句歌词（网易云 / LRCLIB）" };
         lyr.CheckedChanged += (_, _) => Dispatcher.BeginInvoke(() => { LyricsService.Enabled = lyr.Checked; _lyrics?.OnTrack(null); _lyrics?.OnTrack(_media?.Current); });

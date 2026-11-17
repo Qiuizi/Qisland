@@ -144,6 +144,7 @@ public static class CodexApproveHook
             }
             File.Copy(HooksPath, HooksPath + ".qisland-bak", true);
             File.WriteAllText(HooksPath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+            ChangeLedger.Record("codex-approve", "Codex", HooksPath, on ? "PermissionRequest 改为在岛上批准（同步，超时 120 秒）" : "PermissionRequest 改回只通知（异步）");
             return true;
         }
         catch { return false; }

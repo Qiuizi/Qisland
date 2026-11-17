@@ -32,7 +32,7 @@ public sealed partial class IslandWindow
         if (SnapshotMode) return;
         if (!RegisterHotKey(_hwnd, HotkeyId, 0x0002 | 0x0001 | 0x4000 /*Ctrl+Alt, NOREPEAT*/, 0x51 /*Q*/))
             App.Log("热键 Ctrl+Alt+Q 被占用");
-        DpiChanged += (_, _) => Dispatcher.BeginInvoke(() => { _winHpx = -1; MoveTo(_monitor); ApplyFrame(); });
+        DpiChanged += (_, _) => Dispatcher.BeginInvoke(() => { MoveTo(_monitor); ApplyFrame(); });
         if (!File.Exists(FullscreenListPath))
         {
             try

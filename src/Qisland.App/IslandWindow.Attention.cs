@@ -86,6 +86,17 @@ public sealed partial class IslandWindow
         t.Start();
     }
 
+    /// <summary>调试：展开几秒（测展开状态下的占用）。</summary>
+    public void PeekFor(double seconds) => Peek(seconds);
+
+    /// <summary>性能护栏升降级：重建用到动画的部分（频谱条），歌词计时器换档。</summary>
+    public void OnPerfChanged()
+    {
+        _lyricTimer.Interval = TimeSpan.FromMilliseconds(PerfGuard.Degraded ? 450 : 200);
+        RebuildCompact();
+        if (_mode == Mode.Expanded && !_animating) RebuildExpanded(); else _expDirty = true;
+    }
+
     private void Peek(double seconds)
     {
         _lastPeek = DateTime.Now;

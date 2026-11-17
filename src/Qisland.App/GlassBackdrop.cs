@@ -68,7 +68,9 @@ public sealed class GlassBackdrop
         // 背后切了窗口、滚了页面，玻璃里还是展开那一刻的旧画面，看起来就像影子错了位。
         if (Animating() && _wb != null && Covers(_lastArea, a) && Environment.TickCount64 - _lastCap < 150) return;
         // 收起静止时不必 20 fps 盯着背后：降到约 4 fps，背后真变了也只晚 1/4 秒，CPU 省下大半
-        if (!Animating() && Slow() && _wb != null && Covers(_lastArea, a) && Environment.TickCount64 - _lastCap < 240) return;
+        if (!Animating() && Slow() && _wb != null && Covers(_lastArea, a) && Environment.TickCount64 - _lastCap < (PerfGuard.Degraded ? 1000 : 240)) return;
+        // 性能护栏降级时，展开静止也只 5 fps 跟背景
+        if (PerfGuard.Degraded && !Animating() && _wb != null && Covers(_lastArea, a) && Environment.TickCount64 - _lastCap < 200) return;
         var hwnd = new System.Windows.Interop.WindowInteropHelper(_win).Handle;
         if (!Native.GetWindowRect(hwnd, out var wr)) return;
         var s = VisualTreeHelper.GetDpi(_win).DpiScaleX;

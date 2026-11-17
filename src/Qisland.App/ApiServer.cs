@@ -15,6 +15,8 @@ public sealed class ApiServer : IDisposable
     private readonly TcpListener _listener;
     /// <summary>本机调试：连续展开收起几次，帧数据写进日志。</summary>
     public Action? Bench;
+    public Func<string>? PerfJson;
+    public Action<double>? Peek;
     private readonly Action<Action> _post;
     private readonly ActivityStore _store;
     private readonly CancellationTokenSource _cts = new();
@@ -117,6 +119,16 @@ public sealed class ApiServer : IDisposable
             var drafts = QislandIngest.Parse(body);
             _post(() => { foreach (var d in drafts) _store.Upsert(d); });
             return (200, $"{{\"ok\":true,\"accepted\":{drafts.Count}}}");
+        }
+
+        if (method == "GET" && path == "/v1/perf" && PerfJson != null)
+            return (200, PerfJson());
+
+        if (method == "POST" && path == "/v1/debug/peek" && Peek != null)
+        {
+            var secs = double.TryParse(body.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? Math.Clamp(v, 1, 30) : 10;
+            _post(() => Peek(secs));
+            return (200, "{\"ok\":true}");
         }
 
         if (method == "POST" && path == "/v1/debug/bench" && Bench != null)
