@@ -102,6 +102,8 @@ public sealed partial class IslandWindow
         else if (proc.Length > 0 && _showList.Contains(proc)) hide = false;
         else hide = FullscreenOnMyScreen(fg);
         if (OsdActive) hide = false;   // 按音量键时总要看到反馈
+        if (_edgeShow && (_mode == Mode.Expanded || _animating) && !_manualHide) hide = false;   // 顶边呼出的岛展开期间不藏
+        else _edgeShow = false;
         if (hide != _hidden)
         {
             _hidden = hide;

@@ -63,7 +63,7 @@ public sealed partial class IslandWindow : Window
     private bool _animating, _clickThrough = true, _pinned, _hidden;
     private TimeSpan _lastRender;
     private DateTime _hoverSince = DateTime.MaxValue, _outsideSince = DateTime.MinValue, _edgeSince = DateTime.MaxValue;
-    private bool _edgeArmed = true, _edgeSummoned;
+    private bool _edgeArmed = true, _edgeSummoned, _edgeShow;
     private DateTime _peekUntil = DateTime.MinValue;
     private string? _lastTopId;
     private DateTime _lastTopUpdated;
@@ -328,9 +328,9 @@ public sealed partial class IslandWindow : Window
         var now = DateTime.Now;
 
         // 鼠标顶到屏幕最上沿（岛所在的那块屏、任意横向位置）停一下就呼出岛；
-        // 按着鼠标键（拖窗口到顶部最大化之类）不算；全屏 / 手动隐藏时不打扰
+        // 按着鼠标键（拖窗口到顶部最大化之类）不算；全屏时也能呼出，手动隐藏时不打扰
         var m = _monRect;
-        var onEdge = _winAtTop && !_hidden && p.Y <= m.Top + 1 && p.X >= m.Left && p.X < m.Right
+        var onEdge = _winAtTop && !(_hidden && _manualHide) && p.Y <= m.Top + 1 && p.X >= m.Left && p.X < m.Right
                      && (Native.GetAsyncKeyState(0x01) & 0x8000) == 0 && (Native.GetAsyncKeyState(0x02) & 0x8000) == 0;
         if (!onEdge && p.Y > m.Top + 8) _edgeArmed = true;
         if (onEdge && _edgeArmed)
@@ -339,6 +339,7 @@ public sealed partial class IslandWindow : Window
             if (_mode != Mode.Expanded && (now - _edgeSince).TotalMilliseconds > 140)
             {
                 _edgeArmed = false; _edgeSummoned = true;
+                if (_hidden) { _edgeShow = true; _hidden = false; _show.Target = 1; Kick(); }   // 全屏时也给呼出，收回后下一秒自动再藏
                 SetMode(Mode.Expanded);
             }
         }
