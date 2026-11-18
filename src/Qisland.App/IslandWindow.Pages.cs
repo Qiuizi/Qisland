@@ -193,6 +193,8 @@ public sealed partial class IslandWindow
         if (msg == 0x0021 && !_editing) { handled = true; return new IntPtr(3); }   // MA_NOACTIVATE
         if (msg == 0x031D) { OnClipboardUpdate(); return IntPtr.Zero; }   // WM_CLIPBOARDUPDATE
         if (msg == 0x0312 && wParam.ToInt32() == HotkeyId) { OnHotkey(); handled = true; return IntPtr.Zero; }
+        // 任务栏挪了位置 / 开关了自动隐藏：工作区变了，重新摆（DisplaySettingsChanged 不管这个）
+        if (msg == 0x001A && wParam.ToInt64() == 0x2F /*SPI_SETWORKAREA*/) Dispatcher.BeginInvoke(PlaceOnScreen);
         if (msg == 0x0218) // WM_POWERBROADCAST
         {
             var b = BrightnessWatcher.Parse(wParam, lParam);

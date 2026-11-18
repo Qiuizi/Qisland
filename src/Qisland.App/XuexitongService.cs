@@ -154,7 +154,7 @@ public sealed partial class XuexitongService
     public void Tick()
     {
         HomeworkHub.WarnExpiring(_store, "xxt:expiring", "学习通", _jar != null && !Expired ? ExpiresAt : null);
-        if (_jar == null || _busy || Expired || DateTime.Now < _next) return;
+        if (_jar == null || _busy || Expired || DateTime.Now < _next || !App.NetReady()) return;
         _ = RefreshAsync();
     }
 
@@ -196,7 +196,9 @@ public sealed partial class XuexitongService
         Expired = true;
         App.Current.Dispatcher.BeginInvoke(() =>
         {
-            _store.Upsert(new IslandActivity("xxt:expired", HomeworkHub.Source, "学习通登录过期了", "托盘菜单 → 作业 DDL → 学习通扫码登录", ActivityKind.Warning, 40), sticky: true);
+            _store.Upsert(new IslandActivity("xxt:expired", HomeworkHub.Source, "学习通登录过期了", "托盘菜单 → 作业 DDL → 学习通扫码登录", ActivityKind.Warning, 40), sticky: true, quiet: true);
+            // 常驻那条是安静的（不顶掉时间），过期那一刻弹一下让人知道
+            _store.Upsert(new IslandActivity("xxt:expired-note", HomeworkHub.Source, "学习通登录过期了", "作业读不到了，托盘里重新扫码登录", ActivityKind.Warning, 60, DurationSeconds: 8));
             Changed?.Invoke();
         });
     }

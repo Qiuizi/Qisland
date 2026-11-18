@@ -55,31 +55,32 @@ public sealed class Updater
         await Task.Delay(TimeSpan.FromSeconds(40));
         while (true)
         {
-            await Check(manual: false);
-            await Task.Delay(TimeSpan.FromHours(6));
+            var ok = await Check(manual: false);
+            await App.Nap(ok ? TimeSpan.FromHours(6) : TimeSpan.FromMinutes(45)); // 开机时网还没通 / GitHub 限流：别等 6 小时
         }
     }
 
     /// <summary>manual：托盘里点的「检查更新」，没有新版本也要说一声。</summary>
-    public async Task Check(bool manual)
+    public async Task<bool> Check(bool manual)
     {
-        if (_busy) return;
+        if (_busy) return true;
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/repos/{Repo}/releases?per_page=15");
             req.Headers.Accept.ParseAdd("application/vnd.github+json");
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
             using var resp = await _http.SendAsync(req, cts.Token);
-            if (!resp.IsSuccessStatusCode) { App.Log($"检查更新: HTTP {(int)resp.StatusCode}"); if (manual) Say("检查更新失败", $"GitHub 返回 {(int)resp.StatusCode}", ActivityKind.Warning); return; }
+            if (!resp.IsSuccessStatusCode) { App.Log($"检查更新: HTTP {(int)resp.StatusCode}"); if (manual) Say("检查更新失败", $"GitHub 返回 {(int)resp.StatusCode}", ActivityKind.Warning); return false; }
             var best = Pick(await resp.Content.ReadAsStringAsync(cts.Token), Current, includePre: Current.Contains('-'));
-            if (best == null) { App.Log($"检查更新: 已是最新 {Current}"); if (manual) Say("已是最新版本", "v" + Current, ActivityKind.Done); return; }
-            if (!manual && File.Exists(SkipFile) && File.ReadAllText(SkipFile).Trim() == best.Tag) return;
+            if (best == null) { App.Log($"检查更新: 已是最新 {Current}"); if (manual) Say("已是最新版本", "v" + Current, ActivityKind.Done); return true; }
+            if (!manual && File.Exists(SkipFile) && File.ReadAllText(SkipFile).Trim() == best.Tag) return true;
             _found = best;
             App.Log($"发现新版本 {best.Tag}");
             var body = FirstLine(best.Notes);
-            _store.Upsert(new IslandActivity(Id, "update", $"Qisland {best.Tag} 可以更新了", body.Length > 0 ? $"点一下更新 · {body}" : "点一下下载并重启", ActivityKind.Info, 58, DurationSeconds: 0), sticky: true);
+            _store.Upsert(new IslandActivity(Id, "update", $"Qisland {best.Tag} 可以更新了", body.Length > 0 ? $"点一下更新 · {body}" : "点一下下载并重启", ActivityKind.Info, 58, DurationSeconds: 0), sticky: true, quiet: true);
+            return true;
         }
-        catch (Exception ex) { App.Log("检查更新: " + ex.Message); if (manual) Say("检查更新失败", "网络不通或 GitHub 暂时不可用", ActivityKind.Warning); }
+        catch (Exception ex) { App.Log("检查更新: " + ex.Message); if (manual) Say("检查更新失败", "网络不通或 GitHub 暂时不可用", ActivityKind.Warning); return false; }
     }
 
     private void Say(string title, string body, ActivityKind kind) =>
@@ -231,7 +232,7 @@ public sealed class Updater
             App.Log("更新失败: " + ex);
             _busy = false;
             App.Current.Dispatcher.BeginInvoke(() =>
-                _store.Upsert(new IslandActivity(Id, "update", "更新没成功", "网络不通，点一下再试", ActivityKind.Error, 60, DurationSeconds: 0), sticky: true));
+                _store.Upsert(new IslandActivity(Id, "update", "更新没成功", "网络不通，点一下再试", ActivityKind.Error, 60, DurationSeconds: 0), sticky: true, quiet: true));
         }
     }
 }

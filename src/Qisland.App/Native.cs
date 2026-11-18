@@ -35,6 +35,7 @@ internal static class Native
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT r);
     [DllImport("user32.dll")] public static extern IntPtr GetShellWindow();
+    [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
     [DllImport("user32.dll")] public static extern IntPtr GetDesktopWindow();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, System.Text.StringBuilder sb, int max);
     [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
@@ -61,6 +62,9 @@ internal static class Native
         GetClassName(fg, sb, sb.Capacity);
         var cls = sb.ToString();
         if (cls is "Progman" or "WorkerW" or "Shell_TrayWnd") return false;
+        // 最大化的普通窗口（带标题栏）不是全屏。任务栏设成自动隐藏时，最大化窗口的矩形会盖满整块屏（四边各多出几像素边框），
+        // 以前会被当成全屏，岛在浏览器、编辑器最大化时一直藏着。真全屏（F11、视频全屏、游戏）都会去掉标题栏或先还原再铺满。
+        if (IsZoomed(fg) && ((long)GetWindowLongPtr(fg, -16 /*GWL_STYLE*/) & 0x00C00000 /*WS_CAPTION*/) == 0x00C00000) return false;
         if (!GetWindowRect(fg, out var r)) return false;
         var mon = MonitorFromWindow(fg, 2);
         var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };

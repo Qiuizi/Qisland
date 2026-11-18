@@ -123,10 +123,59 @@ public sealed class App : Application
 
         StartProviders();
         _window.SettleNow();
+        WatchPowerAndSession();
         CleanDebugDumps();
         try { var n = ChangeLedger.Sync().Count; if (n > 0) Log($"改动账本: 对其他软件有 {n} 处改动（托盘 → 对其他软件的改动）"); } catch (Exception ex) { Log("改动账本: " + ex.Message); }
         if (args.Contains("--demo")) Demo();
         TrimSoon();
+    }
+
+    // ───────────── 睡眠唤醒 / 时间变化 ─────────────
+    // 唤醒后：按分钟睡的循环（天气、信息站、更新检查）立刻醒来再拉一次，不顶着睡前的旧数据过几个小时；
+    // 刚醒的 20 秒网络多半还没通，作业这类请求先别发（发了必失败，还要等 5–10 分钟才重试）。
+    private static TaskCompletionSource _wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public static DateTime ResumedAt { get; private set; } = DateTime.MinValue;
+
+    /// <summary>睡一段时间；电脑从睡眠醒来时提前醒。</summary>
+    public static async Task Nap(TimeSpan t)
+    {
+        var w = _wake.Task;
+        await Task.WhenAny(Task.Delay(t), w);
+    }
+
+    /// <summary>作业这类联网轮询：刚唤醒或者没网时先不发。</summary>
+    public static bool NetReady() =>
+        DateTime.Now - ResumedAt > TimeSpan.FromSeconds(20) && System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable();
+
+    private void WatchPowerAndSession()
+    {
+        Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) =>
+        {
+            if (e.Mode != Microsoft.Win32.PowerModes.Resume) return;
+            ResumedAt = DateTime.Now;
+            Dispatcher.BeginInvoke(async () =>
+            {
+                Log("从睡眠唤醒");
+                _window?.OnResume();
+                _media?.Reconnect();
+                await Task.Delay(TimeSpan.FromSeconds(20));   // 等网络
+                Interlocked.Exchange(ref _wake, new(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
+            });
+        };
+        // 改了时区 / 系统时间：DateTime.Now 用的是缓存的时区，不清的话岛上的钟会一直按旧时区走
+        Microsoft.Win32.SystemEvents.TimeChanged += (_, _) => Dispatcher.BeginInvoke(() =>
+        {
+            System.Globalization.CultureInfo.CurrentCulture.ClearCachedData();
+            TimeZoneInfo.ClearCachedData();
+            Log($"系统时间 / 时区变了：{TimeZoneInfo.Local.Id}");
+            _window?.OnResume();
+        });
+        // 解锁 / 远程桌面连回来：重新摆位置、确认置顶
+        Microsoft.Win32.SystemEvents.SessionSwitch += (_, e) =>
+        {
+            if (e.Reason is Microsoft.Win32.SessionSwitchReason.SessionUnlock or Microsoft.Win32.SessionSwitchReason.ConsoleConnect or Microsoft.Win32.SessionSwitchReason.RemoteConnect)
+                Dispatcher.BeginInvoke(() => _window?.OnResume());
+        };
     }
 
     // ───────────── 常用软件 ─────────────
@@ -322,7 +371,7 @@ public sealed class App : Application
                 catch (Exception ex) { Log("Open-Meteo: " + ex.Message); }
             }
             if (!ok) wait = TimeSpan.FromMinutes(3);
-            await Task.Delay(wait);
+            await Nap(wait);
         }
     }
 

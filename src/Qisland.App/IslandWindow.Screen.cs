@@ -136,8 +136,40 @@ public sealed partial class IslandWindow
     {
         if (SnapshotMode) return;
         var mon = _monitor;
-        if (mon == IntPtr.Zero || GetSystemMetrics(80) < 2) mon = MonitorFromPoint(new POINT(), 1 /*PRIMARY*/);
+        // 显示器拔掉 / 重新排列后旧的句柄会失效：失效就回主屏，不然岛会留在一块已经不存在的屏上
+        var info = new Native.MONITORINFO { cbSize = Marshal.SizeOf<Native.MONITORINFO>() };
+        if (mon == IntPtr.Zero || GetSystemMetrics(80) < 2 || !Native.GetMonitorInfo(mon, ref info)) mon = MonitorFromPoint(new POINT(), 1 /*PRIMARY*/);
         MoveTo(mon);
+    }
+
+    // ───────────── 置顶守护 ─────────────
+    // 别的程序（全屏游戏切换、某些启动器、Electron 窗口）可能把岛的 WS_EX_TOPMOST 摘掉，岛就沉到普通窗口后面去了。
+    // 每 2 秒看一眼这个位，掉了才补回（不去和截图工具这类同样置顶的窗口抢层级）；展开 / 偷看时主动顶到置顶层最上面。
+    private int _topLost;
+    private void GuardTopmost()
+    {
+        if (_hwnd == IntPtr.Zero || SnapshotMode) return;
+        if (((long)Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE) & 0x8 /*WS_EX_TOPMOST*/) != 0) return;
+        _topLost++;
+        if (_topLost <= 3 || _topLost % 50 == 0) App.Log($"置顶被别的程序摘掉了，补回（第 {_topLost} 次）");
+        RaiseTop();
+    }
+
+    private void RaiseTop()
+    {
+        if (_hwnd == IntPtr.Zero || SnapshotMode) return;
+        SetWindowPos(_hwnd, new IntPtr(-1) /*HWND_TOPMOST*/, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0200 /*NOSIZE|NOMOVE|NOACTIVATE|NOOWNERZORDER*/);
+    }
+
+    /// <summary>睡眠唤醒、解锁、远程桌面连回、改时区之后：重新摆位置、补置顶、刷新时钟和毛玻璃底。</summary>
+    public void OnResume()
+    {
+        PlaceOnScreen();
+        RaiseTop();
+        _clockText = "";
+        OnSecond();
+        if (_glass != null && _glass.Host.Visibility == Visibility.Visible) _glass.Refresh();
+        ApplyFrame();
     }
 
     private void MoveTo(IntPtr mon)

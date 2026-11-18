@@ -127,7 +127,7 @@ public sealed class YuketangService
     public void Tick()
     {
         HomeworkHub.WarnExpiring(_store, "ykt:expiring", "雨课堂", _session != null && !Expired ? ExpiresAt : null);
-        if (_session == null || _busy || Expired || DateTime.Now < _next) return;
+        if (_session == null || _busy || Expired || DateTime.Now < _next || !App.NetReady()) return;
         _ = RefreshAsync();
     }
 
@@ -169,7 +169,9 @@ public sealed class YuketangService
         Expired = true;
         App.Current.Dispatcher.BeginInvoke(() =>
         {
-            _store.Upsert(new IslandActivity("ykt:expired", HomeworkHub.Source, "雨课堂登录过期了", "托盘菜单 → 雨课堂扫码登录，重新扫一下就好", ActivityKind.Warning, 40), sticky: true);
+            _store.Upsert(new IslandActivity("ykt:expired", HomeworkHub.Source, "雨课堂登录过期了", "托盘菜单 → 雨课堂扫码登录，重新扫一下就好", ActivityKind.Warning, 40), sticky: true, quiet: true);
+            // 常驻那条是安静的（不顶掉时间），过期那一刻弹一下让人知道
+            _store.Upsert(new IslandActivity("ykt:expired-note", HomeworkHub.Source, "雨课堂登录过期了", "作业读不到了，托盘里重新扫码登录", ActivityKind.Warning, 60, DurationSeconds: 8));
             Changed?.Invoke();
         });
     }

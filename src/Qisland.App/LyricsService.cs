@@ -36,7 +36,8 @@ public sealed class LyricsService
     public void OnTrack(MediaState? m)
     {
         if (_key == "demo") return;
-        if (m == null || m.Video || !Enabled || string.IsNullOrWhiteSpace(m.Title))
+        // 没有歌手、也不是网易云日志里的歌：多半是浏览器标签页 / 网页视频的标题，不拿它去歌词站搜（搜不到，还把网页标题发了出去）
+        if (m == null || m.Video || !Enabled || string.IsNullOrWhiteSpace(m.Title) || (string.IsNullOrWhiteSpace(m.Artist) && m.SongId == null))
         {
             if (Lines != null) { Lines = null; _key = ""; Changed?.Invoke(); }
             return;

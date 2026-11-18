@@ -246,7 +246,7 @@ public sealed class InfoStationWatcher
             catch (HttpRequestException) { /* 信息站没开 */ }
             catch (TaskCanceledException) { }
             catch (Exception ex) { App.Log("信息站: " + ex.Message); }
-            await Task.Delay(TimeSpan.FromMinutes(2));
+            await App.Nap(TimeSpan.FromMinutes(2));
         }
     }
 
@@ -258,7 +258,7 @@ public sealed class InfoStationWatcher
             .Where(a => a.Priority >= 72) // 3 天内
             .Select(a => a with { Kind = a.Priority >= 84 ? ActivityKind.Warning : ActivityKind.Info, Priority = Math.Min(a.Priority, 70) })
             .ToList();
-        _store.ReplaceSource("info-deadline", dl.Select(a => a with { Source = "info-deadline" }), sticky: true);
+        _store.ReplaceSource("info-deadline", dl.Select(a => a with { Source = "info-deadline" }), sticky: true, quiet: true); // 几天后的截止不占胶囊，展开能看到
 
         var items = await _http.GetStringAsync(BaseUrl + "/api/items?view=featured&sort=score&read=unread&limit=8", cts.Token);
         foreach (var a in InfoStationProvider.ReadItems(items, 80))

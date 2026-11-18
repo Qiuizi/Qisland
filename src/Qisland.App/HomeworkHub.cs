@@ -128,6 +128,6 @@ public sealed class HomeworkHub
         }
         var left = e - now;
         var text = left.TotalHours < 24 ? $"{Math.Max(1, (int)left.TotalHours)} 小时后过期" : $"{(int)Math.Ceiling(left.TotalDays)} 天后过期";
-        store.Upsert(new IslandActivity(id, Source, $"{name}登录{text}", "托盘菜单 → 作业 DDL → 重新扫码登录", ActivityKind.Warning, 40), sticky: true);
+        store.Upsert(new IslandActivity(id, Source, $"{name}登录{text}", "托盘菜单 → 作业 DDL → 重新扫码登录", ActivityKind.Warning, 40), sticky: true, quiet: true);
     }
 }

@@ -20,7 +20,8 @@ public sealed class MediaWatcher
     private GlobalSystemMediaTransportControlsSessionManager? _mgr;
     private GlobalSystemMediaTransportControlsSession? _session;
     private string? _pinnedId;                       // 用户手动切到的来源
-    private readonly HashSet<GlobalSystemMediaTransportControlsSession> _hooked = [];
+    // 每个会话挂一个播放状态监听；会话关掉（浏览器标签页、播放器退出）就摘掉，不让它们越攒越多
+    private readonly Dictionary<GlobalSystemMediaTransportControlsSession, Windows.Foundation.TypedEventHandler<GlobalSystemMediaTransportControlsSession, PlaybackInfoChangedEventArgs>> _hooked = [];
     private TimeSpan _start;
     private string _artKey = "";
     private BitmapSource? _art;
@@ -31,16 +32,51 @@ public sealed class MediaWatcher
 
     public async Task StartAsync()
     {
+        _ncmTimer = new Timer(_ => NcmTick(), null, 800, 700);
+        // 开机自启时系统的媒体会话服务可能还没起来：连不上就隔一会儿再连，而不是这一次开机都没有音乐
+        for (var attempt = 1; !await Connect(); attempt++)
+        {
+            if (attempt == 1 || attempt % 10 == 0) App.Log($"media: 第 {attempt} 次没连上系统媒体会话，稍后再试");
+            await App.Nap(TimeSpan.FromSeconds(Math.Min(60, 5 * attempt)));
+        }
+    }
+
+    private async Task<bool> Connect()
+    {
         try
         {
-            _mgr = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
-            _mgr.CurrentSessionChanged += (_, _) => Attach();
-            _mgr.SessionsChanged += (_, _) => Attach();
+            var mgr = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+            if (mgr == null) return false;
+            var old = _mgr;
+            if (old != null)
+            {
+                old.CurrentSessionChanged -= OnMgrChanged;
+                old.SessionsChanged -= OnMgrSessions;
+            }
+            UnhookAll();
+            _mgr = mgr;
+            mgr.CurrentSessionChanged += OnMgrChanged;
+            mgr.SessionsChanged += OnMgrSessions;
             Attach();
-            App.Log("media: 已连接系统媒体会话");
+            App.Log(old == null ? "media: 已连接系统媒体会话" : "media: 重新连接了系统媒体会话");
+            return true;
         }
-        catch (Exception ex) { App.Log("media: " + ex.Message); }
-        _ncmTimer = new Timer(_ => NcmTick(), null, 800, 700);
+        catch (Exception ex) { App.Log("media: " + ex.Message); return false; }
+    }
+
+    private void OnMgrChanged(GlobalSystemMediaTransportControlsSessionManager m, CurrentSessionChangedEventArgs e) => Attach();
+    private void OnMgrSessions(GlobalSystemMediaTransportControlsSessionManager m, SessionsChangedEventArgs e) => Attach();
+
+    /// <summary>睡眠唤醒后：系统媒体服务可能重启过，旧的连接不再来事件，重连一次。</summary>
+    public void Reconnect() => _ = Task.Run(async () => { await Task.Delay(3000); await Connect(); });
+
+    private void UnhookAll()
+    {
+        lock (_hooked)
+        {
+            foreach (var (s, h) in _hooked) try { s.PlaybackInfoChanged -= h; } catch { }
+            _hooked.Clear();
+        }
     }
 
     // ---------- 网易云（不报 SMTC，靠读它自己的日志） ----------
@@ -190,9 +226,22 @@ public sealed class MediaWatcher
         if (_mgr == null) return;
         try
         {
+            var now = _mgr.GetSessions().ToList();
             lock (_hooked)
-                foreach (var x in _mgr.GetSessions())
-                    if (_hooked.Add(x)) x.PlaybackInfoChanged += (_, _) => { if (x != _session) Attach(); };
+            {
+                foreach (var gone in _hooked.Keys.Where(k => !now.Contains(k)).ToList())
+                {
+                    try { gone.PlaybackInfoChanged -= _hooked[gone]; } catch { }
+                    _hooked.Remove(gone);
+                }
+                foreach (var x in now)
+                {
+                    if (_hooked.ContainsKey(x)) continue;
+                    Windows.Foundation.TypedEventHandler<GlobalSystemMediaTransportControlsSession, PlaybackInfoChangedEventArgs> h = (_, _) => { if (x != _session) Attach(); };
+                    x.PlaybackInfoChanged += h;
+                    _hooked[x] = h;
+                }
+            }
         }
         catch { }
     }

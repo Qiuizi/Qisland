@@ -119,7 +119,7 @@ public sealed partial class IslandWindow : Window
         AppIcons.Loaded += () => Dispatcher.BeginInvoke(() =>
         {
             RebuildCompact();
-            RebuildBubble(_store.Ranked());
+            RebuildBubble(_store.Pill());
             if (_mode == Mode.Expanded && !_animating) RebuildExpanded(); else _expDirty = true;
         });
         foreach (var src in new[] { "wechat", "qq", "music", "qqmusic", "codex", "deepseek-harness", "doubao", "trae", "workbuddy", "info-station", "spotify", "kugou", "kuwo", "potplayer" })
@@ -223,7 +223,7 @@ public sealed partial class IslandWindow : Window
 
     // ───────────────────────────── 状态 ─────────────────────────────
 
-    private Mode DesiredRestMode() => OsdActive ? Mode.Compact : _store.Ranked().Count > 0 || MusicPlaying ? Mode.Compact : Mode.Idle;
+    private Mode DesiredRestMode() => OsdActive ? Mode.Compact : _store.Pill().Count > 0 || MusicPlaying ? Mode.Compact : Mode.Idle;
 
     public void OnMediaChanged()
     {
@@ -238,8 +238,8 @@ public sealed partial class IslandWindow : Window
         if (m != Mode.Expanded && _mode == Mode.Expanded) OnCollapsed();
         if (m == Mode.Expanded && _expDirty) RebuildExpanded();
         _mode = m;
-        if (opening) StaggerIn();
-        var top = _store.Ranked();
+        if (opening) { StaggerIn(); RaiseTop(); }
+        var top = _store.Pill();
         (_w.Target, _h.Target, _r.Target) = m switch
         {
             Mode.Expanded => (ExpandedW, _expandedH, 30d),
@@ -264,7 +264,7 @@ public sealed partial class IslandWindow : Window
 
     private void OnStoreChanged()
     {
-        var ranked = _store.Ranked();
+        var ranked = _store.Pill();
         var top = ranked.Count > 0 ? ranked[0] : null;
         // 新的头条活动：像 iOS 一样先展开“偷看”几秒
         var fresh = top != null && (top.Id != _lastTopId || top.Updated > _lastTopUpdated)
@@ -295,6 +295,7 @@ public sealed partial class IslandWindow : Window
             SetMode(DesiredRestMode());
         }
         UpdateVisibility();
+        if (now.Second % 2 == 0) GuardTopmost();
     }
 
     /// <summary>点一行：返回 true 表示已经打开了对应软件。</summary>
@@ -496,7 +497,7 @@ public sealed partial class IslandWindow : Window
         if (_hwnd != IntPtr.Zero) SetGlass(Theme.IsGlass);
         RebuildIdle();
         RebuildCompact();
-        RebuildBubble(_store.Ranked());
+        RebuildBubble(_store.Pill());
         RebuildExpanded();
         ApplyFrame();
     }
@@ -533,7 +534,11 @@ public sealed partial class IslandWindow : Window
         var dpi = VisualTreeHelper.GetDpi(this);
         int P(double v) => (int)Math.Round(v * dpi.DpiScaleX);
         static double Up(double v) => Math.Ceiling(v / 24) * 24;
-        const double side = 16, below = 20;
+        // 收起停稳时窗口区域只比岛大一圈（外两层很淡的阴影先不画）：区域里的点击会被岛吃掉，
+        // 以前四周 16、下面 20 的阴影带会挡住最大化浏览器标签栏 / 地址栏正中间那一小块。展开和动画时照旧留足阴影。
+        var tight = !_animating && _mode != Mode.Expanded;
+        double side = tight ? 6 : 16, below = tight ? 11 : 20;
+        for (var i = 0; i < _shadowPaths.Count && i < 2; i++) { var op = tight ? 0.0 : 1.0; if (_shadowPaths[i].Opacity != op) _shadowPaths[i].Opacity = op; }
         var visible = show >= 0.02 || _show.Target > 0.5;
         var y0 = TopGap + (_show.Target > 0.5 ? 0 : _rootShift.Y);
         var bw = Up(Math.Max(w, _w.Target));
@@ -623,7 +628,7 @@ public sealed partial class IslandWindow : Window
         _compact.Children.Clear();
         _compact.ColumnDefinitions.Clear();
         if (OsdActive) { BuildOsd(); return; }
-        var ranked = _store.Ranked();
+        var ranked = _store.Pill();
         if (ranked.Count == 0) { if (MusicPlaying) CompactMusic(Media!.Current!); return; }
         var a = ranked[0];
 

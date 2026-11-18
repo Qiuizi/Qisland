@@ -18,6 +18,11 @@ public sealed class LiveActivity
     public bool Sticky { get; set; }
     /// <summary>点这一条时优先打开的链接（Codex 会话、作业网页…）。</summary>
     public string? OpenUri { get; set; }
+    /// <summary>
+    /// 安静的：只在展开后的列表里出现，不占收起的胶囊（不顶掉时间）、也不弹出来偷看。
+    /// 给「几天后的截止」「登录快过期」「有新版本」这类不急、但会一直挂着的提示用。
+    /// </summary>
+    public bool Quiet { get; set; }
 }
 
 /// <summary>
@@ -48,7 +53,7 @@ public sealed class ActivityStore
             d.DurationSeconds, d.ResetTtl, IslandActivity.SafeUri(d.OpenUri)), progress: progress);
     }
 
-    public void Upsert(IslandActivity a, bool sticky = false, double? progress = null)
+    public void Upsert(IslandActivity a, bool sticky = false, double? progress = null, bool quiet = false)
     {
         var isNew = !_items.TryGetValue(a.Id, out var live);
         live ??= new LiveActivity { Id = a.Id };
@@ -61,6 +66,7 @@ public sealed class ActivityStore
         live.Priority = a.Priority;
         live.Progress = progress;
         live.Sticky = sticky;
+        if (live.Quiet != quiet) { live.Quiet = quiet; changed = true; }
         if (a.OpenUri != null || isNew) live.OpenUri = a.OpenUri;
         if (changed) live.Updated = DateTime.Now;
         // 运行中的会话没有自然终点：给长一点的寿命，靠后续事件刷新。
@@ -74,7 +80,7 @@ public sealed class ActivityStore
     }
 
     /// <summary>用一个来源的最新快照替换它之前的所有条目。</summary>
-    public void ReplaceSource(string source, IEnumerable<IslandActivity> snapshot, bool sticky = true)
+    public void ReplaceSource(string source, IEnumerable<IslandActivity> snapshot, bool sticky = true, bool quiet = false)
     {
         var keep = new HashSet<string>(StringComparer.Ordinal);
         var before = _items.Count;
@@ -84,7 +90,7 @@ public sealed class ActivityStore
             keep.Add(a.Id);
             var had = _items.TryGetValue(a.Id, out var old);
             var sig = had ? old!.Title + "\u0001" + old.Body + "\u0001" + old.Kind : null;
-            UpsertQuiet(a, sticky);
+            UpsertQuiet(a, sticky, quiet);
             var now = _items[a.Id];
             if (!had || sig != now.Title + "\u0001" + now.Body + "\u0001" + now.Kind) dirty = true;
         }
@@ -96,11 +102,11 @@ public sealed class ActivityStore
         if (dirty || before != _items.Count) Changed?.Invoke();
     }
 
-    private void UpsertQuiet(IslandActivity a, bool sticky)
+    private void UpsertQuiet(IslandActivity a, bool sticky, bool quiet)
     {
         var h = Changed;
         Changed = null;
-        try { Upsert(a, sticky); } finally { Changed = h; }
+        try { Upsert(a, sticky, quiet: quiet); } finally { Changed = h; }
     }
 
     public bool Remove(string id)
@@ -127,6 +133,9 @@ public sealed class ActivityStore
         .ThenByDescending(x => x.Priority)
         .ThenByDescending(x => x.Updated)
         .ToList();
+
+    /// <summary>能上收起胶囊的活动（去掉安静的）：没有它们时，收起的岛显示时间。</summary>
+    public IReadOnlyList<LiveActivity> Pill() => Ranked().Where(x => !x.Quiet).ToList();
 
     public LiveActivity? Get(string id) => _items.TryGetValue(id, out var x) ? x : null;
 }
