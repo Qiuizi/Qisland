@@ -304,7 +304,7 @@ public sealed class MediaWatcher
                 });
             } while (_again);
         }
-        catch (Exception ex) { App.Log("media read: " + ex.Message); }
+        catch (Exception ex) { App.Log($"media read: {ex.GetType().Name} {ex.HResult:X8} {ex.Message}".TrimEnd()); } // 会话刚关掉时常见，消息为空，记下类型和错误码
         finally { _refreshing = 0; }
     }
     private volatile bool _again;
