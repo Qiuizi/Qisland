@@ -10,7 +10,7 @@ namespace Qisland.App;
 /// <summary>音量 / 亮度浮窗：岛本身变成一条细滑块，1.6 秒后缩回。</summary>
 public sealed partial class IslandWindow
 {
-    private enum OsdKind { None, Volume, Brightness }
+    private enum OsdKind { None, Volume, Brightness, Lock }
     private OsdKind _osd = OsdKind.None;
     private double _osdLevel;
     private bool _osdMuted;
@@ -23,6 +23,22 @@ public sealed partial class IslandWindow
     private bool OsdActive => _osd != OsdKind.None;
 
     public void ShowVolume(float level, bool muted) => ShowOsd(OsdKind.Volume, level, muted);
+
+    private string _lockName = "";
+    private bool _lockOn;
+
+    /// <summary>大写 / 数字锁定切换：岛变成一条小提示，1.2 秒后缩回。全屏（游戏里常把 Caps 绑成按键）时不冒出来。</summary>
+    public void ShowLock(string name, bool on)
+    {
+        if (_hidden || _manualHide || _mode == Mode.Expanded) return;
+        _lockName = name; _lockOn = on;
+        _osd = OsdKind.Lock;
+        _osdTimer ??= MakeOsdTimer();
+        _osdTimer.Interval = TimeSpan.FromMilliseconds(1200);
+        _osdTimer.Stop(); _osdTimer.Start();
+        RebuildCompact();
+        SetMode(Mode.Compact);
+    }
 
     private void OnBrightness(int pct)
     {
@@ -38,6 +54,7 @@ public sealed partial class IslandWindow
         var same = _osd == kind && _mode == Mode.Compact && _osdFill != null;
         _osd = kind; _osdLevel = level; _osdMuted = muted;
         _osdTimer ??= MakeOsdTimer();
+        _osdTimer.Interval = TimeSpan.FromMilliseconds(1600);
         _osdTimer.Stop(); _osdTimer.Start();
         if (same) { UpdateOsd(true); return; }
         RebuildCompact();
@@ -59,6 +76,7 @@ public sealed partial class IslandWindow
 
     private void BuildOsd()
     {
+        if (_osd == OsdKind.Lock) { BuildLockOsd(); return; }
         _compact.Height = CompactH;
         _compact.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _compact.ColumnDefinitions.Add(new ColumnDefinition());
@@ -87,6 +105,34 @@ public sealed partial class IslandWindow
         Place(_compact, _compactW);
         if (_mode == Mode.Compact) _w.Target = _compactW;
         UpdateOsd(false);
+    }
+
+    private void BuildLockOsd()
+    {
+        _osdFill = null;
+        _compact.Height = CompactH;
+        _compact.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _compact.ColumnDefinitions.Add(new ColumnDefinition());
+        _compact.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var caps = _lockName.StartsWith("大写");
+        var key = new Border
+        {
+            Width = 24, Height = 22, CornerRadius = new CornerRadius(6), Margin = new Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
+            Background = _lockOn ? Theme.Primary : Theme.Fill,
+            Child = new TextBlock { Text = caps ? "A" : "1", FontFamily = Theme.Text, FontSize = 13, FontWeight = FontWeights.Bold, Foreground = _lockOn ? Theme.Freeze(new SolidColorBrush(Colors.Black)) : Theme.Secondary, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
+        };
+        if (_lockOn && Theme.Current == Theme.Look.Light) ((TextBlock)key.Child).Foreground = Theme.Freeze(new SolidColorBrush(Colors.White));
+        _compact.Children.Add(key);
+        var t = Txt(13, FontWeights.SemiBold, Theme.Primary);
+        t.Text = _lockName; t.VerticalAlignment = VerticalAlignment.Center; t.Margin = new Thickness(10, 0, 10, 1);
+        Grid.SetColumn(t, 1); _compact.Children.Add(t);
+        var st = Txt(12, FontWeights.SemiBold, _lockOn ? Theme.Primary : Theme.Tertiary);
+        st.Text = _lockOn ? "开" : "关"; st.VerticalAlignment = VerticalAlignment.Center; st.Margin = new Thickness(0, 0, 18, 1);
+        Grid.SetColumn(st, 2); _compact.Children.Add(st);
+        _compactW = 200;
+        _compact.Width = _compactW;
+        Place(_compact, _compactW);
+        if (_mode == Mode.Compact) _w.Target = _compactW;
     }
 
     private void UpdateOsd(bool animate)

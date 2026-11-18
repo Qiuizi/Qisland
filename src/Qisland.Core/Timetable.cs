@@ -74,7 +74,7 @@ public static class Timetable
     }
 
     // 参数里可能有带引号的冒号（TZID="..."），值的冒号是第一个不在引号里的
-    private static int IndexOfValueColon(string line)
+    internal static int IndexOfValueColon(string line)
     {
         var q = false;
         for (var i = 0; i < line.Length; i++)
@@ -85,7 +85,7 @@ public static class Timetable
         return -1;
     }
 
-    private static IEnumerable<string> Unfold(string ics)
+    internal static IEnumerable<string> Unfold(string ics)
     {
         var sb = new StringBuilder();
         foreach (var raw in ics.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
@@ -97,7 +97,7 @@ public static class Timetable
         if (sb.Length > 0) yield return sb.ToString();
     }
 
-    private static string Unescape(string v) => v.Replace("\\n", "\n").Replace("\\N", "\n").Replace("\\,", ",").Replace("\\;", ";").Replace("\\\\", "\\");
+    internal static string Unescape(string v) => v.Replace("\\n", "\n").Replace("\\N", "\n").Replace("\\,", ",").Replace("\\;", ";").Replace("\\\\", "\\");
 
     private static string Clean(string s) => s.Replace('\n', ' ').Trim();
 
@@ -141,7 +141,7 @@ public static class Timetable
         return t;
     }
 
-    private static IEnumerable<DateTime> Occurrences(DateTime start, string rrule, DateTime from, DateTime to)
+    internal static IEnumerable<DateTime> Occurrences(DateTime start, string rrule, DateTime from, DateTime to)
     {
         if (string.IsNullOrWhiteSpace(rrule)) { yield return start; yield break; }
         var r = rrule.Split(';', StringSplitOptions.RemoveEmptyEntries)

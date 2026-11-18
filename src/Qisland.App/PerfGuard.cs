@@ -78,5 +78,5 @@ public sealed class PerfGuard
     }
 
     public string Json() =>
-        $"{{\"ok\":true,\"cpu\":{Cpu:0.00},\"cpu_avg30\":{Avg30:0.00},\"threads\":{Threads},\"handles\":{Handles},\"private_mb\":{PrivateMb:0.0},\"degraded\":{(Degraded ? "true" : "false")},\"budget\":{Budget}}}";
+        $"{{\"ok\":true,\"cpu\":{Cpu:0.00},\"cpu_avg30\":{Avg30:0.00},\"threads\":{Threads},\"handles\":{Handles},\"private_mb\":{PrivateMb:0.0},\"degraded\":{(Degraded ? "true" : "false")},\"budget\":{Budget},\"events\":{Counters.Json()}}}";
 }

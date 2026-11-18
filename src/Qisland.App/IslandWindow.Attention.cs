@@ -22,6 +22,7 @@ public sealed partial class IslandWindow
     private static Level LevelOf(LiveActivity a)
     {
         if (a.Source is "media") return Level.Passive;
+        if (a.Source is "call" && a.Kind == ActivityKind.Warning) return Level.Critical;   // 来电：立刻展开
         // 微信 / QQ 消息只是“主动”档：胶囊轻弹、换上新内容，不展开（要看就鼠标移上去）
         if (a.Source is "wechat" or "qq") return Level.Active;
         return a.Kind switch
@@ -33,7 +34,23 @@ public sealed partial class IslandWindow
         };
     }
 
-    private bool Focusing => Timer is { Active: true, Paused: false, Label: "专注" };
+    private bool OwnFocus => Timer is { Active: true, Paused: false, Label: "专注" };
+    private bool Focusing => OwnFocus || FocusMode.Active;
+
+    /// <summary>专注联动开着时，被挡在胶囊外的新消息也记进摘要（它们不会成为头条，Attend 看不到）。</summary>
+    private void NoteHeld()
+    {
+        if (!FocusMode.Active) return;
+        var now = DateTime.Now;
+        foreach (var a in _store.Ranked())
+        {
+            if (a.Quiet || FocusMode.Passes(a) || (now - a.Updated).TotalSeconds >= 2 || LevelOf(a) < Level.Active) continue;
+            if (!_held.Contains(a.Title)) _held.Add(a.Title);
+        }
+    }
+
+    /// <summary>专注开始 / 结束（含 Windows 专注会话）：胶囊上放行的东西变了，重排一次。</summary>
+    public void OnFocusModeChanged() => OnStoreChanged();
 
     /// <summary>新头条到达时决定打扰到什么程度。返回 true 表示已经展开偷看。</summary>
     private bool Attend(LiveActivity top)
@@ -41,7 +58,7 @@ public sealed partial class IslandWindow
         if (_hidden) return false;
         var level = LevelOf(top);
         var now = DateTime.Now;
-        if (top.Source != "timer" && Focusing && level < Level.Critical)
+        if (top.Source != "timer" && Focusing && level < Level.Critical && !FocusMode.Passes(top))
         {
             if (level >= Level.Active && !_held.Contains(top.Title)) _held.Add(top.Title);
             return false;

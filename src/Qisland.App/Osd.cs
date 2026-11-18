@@ -44,6 +44,7 @@ public sealed class VolumeWatcher : IDisposable
         }
         catch (Exception ex) { App.Log("音量监听初始化失败: " + ex.Message); }
         if (!File.Exists(OffFlag)) HookKeys(true);
+        else _volKeys = false;
     }
 
     private void Bind()
@@ -135,33 +136,89 @@ public sealed class VolumeWatcher : IDisposable
         try { _vol.GetMute(out var m); _vol.SetMute(!m, ref _ctx); } catch { }
     }
 
+    private bool _volKeys, _lockKeys;
+
+    /// <summary>接管音量键（吃掉，系统音量浮窗不弹）。和大小写锁定提示共用同一个低级键盘钩子。</summary>
     public void HookKeys(bool on)
     {
-        if (on && _hook == IntPtr.Zero)
+        _volKeys = on;
+        UpdateHook();
+        try { if (on) File.Delete(OffFlag); else File.WriteAllText(OffFlag, ""); } catch { }
+    }
+
+    /// <summary>大写 / 数字锁定提示：只看按键，不吃掉、不模拟按键。</summary>
+    public void WatchLockKeys(bool on) { _lockKeys = on; UpdateHook(); }
+
+    /// <summary>大写 / 数字锁定切换后：(名字, 现在是否开着)。</summary>
+    public event Action<string, bool>? LockChanged;
+
+    private void UpdateHook()
+    {
+        var want = _volKeys || _lockKeys;
+        if (want && _hook == IntPtr.Zero)
         {
             _proc = KeyProc;
             using var mod = Process.GetCurrentProcess().MainModule!;
             _hook = SetWindowsHookEx(13 /*WH_KEYBOARD_LL*/, _proc, GetModuleHandle(mod.ModuleName), 0);
-            App.Log(_hook != IntPtr.Zero ? "已接管音量键" : "音量键钩子失败");
+            App.Log(_hook != IntPtr.Zero ? $"键盘钩子已挂上（音量键 {(_volKeys ? "接管" : "不接管")}，锁定键提示 {(_lockKeys ? "开" : "关")}）" : "键盘钩子失败");
         }
-        else if (!on && _hook != IntPtr.Zero) { UnhookWindowsHookEx(_hook); _hook = IntPtr.Zero; }
-        try { if (on) File.Delete(OffFlag); else File.WriteAllText(OffFlag, ""); } catch { }
+        else if (!want && _hook != IntPtr.Zero) { UnhookWindowsHookEx(_hook); _hook = IntPtr.Zero; App.Log("键盘钩子已卸下"); }
     }
+
+    private bool _capsDown, _numDown;
 
     private IntPtr KeyProc(int code, IntPtr wParam, IntPtr lParam)
     {
         if (code >= 0)
         {
             var vk = Marshal.ReadInt32(lParam);
-            if (vk is 0xAD or 0xAE or 0xAF)
+            var down = (int)wParam is 0x100 or 0x104;
+            if (_volKeys && vk is 0xAD or 0xAE or 0xAF)
             {
-                var down = (int)wParam is 0x100 or 0x104;
                 if (down) _ui.BeginInvoke(() => { if (vk == 0xAD) ToggleMute(); else Step(vk == 0xAF ? 1 : -1); });
                 return 1;   // 吃掉：系统就不会弹自己的音量浮窗
+            }
+            if (_lockKeys && vk is 0x14 or 0x90)
+            {
+                // 按住不放会连发 keydown：只认第一下。切换是在按下时生效的，松开后再读状态最准
+                ref var held = ref (vk == 0x14 ? ref _capsDown : ref _numDown);
+                if (down) held = true;
+                else if (held)
+                {
+                    held = false;
+                    _ui.BeginInvoke(() => ReadLock(vk), DispatcherPriority.Input);
+                }
             }
         }
         return CallNextHookEx(_hook, code, wParam, lParam);
     }
+
+    private readonly Dictionary<int, bool> _lockState = [];
+
+    /// <summary>
+    /// 锁定键状态是按线程的输入状态记的，岛自己不是前台时 GetKeyState 可能是旧的：
+    /// 临时挂到前台窗口的输入线程上读，读完马上断开；挂不上就按「翻转一次」推算。
+    /// </summary>
+    private void ReadLock(int vk)
+    {
+        Counters.Hit("keys.lock");
+        bool on;
+        var fg = GetForegroundWindow();
+        var fgThread = fg != IntPtr.Zero ? GetWindowThreadProcessId(fg, out _) : 0;
+        var me = GetCurrentThreadId();
+        var attached = fgThread != 0 && fgThread != me && AttachThreadInput(me, fgThread, true);
+        try { on = (GetKeyState(vk) & 1) != 0; }
+        finally { if (attached) AttachThreadInput(me, fgThread, false); }
+        if (!attached && fgThread != me && _lockState.TryGetValue(vk, out var was) && was == on) on = !was;
+        _lockState[vk] = on;
+        LockChanged?.Invoke(vk == 0x14 ? "大写锁定" : "数字锁定", on);
+    }
+
+    [DllImport("user32.dll")] private static extern short GetKeyState(int vk);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint a, uint b, bool attach);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
 
     public void Dispose()
     {

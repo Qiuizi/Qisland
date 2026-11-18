@@ -84,6 +84,17 @@ public sealed partial class IslandWindow : Window
     // 输入法中 / 英：收起时天气左边一个小字，默认关（托盘里开）
     private readonly TextBlock _idleIme = Txt(11.5, FontWeights.SemiBold, Theme.Tertiary);
 
+    // iOS 的隐私指示：橙点 = 麦克风在用，绿点 = 摄像头在用。只是天气左边的一个小点，不顶掉时间
+    private readonly System.Windows.Shapes.Ellipse _micDot = new() { Width = 6, Height = 6, Fill = Theme.Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x9F, 0x0A))) };
+    private readonly System.Windows.Shapes.Ellipse _camDot = new() { Width = 6, Height = 6, Fill = Theme.Freeze(new SolidColorBrush(Color.FromRgb(0x30, 0xD1, 0x58))) };
+
+    public void SetPrivacyDots(bool mic, bool cam, string tip)
+    {
+        _micDot.Visibility = mic ? Visibility.Visible : Visibility.Collapsed;
+        _camDot.Visibility = cam ? Visibility.Visible : Visibility.Collapsed;
+        _micDot.ToolTip = _camDot.ToolTip = tip.Length > 0 ? tip : null;
+    }
+
     public void SetIme(string state)
     {
         _idleIme.Text = state;
@@ -185,6 +196,7 @@ public sealed partial class IslandWindow : Window
         var wx = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 15, 0), VerticalAlignment = VerticalAlignment.Center };
         _idleIme.Margin = new Thickness(0, 0, 7, 0);
         _idleIme.Visibility = Visibility.Collapsed;
+        foreach (var dot in new[] { _micDot, _camDot }) { dot.Visibility = Visibility.Collapsed; dot.Margin = new Thickness(0, 0, 6, 0); dot.VerticalAlignment = VerticalAlignment.Center; wx.Children.Add(dot); }
         wx.Children.Add(_idleIme);
         _idleWeatherGlyph.Margin = new Thickness(0, 1, 6, 0);
         wx.Children.Add(_idleWeatherGlyph);
@@ -264,6 +276,7 @@ public sealed partial class IslandWindow : Window
 
     private void OnStoreChanged()
     {
+        NoteHeld();
         var ranked = _store.Pill();
         var top = ranked.Count > 0 ? ranked[0] : null;
         // 新的头条活动：像 iOS 一样先展开“偷看”几秒
@@ -949,6 +962,7 @@ public sealed partial class IslandWindow : Window
 
         var canOpen = a.Source == "otp" || a.OpenUri != null || Launcher.CanOpen(a.Source) || a.Source is "update" or "system" or "battery" or "device" or "copy" or "download";
         if (a.Source == "otp") right.Children.Add(Chip("复制", () => CopyOtp(a)));
+        if (a.Source is "agenda" or "calendar" && a.OpenUri is { } join) right.Children.Add(Chip("加入", () => Launcher.OpenUri(join, a.Source), "打开会议链接"));
         // QQ 等发系统通知的软件：原通知还在时，给一个去通知中心的入口——点原通知，软件自己会跳到那个会话
         if (a.Source is not "wechat" && a.OpenUri == null && ToastMirror.Current?.Alive(a.Id) == true)
             right.Children.Add(ActionCenterButton());

@@ -135,7 +135,12 @@ public sealed class ActivityStore
         .ToList();
 
     /// <summary>能上收起胶囊的活动（去掉安静的）：没有它们时，收起的岛显示时间。</summary>
-    public IReadOnlyList<LiveActivity> Pill() => Ranked().Where(x => !x.Quiet).ToList();
+    /// <summary>专注中（见 <see cref="FocusMode"/>）只放行关键的几类，其余也只进列表。</summary>
+    public IReadOnlyList<LiveActivity> Pill()
+    {
+        var focus = FocusMode.Active;
+        return Ranked().Where(x => !x.Quiet && (!focus || FocusMode.Passes(x))).ToList();
+    }
 
     public LiveActivity? Get(string id) => _items.TryGetValue(id, out var x) ? x : null;
 }

@@ -42,6 +42,11 @@ public sealed class App : Application
     private SystemWatch _sys = null!;
     private readonly PerfGuard _perf = new();
     private ImeWatch? _ime;
+    private PrivacyWatcher? _privacy;
+    private NetworkWatcher? _net;
+    private CallWatcher? _calls;
+    private BluetoothWatcher? _bt;
+    private CalendarWatcher? _cal;
     private Updater _upd = null!;
     private DateTime _day = DateTime.Today;
     private readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -158,6 +163,7 @@ public sealed class App : Application
                 Log("从睡眠唤醒");
                 _window?.OnResume();
                 _media?.Reconnect();
+                _net?.OnResume();
                 await Task.Delay(TimeSpan.FromSeconds(20));   // 等网络
                 Interlocked.Exchange(ref _wake, new(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
             });
@@ -184,7 +190,7 @@ public sealed class App : Application
         _sys = new SystemWatch(_store);
         _upd = new Updater(_store, Http, Quit);
         _ = _upd.Loop();
-        _window!.OpenRequested = a => _upd.Open(a) || _sys.Open(a) || Launcher.Open(a);
+        _window!.OpenRequested = a => _upd.Open(a) || _sys.Open(a) || (_calls?.Open(a) ?? false) || Launcher.Open(a);
         _window.ApplyLook(LoadLook());
         _timer = new FocusTimer(_store);
         _window.Timer = _timer;
@@ -193,6 +199,7 @@ public sealed class App : Application
         try { _flash = new MessengerFlash(_store); _flash.Start(); } catch (Exception ex) { Log("ShellHook: " + ex.Message); }
         try { _volume = new VolumeWatcher(); _volume.Changed += _window.ShowVolume; _volume.DeviceChanged += name =>
             {
+                if (_bt != null && DateTime.Now - _bt.LastConnect < TimeSpan.FromSeconds(12) && Features.On(Features.Bluetooth)) return;   // 蓝牙那条已经说了
                 var icon = name.Contains("耳机") || name.Contains("Headphone", StringComparison.OrdinalIgnoreCase) || name.Contains("Buds", StringComparison.OrdinalIgnoreCase) || name.Contains("AirPods", StringComparison.OrdinalIgnoreCase) || name.Contains("Hands-Free", StringComparison.OrdinalIgnoreCase) ? "已连接耳机" : "声音输出已切换";
                 _store.Upsert(new IslandActivity("audio:device", "audio", icon, $"{name} · 音量 {(int)Math.Round(_volume.Level * 100)}%", ActivityKind.Done, 72, DurationSeconds: 4, ResetTtl: true), progress: _volume.Level);
             }; } catch (Exception ex) { Log("音量: " + ex.Message); }
@@ -235,6 +242,7 @@ public sealed class App : Application
         _media.Changed += () => { _window.OnMediaChanged(); _lyrics.OnTrack(_media.Current); _window.UpdateLyricTimer(); };
         _lyrics.Changed += _window.OnLyricsChanged;
         _ = _media.StartAsync();
+        StartGapFeatures();
         _tick.Tick += (_, _) =>
         {
             _tickN++;
@@ -249,9 +257,119 @@ public sealed class App : Application
             if (_tickN % 10 == 5) { try { _xxt?.Tick(); } catch (Exception ex) { Log("学习通: " + ex.Message); } }
             if (_tickN % 10 == 7) { try { _quota?.Tick(); } catch (Exception ex) { Log("Codex 额度: " + ex.Message); } }
             if (_tickN % 60 == 0) { try { _homework?.Tick(); _window.OnHomeworkChanged(); } catch (Exception ex) { Log("作业: " + ex.Message); } }
+            try { _calls?.Tick(_tickN); } catch (Exception ex) { Log("通话: " + ex.Message); }
+            if (_tickN % 30 == 3) { try { _cal?.Tick(); } catch (Exception ex) { Log("日历: " + ex.Message); } }
+            if (_tickN % 60 == 13) { try { _bt?.Tick(); } catch (Exception ex) { Log("蓝牙: " + ex.Message); } }
+            if (_tickN % 10 == 9 && FocusMode.Poll()) _window.OnFocusModeChanged();
         };
         _tick.Start();
         Log("providers started");
+    }
+
+    // ───────────── 从 Mac / iOS 灵动岛补来的：隐私指示、日历、通话、专注、蓝牙、网络、锁定键 ─────────────
+
+    private void StartGapFeatures()
+    {
+        var w = _window!;
+        FocusMode.Own = () => _timer is { Active: true, Paused: false, Label: "专注" };
+        try
+        {
+            _calls = new CallWatcher(_store);
+            _privacy = new PrivacyWatcher(Dispatcher);
+            _privacy.Changed += (now, before) =>
+            {
+                _calls.OnDevices(now);
+                OnPrivacy(now, before);
+            };
+            if (Features.On(Features.Privacy) || Features.On(Features.Calls)) _privacy.Start();
+        }
+        catch (Exception ex) { Log("隐私指示: " + ex.Message); }
+        try { _net = new NetworkWatcher(_store, Dispatcher); if (Features.On(Features.Network)) _net.Start(); }
+        catch (Exception ex) { Log("网络: " + ex.Message); }
+        try { _bt = new BluetoothWatcher(_store, Dispatcher); if (Features.On(Features.Bluetooth)) _bt.Start(); }
+        catch (Exception ex) { Log("蓝牙: " + ex.Message); }
+        try
+        {
+            _cal = new CalendarWatcher(_store, Http);
+            w.Calendar = _cal;
+            _cal.Changed += w.OnCalendarChanged;
+            _ = _cal.Loop();
+        }
+        catch (Exception ex) { Log("日历: " + ex.Message); }
+        if (_volume != null)
+        {
+            _volume.LockChanged += (name, on) => { if (Features.On(Features.LockKeys)) w.ShowLock(name, on); };
+            _volume.WatchLockKeys(Features.On(Features.LockKeys));
+        }
+        Features.Changed += key => Dispatcher.BeginInvoke(() => OnFeature(key));
+        if (FocusMode.Poll()) w.OnFocusModeChanged();
+    }
+
+    private void OnFeature(string key)
+    {
+        var on = Features.On(key);
+        switch (key)
+        {
+            case Features.Privacy:
+            case Features.Calls:
+                if (Features.On(Features.Privacy) || Features.On(Features.Calls)) _privacy?.Start(); else _privacy?.Stop();
+                if (_privacy != null) OnPrivacy(_privacy.Uses, []);
+                break;
+            case Features.Network: if (on) _net?.Start(); else _net?.Stop(); break;
+            case Features.Bluetooth: if (on) _bt?.Start(); else _bt?.Stop(); break;
+            case Features.LockKeys: _volume?.WatchLockKeys(on); break;
+            case Features.Calendar: _cal?.Tick(); _window?.OnCalendarChanged(); if (on) _cal?.RefreshNow(); break;
+            case Features.Focus: FocusMode.Poll(); _window?.OnFocusModeChanged(); break;
+        }
+    }
+
+    /// <summary>麦克风 / 摄像头：开始用时弹一条临时胶囊（通话软件的由通话那条代替），之后只留天气旁边的小圆点。</summary>
+    private void OnPrivacy(IReadOnlyList<DeviceUse> now, IReadOnlyList<DeviceUse> before)
+    {
+        if (!Features.On(Features.Privacy))
+        {
+            _window?.SetPrivacyDots(false, false, "");
+            _store.Remove("privacy:mic"); _store.Remove("privacy:cam");
+            return;
+        }
+        var mic = now.Where(u => u.Mic).ToList();
+        var cam = now.Where(u => !u.Mic).ToList();
+        var tip = string.Join("\n", now.Select(u => $"{(u.Mic ? "麦克风" : "摄像头")}：{u.App}"));
+        _window?.SetPrivacyDots(mic.Count > 0, cam.Count > 0, tip);
+        foreach (var (dev, id, src, word) in new[] { ("microphone", "privacy:mic", "mic", "麦克风"), ("webcam", "privacy:cam", "camera", "摄像头") })
+        {
+            var cur = now.Where(u => u.Device == dev).ToList();
+            if (cur.Count == 0) { _store.Remove(id); continue; }
+            var fresh = cur.Where(u => !before.Any(b => b.Device == dev && b.Exe == u.Exe)).ToList();
+            if (fresh.Count == 0) continue;
+            Log($"{word}: {string.Join("、", fresh.Select(u => u.App))} 开始使用");
+            // 通话软件开麦：通话胶囊会接手，不再单独弹；摄像头照样提示（视频通话时开摄像头是值得知道的）
+            if (dev == "microphone" && Features.On(Features.Calls) && fresh.All(u => CallWatcher.IsCallApp(u.Exe))) continue;
+            var names = string.Join("、", cur.Select(u => u.App).Distinct());
+            _store.Upsert(new IslandActivity(id, src, $"{word}正在使用", names, ActivityKind.Info, 60, DurationSeconds: 5, ResetTtl: true));
+        }
+    }
+
+    private void CalendarMenu(System.Windows.Forms.ToolStripMenuItem m)
+    {
+        m.DropDownItems.Clear();
+        if (_cal == null) { m.DropDownItems.Add(new System.Windows.Forms.ToolStripMenuItem("日历没启动") { Enabled = false }); return; }
+        m.DropDownItems.Add("添加 .ics 订阅链接…", null, (_, _) => Dispatcher.BeginInvoke(() => new CalendarAddWindow(_cal).Show()));
+        var refresh = new System.Windows.Forms.ToolStripMenuItem(_cal.LastOk is { } t ? $"立即刷新（上次 {t:HH:mm}）" : "立即刷新") { Enabled = _cal.Feeds.Count > 0 };
+        refresh.Click += (_, _) => Dispatcher.BeginInvoke(_cal.RefreshNow);
+        m.DropDownItems.Add(refresh);
+        if (_cal.LastError.Length > 0) m.DropDownItems.Add(new System.Windows.Forms.ToolStripMenuItem("上次出错：" + _cal.LastError) { Enabled = false });
+        if (_cal.Feeds.Count > 0) m.DropDownItems.Add(new System.Windows.Forms.ToolStripSeparator());
+        foreach (var url in _cal.Feeds)
+        {
+            var item = new System.Windows.Forms.ToolStripMenuItem($"{CalendarWatcher.Host(url)}（点击删除）") { ToolTipText = "链接本身加密保存，这里只显示域名" };
+            var u = url;
+            item.Click += (_, _) => Dispatcher.BeginInvoke(() =>
+            {
+                if (System.Windows.MessageBox.Show($"删除日历订阅 {CalendarWatcher.Host(u)}？", "Qisland", MessageBoxButton.OKCancel) == MessageBoxResult.OK) _cal.Remove(u);
+            });
+            m.DropDownItems.Add(item);
+        }
     }
 
     private void YuketangLoginOrOut()
@@ -425,6 +543,27 @@ public sealed class App : Application
             hwRefresh.Text = last is { } t ? $"立即刷新作业（上次 {t:HH:mm}）" : "立即刷新作业";
         };
         menu.Items.Add(hwMenu);
+        var calMenu = new System.Windows.Forms.ToolStripMenuItem("日历订阅");
+        calMenu.DropDownItems.Add("…");
+        calMenu.DropDownOpening += (_, _) => CalendarMenu(calMenu);
+        menu.Items.Add(calMenu);
+        var hints = new System.Windows.Forms.ToolStripMenuItem("岛上提示");
+        foreach (var (key, label, tip) in new[]
+        {
+            (Features.Privacy, "麦克风 / 摄像头占用", "有程序开始用麦克风 / 摄像头时弹一下，用着的时候天气左边留个橙点 / 绿点"),
+            (Features.Calls, "通话 / 会议", "微信 / QQ 来电和通话中、腾讯会议 / 钉钉 / 飞书会议中，显示时长，点一下切过去"),
+            (Features.Focus, "专注时只放行要紧的", "自己的专注计时或 Windows 专注会话进行中：胶囊只放行审批、通话、1 小时内截止的作业，其余只进列表"),
+            (Features.Calendar, "日历日程和会前提醒", "订阅日历的接下来几个日程进列表和课程组件，开始前 10 分钟提醒，有会议链接可一键加入"),
+            (Features.Bluetooth, "蓝牙耳机连接和电量", "蓝牙耳机 / 音箱连上、断开时提示，能读到电量就显示，低电量提醒"),
+            (Features.Network, "网络断开 / 恢复和代理", "断网、恢复、换 Wi-Fi、校园网要网页认证、系统代理开关时提示"),
+            (Features.LockKeys, "大写 / 数字锁定提示", "按 Caps Lock / Num Lock 时岛上显示开还是关（只看按键，不改按键）"),
+        })
+        {
+            var it = new System.Windows.Forms.ToolStripMenuItem(label) { CheckOnClick = true, Checked = Features.On(key), ToolTipText = tip };
+            it.CheckedChanged += (_, _) => Features.Set(key, it.Checked);
+            hints.DropDownItems.Add(it);
+        }
+        menu.Items.Add(hints);
         var cdx = new System.Windows.Forms.ToolStripMenuItem("Codex");
         var approve = new System.Windows.Forms.ToolStripMenuItem("在岛上批准 Codex 请求") { ToolTipText = "Codex 要你批准命令时，岛上直接点允许 / 拒绝；100 秒不点就回终端问你。只改 ~/.codex/hooks.json 里 Qisland 的 PermissionRequest 一条，改前备份。" };
         approve.Click += (_, _) => Dispatcher.BeginInvoke(() =>
@@ -510,6 +649,9 @@ public sealed class App : Application
         if (_tray != null) { _tray.Visible = false; _tray.Dispose(); }
         _api?.Dispose();
         _volume?.Dispose();
+        _privacy?.Dispose();
+        _net?.Dispose();
+        _bt?.Stop();
         _inboxWatcher?.Dispose();
         Shutdown();
     }

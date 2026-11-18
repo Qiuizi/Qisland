@@ -502,6 +502,16 @@ public sealed partial class IslandWindow
                 var left = (date - today).Days;
                 cell.ToolTip = (left > 0 ? $"{name} · 还有 {left} 天" : left == 0 ? $"{name} · 今天" : name) + "\n" + lunarTip;
             }
+            if (Calendar?.Events is { Count: > 0 } ce)
+            {
+                var dayEv = ce.Where(e => e.Start.Date == date).ToList();
+                if (dayEv.Count > 0)
+                {
+                    var hasCd = events.ContainsKey(d);
+                    cell.Children.Add(new System.Windows.Shapes.Ellipse { Width = 3.5, Height = 3.5, Fill = isToday ? Brushes.White : Theme.Blue, VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(hasCd ? 9 : 0, 0, 0, -1) });
+                    cell.ToolTip = string.Join("\n", dayEv.Take(5).Select(e => e.AllDay ? "全天  " + e.Title : $"{e.Start:HH:mm}  {e.Title}")) + (dayEv.Count > 5 ? $"\n…共 {dayEv.Count} 个" : "") + "\n" + cell.ToolTip;
+                }
+            }
             grid.Children.Add(cell);
         }
         sp.Children.Add(grid);

@@ -604,10 +604,12 @@ public sealed partial class IslandWindow
         var sp = new StackPanel();
         var tc = TodayClasses();
         var hw = HomeworkCard();
+        var ag = AgendaCard();
         sp.Children.Add(WidgetHead(d, DateTime.Now.ToString("ddd", new CultureInfo("zh-CN")), null));
-        if (tc != null) { tc.Margin = new Thickness(0, 0, 0, hw != null ? 6 : 0); sp.Children.Add(tc); }
+        if (tc != null) { tc.Margin = new Thickness(0, 0, 0, hw != null || ag != null ? 6 : 0); sp.Children.Add(tc); }
+        if (ag != null) { ag.Margin = new Thickness(0, 0, 0, hw != null ? 6 : 0); sp.Children.Add(ag); }
         if (hw != null) { hw.Margin = new Thickness(0); sp.Children.Add(hw); }
-        if (tc == null && hw == null)
+        if (tc == null && hw == null && ag == null)
         {
             var e = Txt(12.5, FontWeights.Normal, Theme.Tertiary);
             e.Text = "今天没课了，也没有待交作业";
