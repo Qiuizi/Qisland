@@ -2,125 +2,163 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Qisland 3.0 · Windows 灵动岛</title>
-<meta name="description" content="给 Windows 做的灵动岛：顺滑、安静，不挡事。">
-<meta property="og:image" content="assets/shots/03-home.png">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Qisland 3.0 · 有事它变形，没事它是钟。</title>
+<meta name="description" content="给 Windows 做的灵动岛。课业雷达、Agent 审批、麦克风摄像头提示、日历、通话、专注，平时只显示时间。">
+<meta property="og:title" content="Qisland 3.0 · Windows 灵动岛">
+<meta property="og:description" content="有事它变形，没事它是钟。">
+<meta property="og:image" content="media/qisland-v3-poster.png">
+<meta name="theme-color" content="#fbfbfd">
 <style>
-:root{--bg:#000;--fg:#f5f5f7;--mute:#86868b;--card:#111114;--line:rgba(255,255,255,.08);--accent:#ff9f0a;--blue:#2997ff}
+:root{--bg:#fbfbfd;--fg:#1d1d1f;--mute:#6e6e73;--card:#fff;--soft:#f2f2f5;--blue:#0071e3;--orange:#ff9f0a}
 *{box-sizing:border-box;margin:0;padding:0}
-html{scroll-behavior:smooth}
-body{background:var(--bg);color:var(--fg);font-family:-apple-system,"SF Pro Display","Segoe UI Variable","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;line-height:1.5;overflow-x:hidden}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI Variable Display","Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;line-height:1.5;overflow-x:hidden}
 a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
-nav{position:fixed;top:0;left:0;right:0;z-index:10;display:flex;justify-content:space-between;align-items:center;padding:14px 28px;background:rgba(0,0,0,.6);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);font-size:14px}
-nav b{font-weight:600;letter-spacing:.2px}nav div a{color:var(--fg);opacity:.8;margin-left:24px}
-.tag{display:inline-block;font-size:13px;font-weight:600;color:var(--accent);border:1px solid rgba(255,159,10,.4);padding:3px 12px;border-radius:99px;margin-bottom:22px}
-section{padding:120px 24px;max-width:1080px;margin:0 auto;text-align:center}
-.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;padding-top:140px}
-h1{font-size:clamp(56px,10vw,112px);font-weight:700;letter-spacing:-.04em;line-height:1}
-h2{font-size:clamp(36px,5.5vw,64px);font-weight:700;letter-spacing:-.03em;line-height:1.08}
-.sub{font-size:clamp(20px,2.6vw,28px);color:var(--mute);margin-top:18px;font-weight:500}
-.grad{background:linear-gradient(90deg,#ff9f0a,#ff375f 45%,#bf5af2);-webkit-background-clip:text;background-clip:text;color:transparent}
-.island{margin-top:72px;position:relative;width:min(560px,90vw)}
-.island img{width:100%;display:block;filter:drop-shadow(0 30px 60px rgba(255,159,10,.12))}
-.cta{margin-top:44px;display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
-.btn{background:var(--blue);color:#fff;padding:12px 26px;border-radius:99px;font-size:17px;font-weight:500}
-.btn.ghost{background:transparent;color:var(--blue);border:1px solid var(--blue)}.btn:hover{text-decoration:none;opacity:.9}
-video{width:100%;border-radius:28px;margin-top:56px;background:#0a0a0c}
-.pains{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;margin-top:64px;text-align:left}
-.pain{background:var(--card);border-radius:28px;padding:34px 30px}
-.pain .q{color:var(--mute);font-size:15px}
-.pain h3{font-size:24px;margin:8px 0 12px;letter-spacing:-.01em}
-.pain p{color:#c7c7cc;font-size:16px}
-.pain .n{font-size:44px;font-weight:700;letter-spacing:-.03em;margin-top:18px}
-.pain .n small{font-size:15px;color:var(--mute);font-weight:500;margin-left:6px}
-.shot{margin-top:56px}.shot img{width:min(100%,560px);filter:drop-shadow(0 40px 80px rgba(0,0,0,.6))}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center;text-align:left;margin-top:40px}
-.two img{width:100%}
-.two p{color:#c7c7cc;font-size:18px;margin-top:14px}
-@media(max-width:760px){.two{grid-template-columns:1fr}nav div a:not(:last-child){display:none}}
-.feat{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:36px 28px;margin-top:64px;text-align:left}
-.feat h4{font-size:19px;margin-bottom:6px}.feat p{color:var(--mute);font-size:15px}
-.feat i{font-style:normal;display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:10px}
-code{font-family:"SF Mono","Cascadia Code",Consolas,monospace;font-size:.9em;background:#1c1c1f;padding:2px 7px;border-radius:6px}
-footer{border-top:1px solid var(--line);color:var(--mute);font-size:13px;padding:36px 24px;text-align:center}
-.reveal{opacity:0;transform:translateY(40px);transition:opacity 1s cubic-bezier(.2,.8,.2,1),transform 1s cubic-bezier(.2,.8,.2,1)}
+img{max-width:100%;display:block}
+nav{position:sticky;top:0;z-index:10;display:flex;justify-content:space-between;align-items:center;height:52px;padding:0 max(22px,env(safe-area-inset-left));background:rgba(251,251,253,.72);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);font-size:13px}
+nav b{font-weight:600;font-size:16px;letter-spacing:-.01em}
+nav div a{color:var(--fg);opacity:.8;margin-left:22px}
+section{padding:110px 22px;max-width:1080px;margin:0 auto;text-align:center}
+.eyebrow{display:inline-block;font-size:14px;font-weight:600;color:var(--orange);margin-bottom:14px;letter-spacing:.02em}
+h1{font-size:clamp(46px,9vw,96px);font-weight:700;letter-spacing:-.035em;line-height:1.04}
+h2{font-size:clamp(32px,5.4vw,56px);font-weight:700;letter-spacing:-.03em;line-height:1.1}
+h3{font-size:clamp(22px,2.6vw,28px);font-weight:700;letter-spacing:-.02em;line-height:1.2}
+.lead{font-size:clamp(18px,2.4vw,24px);color:var(--mute);margin:18px auto 0;max-width:720px;font-weight:500}
+.grad{background:linear-gradient(90deg,#ff9f0a,#ff375f 50%,#bf5af2);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero{padding-top:84px}
+.cta{margin-top:36px;display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+.btn{background:var(--blue);color:#fff;padding:11px 24px;border-radius:99px;font-size:17px;font-weight:500}
+.btn.ghost{background:rgba(0,113,227,.08);color:var(--blue)}.btn:hover{text-decoration:none;filter:brightness(1.06)}
+/* 截图放在一块“桌面壁纸”上，岛的半透明玻璃才看得清 */
+.stage{position:relative;border-radius:30px;overflow:hidden;background:radial-gradient(120% 90% at 10% 0%,#ffd8a8 0,rgba(255,216,168,0) 55%),radial-gradient(100% 80% at 100% 20%,#d6c6ff 0,rgba(214,198,255,0) 60%),radial-gradient(120% 100% at 50% 110%,#a8e0ff 0,rgba(168,224,255,0) 60%),#eef0f6;padding:44px 24px;display:flex;justify-content:center;align-items:center}
+.duo{margin-top:56px;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.duo .stage{flex-direction:column;gap:18px;min-height:220px}
+.duo .stage img{width:min(100%,420px)}
+.duo .cap{font-size:15px;font-weight:600;color:#3a3a3c}
+.film{margin-top:48px;border-radius:30px;overflow:hidden;background:#000;box-shadow:0 30px 80px rgba(0,0,0,.12)}
+video{width:100%;display:block;aspect-ratio:16/9;background:#000}
+.note{font-size:13px;color:var(--mute);margin-top:12px}
+.row{display:grid;grid-template-columns:1.05fr 1fr;gap:40px;align-items:center;text-align:left;margin-top:64px}
+.row.flip .stage{order:2}
+.row p{color:var(--mute);font-size:18px;margin-top:12px}
+.row .stage img{width:min(100%,460px)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:16px;margin-top:56px;text-align:left}
+.card{background:var(--card);border-radius:24px;padding:26px 24px;box-shadow:0 2px 14px rgba(0,0,0,.05)}
+.card .dot{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:18px;margin-bottom:14px;color:#fff}
+.card h4{font-size:18px;letter-spacing:-.01em;margin-bottom:6px}
+.card p{color:var(--mute);font-size:15px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px;margin-top:56px}
+.stat{background:var(--card);border-radius:24px;padding:30px 24px;box-shadow:0 2px 14px rgba(0,0,0,.05)}
+.stat .n{font-size:clamp(36px,5vw,48px);font-weight:700;letter-spacing:-.03em}
+.stat .k{color:var(--mute);font-size:15px;margin-top:4px}
+.dark{background:#000;color:#f5f5f7;max-width:none}
+.dark .inner{max-width:1080px;margin:0 auto}
+.dark .lead,.dark .card p{color:#a1a1a6}
+.dark .card{background:#1c1c1e;box-shadow:none}
+code{font-family:"SF Mono","Cascadia Code",Consolas,monospace;font-size:.88em;background:var(--soft);padding:2px 7px;border-radius:6px}
+footer{color:var(--mute);font-size:12px;padding:40px 22px 56px;text-align:center}
+.reveal{opacity:0;transform:translateY(32px);transition:opacity .9s cubic-bezier(.2,.8,.2,1),transform .9s cubic-bezier(.2,.8,.2,1)}
 .reveal.on{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}
+@media(max-width:760px){
+  section{padding:76px 18px}
+  nav div a:not(:last-child){display:none}
+  .duo,.row{grid-template-columns:1fr;gap:18px}
+  .row{margin-top:48px}.row.flip .stage{order:0}
+  .stage{padding:30px 16px;border-radius:24px}
+  .film{border-radius:20px}
+  .grid{grid-template-columns:1fr 1fr;gap:12px}.card{padding:18px 15px;border-radius:20px}.card h4{font-size:16px}.card p{font-size:13.5px}.card .dot{width:30px;height:30px;font-size:16px;margin-bottom:10px}
+}
 </style>
 </head>
 <body>
-<nav><b>Qisland</b><div><a href="#new">新功能</a><a href="#pain">痛点</a><a href="#look">界面</a><a href="#start">开始使用</a><a href="https://github.com/Qiuizi/Qisland">GitHub</a></div></nav>
+<nav><b>Qisland</b><div><a href="#film">宣传片</a><a href="#new">3.0 新功能</a><a href="#quiet">安静</a><a href="#privacy">隐私</a><a href="https://github.com/Qiuizi/Qisland">GitHub</a></div></nav>
 
 <section class="hero">
-  <span class="tag">3.0 正式版</span>
-  <h1>Qisland</h1>
-  <p class="sub">给 Windows 做的灵动岛。<span class="grad">现在，它开始替你记事。</span></p>
-  <div class="island"><img src="assets/shots/02-compact.png" alt="Qisland 紧凑态"></div>
+  <span class="eyebrow">Qisland 3.0</span>
+  <h1>有事它变形，<br><span class="grad">没事它是钟。</span></h1>
+  <p class="lead">给 Windows 做的灵动岛。下节课、快截止的作业、等你批准的命令、谁在用麦克风——只在需要时出现在屏幕顶上。</p>
   <div class="cta">
     <a class="btn" href="https://github.com/Qiuizi/Qisland/releases/latest">下载 3.0</a>
     <a class="btn ghost" href="#film">观看宣传片</a>
   </div>
-</section>
-
-<section id="film" class="reveal">
-  <h2>一条胶囊，<br>装下你正在等的事。</h2>
-  <p class="sub">下节课、快截止的作业、Agent 要你点头的命令、正在放的歌。它们按轻重排好，只在需要时展开。</p>
-  <video src="assets/qisland-v2.mp4" poster="assets/poster.png" controls playsinline muted loop preload="metadata"></video>
-</section>
-
-<section id="new">
-  <span class="tag reveal">2.0 新功能</span>
-  <h2 class="reveal">课表、作业、审批、歌词，<br>都上岛了。</h2>
-  <div class="two reveal"><img src="assets/shots/11-class-home.png" alt="课表"><div><h3 style="font-size:30px">课表，导进来就好</h3><p>托盘里导入 <code>.ics</code> 课表。上课时胶囊显示进度，课前 10 分钟轻轻弹一下，主页告诉你今天还有几节课。</p></div></div>
-  <div class="two reveal"><div><h3 style="font-size:30px">作业 DDL，不再漏</h3><p>雨课堂、学习通扫码登录，低频只读获取作业截止时间。24 小时内上岛，3 小时内变红。凭据加密存在本机，不存密码，不签到、不刷课、不答题。</p></div><img src="assets/shots/15-homework-home.png" alt="作业"></div>
-  <div class="two reveal"><img src="assets/shots/17-codex-approval.png" alt="Codex 审批"><div><h3 style="font-size:30px">Codex 要跑命令？在岛上点允许</h3><p>允许、拒绝或回终端，一次点击。额度圆环显示 5 小时和本周用量。默认关闭，托盘里打开。</p></div></div>
-  <div class="two reveal"><div><h3 style="font-size:30px">主流音乐平台，都有歌词</h3><p>QQ 音乐、网易云、酷狗、酷我、Spotify、Apple Music 和浏览器视频，封面、进度、逐行歌词都在岛上，暂停切歌不用翻出播放器。</p></div><img src="assets/shots/14-lyrics-home.png" alt="歌词"></div>
-</section>
-
-<section id="pain">
-  <h2 class="reveal">先把地基打牢。</h2>
-  <p class="sub reveal">Windows 灵动岛用一天就会遇到的问题，先解决，再加功能。</p>
-  <div class="pains">
-    <div class="pain reveal"><div class="q">岛下面的按钮点不到？</div><h3>只占岛那么大</h3><p>透明大窗口会吞掉点击。Qisland 把可点击区域收紧到岛本身，其余像素全部穿透给下面的程序。</p></div>
-    <div class="pain reveal"><div class="q">游戏和全屏视频被挡住？</div><h3>全屏自动让路</h3><p>识别全屏游戏和演示模式自动隐藏，<code>Ctrl+Alt+Q</code> 随时叫回。按进程名配置白名单和黑名单。</p></div>
-    <div class="pain reveal"><div class="q">闲着也在耗电？</div><h3>不动就不画</h3><p>只有动画在跑时才启动帧循环，其余时间几乎不占资源。</p><div class="n">≈0.3%<small>闲置 CPU（作者机器实测，30 秒平均）</small></div></div>
-    <div class="pain reveal"><div class="q">动画发涩？</div><h3>跟上屏幕刷新率</h3><p>读取显示器刷新率驱动弹簧动画，页面预热缓存，翻页时整页转成位图只做平移。</p><div class="n">110+ fps<small>展开动画 · 120 Hz 屏实测</small></div></div>
-    <div class="pain reveal"><div class="q">玻璃效果卡顿、留黑块？</div><h3>模糊在后台算</h3><p>系统亚克力裁不出胶囊。Qisland 自己截取岛背后的画面做模糊，截屏和模糊都在后台线程，展开全程都有通透质感。</p></div>
-    <div class="pain reveal"><div class="q">崩了就没了？</div><h3>自己爬起来</h3><p>开机自启，崩溃后自动重启；一分钟内重复崩溃就停下，不会死循环。</p></div>
+  <div class="duo reveal">
+    <div class="stage"><img src="assets/shots/01-idle.png" alt="没事时：显示时间的岛"><span class="cap">没事时，它是钟</span></div>
+    <div class="stage"><img src="assets/shots/02-compact.png" alt="有事时：等待确认的命令"><span class="cap">有事时，它变形</span></div>
   </div>
 </section>
 
-<section id="look">
-  <h2 class="reveal">展开，是五个页面。</h2>
-  <p class="sub reveal">滚轮切换，收起时自动回到主页。</p>
-  <div class="two reveal"><img src="assets/shots/03-home.png" alt="主页"><div><h3 style="font-size:30px">主页</h3><p>编程助手等你确认的命令、刚跑完的测试、快截止的作业、群消息，一屏看完。点一下直接跳到对应窗口。</p></div></div>
-  <div class="two reveal"><div><h3 style="font-size:30px">组件，自己搭</h3><p>天气、待办、剪贴板、日历、专注、系统状态，每个都是小组件。点「编辑组件」决定开哪些、怎么排，半宽的两两并排。</p></div><img src="assets/shots/04-widgets.png" alt="组件"></div>
-  <div class="two reveal"><img src="assets/shots/05-clipboard.png" alt="剪贴板"><div><h3 style="font-size:30px">剪贴板</h3><p>最近 30 条文字和文件，点一下重新复制。只存在内存里，并尊重密码管理器的“不进历史”标记。</p></div></div>
-  <div class="shot reveal"><img src="assets/shots/06-volume.png" alt="音量" style="width:min(100%,460px)"><p class="sub" style="font-size:18px">音量键接管：岛上显示音量条，插上耳机会告诉你。</p></div>
+<section id="film" class="reveal">
+  <h2>看它怎么安静地工作。</h2>
+  <div class="film">
+    <video src="media/qisland-v3.mp4" poster="media/qisland-v3-poster.png" controls playsinline muted preload="none"></video>
+  </div>
+  <p class="note">视频约 19 MB，点击后才开始加载。</p>
 </section>
 
-<section>
-  <h2 class="reveal">还有这些。</h2>
-  <div class="feat">
-    <div class="reveal"><h4><i style="background:#30d158"></i>电量与充电</h4><p>插拔电源、20% 和 10% 低电量、充满提醒。</p></div>
-    <div class="reveal"><h4><i style="background:#0a84ff"></i>多显示器</h4><p>跟随前台窗口所在的屏幕，按每块屏的 DPI 居中。</p></div>
-    <div class="reveal"><h4><i style="background:#ff9f0a"></i>复制与下载进度</h4><p>资源管理器复制和浏览器下载显示进度，完成后一键定位文件。</p></div>
-    <div class="reveal"><h4><i style="background:#bf5af2"></i>主流 Agent</h4><p>Claude Code、Codex、DSH、豆包、Trae、WorkBuddy，跑完、出错、等确认都会上岛。</p></div>
-    <div class="reveal"><h4><i style="background:#ff375f"></i>考试倒计时</h4><p>三天内的考试直接显示在胶囊上。</p></div>
-    <div class="reveal"><h4><i style="background:#ffd60a"></i>剪贴板与农历</h4><p>图片也进历史，文字一键翻译；日历显示农历和节日。</p></div>
-    <div class="reveal"><h4><i style="background:#64d2ff"></i>本机上岛 API</h4><p><code>127.0.0.1:9840</code>，兼容 WinIslands 协议，脚本一行推送。</p></div>
+<section id="new">
+  <span class="eyebrow reveal">3.0 新功能</span>
+  <h2 class="reveal">该响的响，<br>不该响的等你忙完。</h2>
+
+  <div class="row reveal">
+    <div class="stage"><img src="assets/shots/15-homework-home.png" alt="课业雷达"></div>
+    <div><h3>课业雷达</h3><p>雨课堂、学习通扫码登录，低频只读截止时间。截止前 24、3、1 小时各提醒一次，交了就不再吵；导入的课表告诉你下一节在哪个教室。</p></div>
+  </div>
+  <div class="row flip reveal">
+    <div class="stage"><img src="assets/shots/17-codex-approval.png" alt="Agent 审批"></div>
+    <div><h3>Agent 审批，在岛上点头</h3><p>Codex 和 DeepSeek Harness 要执行命令时，岛上直接允许或拒绝。100 秒没点就回终端问你，从不默认同意。</p></div>
+  </div>
+
+  <div class="grid">
+    <div class="card reveal"><div class="dot" style="background:#ff9f0a">●</div><h4>麦克风与摄像头</h4><p>有程序开始用时提示是谁；用着时，时间旁留一个橙点或绿点。</p></div>
+    <div class="card reveal"><div class="dot" style="background:#ff375f">31</div><h4>日历订阅</h4><p>Outlook、Google、飞书、钉钉的 .ics 链接，开始前提醒，会议链接一键加入，支持每月、每年重复。</p></div>
+    <div class="card reveal"><div class="dot" style="background:#30d158">☏</div><h4>通话计时</h4><p>微信、QQ、腾讯会议、Teams、Zoom 等通话时显示时长，点一下回到通话窗口。</p></div>
+    <div class="card reveal"><div class="dot" style="background:#5e5ce6">☾</div><h4>专注模式</h4><p>专注计时或 Windows 专注会话期间，只放行审批、通话和快截止的作业，结束后汇总。</p></div>
+    <div class="card reveal"><div class="dot" style="background:#0a84ff">ᛒ</div><h4>蓝牙耳机电量</h4><p>连上、断开、电量，20% 和 10% 时提醒。</p></div>
+    <div class="card reveal"><div class="dot" style="background:#64d2ff">⌁</div><h4>网络与校园网认证</h4><p>断网、恢复、换 Wi-Fi，需要网页认证时点一下打开登录页；开着代理也认得出真实网络。</p></div>
+    <div class="card reveal"><div class="dot" style="background:#8e8e93">⇪</div><h4>大写锁定提示</h4><p>按下 Caps Lock 或 Num Lock，岛上告诉你现在的状态。</p></div>
+    <div class="card reveal"><div class="dot" style="background:#ff9f0a">↥</div><h4>全屏里也叫得出</h4><p>游戏和视频全屏时岛自动让开，鼠标推到顶边或按 <code>Ctrl+Alt+Q</code> 随时叫回。</p></div>
+    <div class="card reveal"><div class="dot" style="background:#bf5af2">↺</div><h4>改动账本</h4><p>对其他软件改过的每一处都记下来，托盘里一键还原，只删自己加的。</p></div>
+    <div class="card reveal"><div class="dot" style="background:#30d158">#</div><h4>验证码一键复制</h4><p>通知里的验证码单独弹出，点一下复制。只在内存里，不写日志。</p></div>
+    <div class="card reveal"><div class="dot" style="background:#0071e3">➚</div><h4>点哪跳哪</h4><p>点一条活动，直接切到对应的软件、终端会话或作业网页。</p></div>
+    <div class="card reveal"><div class="dot" style="background:#ff375f">♪</div><h4>正在播放</h4><p>系统媒体控制里的音乐和视频：封面、进度、逐行歌词，暂停切歌不用翻出播放器。</p></div>
+  </div>
+</section>
+
+<section id="quiet" class="dark">
+  <div class="inner">
+    <h2 class="reveal">常驻，但几乎感觉不到。</h2>
+    <p class="lead reveal">监听靠系统通知驱动，不轮询；只有动画在跑时才画帧。下面是作者机器（Windows 11、4K、120 Hz）上从本机 <code style="background:#2c2c2e">/v1/perf</code> 读到的数。</p>
+    <div class="stats">
+      <div class="stat card reveal"><div class="n">0.2–0.3%</div><div class="k">闲置 CPU · 30 秒平均</div></div>
+      <div class="stat card reveal"><div class="n">≈230 MB</div><div class="k">私有内存 · WPF 加玻璃外观，不算小</div></div>
+      <div class="stat card reveal"><div class="n">3%</div><div class="k">超过就自动降级，回落后恢复</div></div>
+    </div>
+    <p class="note reveal" style="color:#86868b;margin-top:22px">数字只代表这一台机器。</p>
+  </div>
+</section>
+
+<section id="privacy">
+  <h2 class="reveal">全在本机。</h2>
+  <p class="lead reveal">没有服务器，不上传任何东西。</p>
+  <div class="grid">
+    <div class="card reveal"><h4>不读消息内容</h4><p>只知道“有新消息”，不读微信消息正文。</p></div>
+    <div class="card reveal"><h4>不存密码</h4><p>课程平台只用扫码登录，凭据用 Windows DPAPI 加密；只读作业，不签到、不刷课、不答题。</p></div>
+    <div class="card reveal"><h4>只读</h4><p>音乐软件的播放日志只读不写；验证码和剪贴板历史只在内存里。</p></div>
+    <div class="card reveal"><h4>来去干净</h4><p>本机接口只听 <code>127.0.0.1</code>；改过别的软件的地方都能一键还原。</p></div>
   </div>
 </section>
 
 <section id="start" class="reveal">
   <h2>三十秒开始。</h2>
-  <p class="sub">需要 Windows 10/11 和 .NET 8 桌面运行时。下载、解压、运行 <code>Qisland.exe</code>。</p>
+  <p class="lead">需要 Windows 10 或 11 和 .NET 8 桌面运行时。下载、解压、运行 <code>Qisland.exe</code>。</p>
   <div class="cta"><a class="btn" href="https://github.com/Qiuizi/Qisland/releases/latest">下载 3.0</a><a class="btn ghost" href="https://github.com/Qiuizi/Qisland#readme">阅读文档</a></div>
 </section>
 
-<footer>Qisland 3.0 · MIT · 基于 <a href="https://github.com/JudeKwong/WinIslands">WinIslands</a> 起步 · 由 <a href="https://github.com/Qiuizi">Qiuizi</a> 制作</footer>
+<footer>Qisland 3.0 · MIT 许可 · 基于 <a href="https://github.com/JudeKwong/WinIslands">WinIslands</a> 起步 · <a href="https://github.com/Qiuizi/Qisland">github.com/Qiuizi/Qisland</a></footer>
 <script>
-const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('on');io.unobserve(e.target)}}),{threshold:.15});
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('on');io.unobserve(e.target)}}),{threshold:.12});
 document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
 </script>
 </body>
