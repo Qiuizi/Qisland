@@ -107,6 +107,8 @@ public sealed partial class IslandWindow
         if (hide != _hidden)
         {
             _hidden = hide;
+            // 显示 / 隐藏切换不频繁（换前台程序才会变），记下来方便查「岛怎么不见了」
+            App.Log(hide ? $"岛隐藏：前台 {(proc.Length > 0 ? proc : "?")}{(_manualHide ? "（手动）" : _hideList.Contains(proc) ? "（hide 名单）" : "（全屏）")}" : $"岛显示：前台 {(proc.Length > 0 ? proc : "?")}");
             _show.Target = hide ? 0 : 1;
             if (hide && _mode == Mode.Expanded && !_pinned) SetMode(DesiredRestMode());
             Kick();
