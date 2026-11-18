@@ -71,7 +71,7 @@ public static class WeatherParser
 public sealed class WeatherProvider : IActivityProvider
 {
     private IslandActivity? _current;
-    public string City { get; set; } = "成都";
+    public string City { get; set; } = "";
     public string Id => "weather";
     public string DisplayName => "天气";
     public bool Enabled { get; set; } = true;

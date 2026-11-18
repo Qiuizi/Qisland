@@ -42,7 +42,7 @@ DSH 的审批既不弹系统通知，也不改窗口标题，所以上面两条�
 ```powershell
 cd $env:USERPROFILE\.dsh\profiles\desktop
 $env:ELECTRON_RUN_AS_NODE = '1'
-& "D:\Program Files (x86)\DSH\DeepSeek Harness.exe" --expose-internals "D:\Program Files (x86)\DSH\resources\runtime\primary-runtime\dependencies\pnpm\bin\pnpm.mjs" add "dsh-qisland-bridge@file:D:/Qiuizi/project/Qisland/integrations/dsh-qisland-bridge"
+& "D:\Program Files (x86)\DSH\DeepSeek Harness.exe" --expose-internals "D:\Program Files (x86)\DSH\resources\runtime\primary-runtime\dependencies\pnpm\bin\pnpm.mjs" add "dsh-qisland-bridge@file:<Qisland 仓库路径>/integrations/dsh-qisland-bridge"
 Remove-Item Env:ELECTRON_RUN_AS_NODE
 ```
 

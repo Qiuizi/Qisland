@@ -9,14 +9,29 @@ using System.Text.Json.Nodes;
 namespace Qisland.App;
 
 /// <summary>
-/// 雨课堂（川大 scu.yuketang.cn）：微信扫码登录，只读拉取各课程里没交的作业 / 试卷和截止时间。
+/// 雨课堂：微信扫码登录，只读拉取各课程里没交的作业 / 试卷和截止时间。
 /// 登录得到的 sessionid 用 DPAPI 加密存在本机；不存密码，不做任何签到、答题、看课之类的写操作。
 /// 20 分钟查一次，课程之间间隔 0.5 秒，对服务器很轻。
+/// 学校有专属域名（如 xxx.yuketang.cn）的，把域名写进 %APPDATA%\Qisland\yuketang-host.txt；登录后域名随凭据一起保存。
 /// </summary>
 public sealed class YuketangService
 {
     public const string Platform = "雨课堂";
-    public static string Host = "scu.yuketang.cn";
+    public static string Host = DefaultHost();
+    private static string DefaultHost()
+    {
+        try
+        {
+            var f = Path.Combine(App.DataDir, "yuketang-host.txt");
+            if (File.Exists(f))
+            {
+                var h = File.ReadAllText(f).Trim().Replace("https://", "").Replace("http://", "").TrimEnd('/');
+                if (h.Length > 0 && h.EndsWith("yuketang.cn", StringComparison.OrdinalIgnoreCase) && !h.Contains('/')) return h;
+            }
+        }
+        catch { }
+        return "www.yuketang.cn";
+    }
     private static string CredPath => Path.Combine(App.DataDir, "yuketang.bin");
     private static string DebugDir => Path.Combine(App.DataDir, "debug");
     private const string UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";

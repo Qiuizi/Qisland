@@ -50,7 +50,7 @@ public static class Launcher
         "workbuddy" => new(["WorkBuddy"], [Path.Combine(Local, "Programs", "WorkBuddy", "WorkBuddy.exe")], "WorkBuddy"),
         "info-station" or "info-deadline" => new(["info-station"], [Path.Combine(Local, "信息监控站", "info-station.exe")], "信息监控站"),
         "coursedesk" or "course" => new(["CourseDesk"], [], "CourseDesk"),
-        "jarvis" => new(["CourseWorkspace"], [@"D:\Qiuizi\project\CourseWorkspace\dist\CourseWorkspace\CourseWorkspace.exe"], "Course Workspace"),
+        "jarvis" => new(["CourseWorkspace"], [], "Course Workspace"),
         "codex" => new(["ChatGPT", "Codex"], [], "Codex", @"shell:AppsFolder\OpenAI.Codex_2p2nqsd0c76g0!App"),
         "music" => new(["cloudmusic"], [@"D:\Program Files\NetEase\CloudMusic\cloudmusic.exe"], "网易云音乐"),
         "qqmusic" => new(["QQMusic"], [@"C:\Program Files (x86)\Tencent\QQMusic\QQMusic.exe", @"D:\Program Files (x86)\Tencent\QQMusic\QQMusic.exe"], "QQ音乐"),

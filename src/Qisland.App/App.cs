@@ -426,7 +426,7 @@ public sealed class App : Application
 
     private void ImportTimetable()
     {
-        var dlg = new Microsoft.Win32.OpenFileDialog { Title = "选择课表 .ics（SCU Plus / WakeUp 导出）", Filter = "日历文件 (*.ics)|*.ics|所有文件|*.*" };
+        var dlg = new Microsoft.Win32.OpenFileDialog { Title = "选择课表 .ics（教务 App / WakeUp 课程表导出）", Filter = "日历文件 (*.ics)|*.ics|所有文件|*.*" };
         if (dlg.ShowDialog() != true) return;
         if (!ClassWatcher.Import(dlg.FileName))
         {
@@ -463,28 +463,52 @@ public sealed class App : Application
         }
     }
 
-    // ───────────── 天气（成都，20 分钟一次；wttr.in 有逐 3 小时预报和日出日落，Open-Meteo 兜底） ─────────────
+    // ───────────── 天气（weather.txt 里配的地点，没配就让 wttr.in 按 IP 定位；20 分钟一次，Open-Meteo 兜底） ─────────────
+    public static string WeatherFile => Path.Combine(DataDir, "weather.txt");
+    /// <summary>显示用的地名：配置的显示名 → wttr.in 认出的地名 → 空（界面上就不写地名）。</summary>
+    public static string WeatherLabel { get; private set; } = "";
+    private (double Lat, double Lon)? _lastCoords;
+
+    private static WeatherPlace LoadWeatherPlace()
+    {
+        try
+        {
+            if (!File.Exists(WeatherFile))
+                File.WriteAllText(WeatherFile,
+                    "# 天气地点。留空 = 按网络位置自动判断。\n" +
+                    "# 写法：显示名 查询词，查询词可以是城市英文名或 纬度,经度。例如：\n" +
+                    "# 上海 Shanghai\n# 杭州 30.27,120.15\n");
+            return WeatherPlace.Parse(File.ReadAllText(WeatherFile));
+        }
+        catch { return WeatherPlace.Auto; }
+    }
+
     private async Task WeatherLoop()
     {
-        const string url = "https://api.open-meteo.com/v1/forecast?latitude=30.66&longitude=104.07&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FShanghai&forecast_days=1";
         while (true)
         {
             var wait = TimeSpan.FromMinutes(20);
             var ok = false;
+            var place = LoadWeatherPlace();
             try
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
-                var d = WttrParser.Parse(await Http.GetStringAsync("https://wttr.in/Chengdu?format=j1&lang=zh", cts.Token), DateTime.Now);
-                if (d != null) { _window?.SetWeather(d.Now, d); ok = true; }
+                var d = WttrParser.Parse(await Http.GetStringAsync(place.WttrUrl, cts.Token), DateTime.Now);
+                if (d != null)
+                {
+                    WeatherLabel = place.Display.Length > 0 ? place.Display : d.Area;
+                    if (d.Lat is { } la && d.Lon is { } lo) _lastCoords = (la, lo);
+                    _window?.SetWeather(d.Now, d); ok = true;
+                }
             }
             catch (Exception ex) { Log("wttr: " + ex.Message); }
-            if (!ok)
+            if (!ok && (place.Coordinates ?? _lastCoords) is { } c)
             {
                 try
                 {
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
-                    var w = WeatherParser.ParseForecast(await Http.GetStringAsync(url, cts.Token));
-                    if (w != null) { _window?.SetWeather(w, null); ok = true; }
+                    var w = WeatherParser.ParseForecast(await Http.GetStringAsync(WeatherPlace.OpenMeteoUrl(c.Lat, c.Lon), cts.Token));
+                    if (w != null) { if (place.Display.Length > 0) WeatherLabel = place.Display; _window?.SetWeather(w, null); ok = true; }
                 }
                 catch (Exception ex) { Log("Open-Meteo: " + ex.Message); }
             }

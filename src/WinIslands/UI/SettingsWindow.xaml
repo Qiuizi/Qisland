@@ -1080,7 +1080,7 @@
                             <CheckBox Content="微信" IsChecked="{Binding Working.QislandWeChatEnabled}" Margin="18,2,0,0"/>
                             <CheckBox Content="QQ" IsChecked="{Binding Working.QislandQqEnabled}" Margin="18,2,0,0"/>
                             <CheckBox Content="隐私模式（不显示发送者和内容）" IsChecked="{Binding Working.QislandNotifyPrivacy}" Margin="18,2,0,0"/>
-                            <CheckBox Content="天气（Open-Meteo，默认成都）" IsChecked="{Binding Working.Components.WeatherWhenIdle}" Margin="0,12,0,0"/>
+                            <CheckBox Content="天气（Open-Meteo）" IsChecked="{Binding Working.Components.WeatherWhenIdle}" Margin="0,12,0,0"/>
                             <TextBlock Text="城市" Style="{StaticResource Label}"/>
                             <TextBox Width="180" HorizontalAlignment="Left" Text="{Binding Working.WeatherCity, UpdateSourceTrigger=PropertyChanged}"/>
                             <CheckBox Content="待办" IsChecked="{Binding Working.Components.TodoWhenIdle}"/>

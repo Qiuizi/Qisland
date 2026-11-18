@@ -100,7 +100,7 @@ public class NotificationAndWidgetTests
              "daily":{"temperature_2m_max":[22],"temperature_2m_min":[14]}}
             """);
         Assert.NotNull(weather);
-        Assert.Equal("成都 18° 多云 14/22°", WeatherParser.FormatCompact(weather!, "成都"));
+        Assert.Equal("上海 18° 多云 14/22°", WeatherParser.FormatCompact(weather!, "上海"));
 
         var engine = new TimerEngine();
         var start = new DateTime(2026, 11, 15, 9, 0, 0);

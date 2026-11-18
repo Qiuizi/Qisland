@@ -250,7 +250,7 @@ public sealed class AppSettings
     public string IslandApiToken { get; set; } = "";             // 可选 Token（防局域网误连）
     public int IslandApiDefaultDuration { get; set; } = 30;      // 默认显示时长（秒），推送方可按条覆盖
 
-    // ── Qisland 提供方开关（首次启动会把天气城市设成成都）──
+    // ── Qisland 提供方开关（首次启动会给天气城市一个默认值）──
     public bool QislandPersonalized { get; set; }
     public bool QislandAgentsEnabled { get; set; } = true;
     public bool QislandInfoStationEnabled { get; set; } = true;

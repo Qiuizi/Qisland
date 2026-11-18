@@ -16,6 +16,10 @@ public sealed record WeatherDetail(
     public string MoonPhase { get; init; } = "";
     public int MoonIllum { get; init; }
     public DateTime Fetched { get; init; } = DateTime.Now;
+    /// <summary>wttr.in 认出来的地名和坐标（nearest_area）：没配置地点时用作显示名和 Open-Meteo 兜底坐标。</summary>
+    public string Area { get; init; } = "";
+    public double? Lat { get; init; }
+    public double? Lon { get; init; }
 }
 
 public static class WttrParser
@@ -52,6 +56,26 @@ public static class WttrParser
         "New Moon" => "新月", "Waxing Crescent" => "蛾眉月", "First Quarter" => "上弦月", "Waxing Gibbous" => "盈凸月",
         "Full Moon" => "满月", "Waning Gibbous" => "亏凸月", "Last Quarter" => "下弦月", "Waning Crescent" => "残月", _ => p,
     };
+
+    private static string AreaName(JsonElement root)
+    {
+        try
+        {
+            var a = root.GetProperty("nearest_area")[0];
+            return a.GetProperty("areaName")[0].GetProperty("value").GetString() ?? "";
+        }
+        catch { return ""; }
+    }
+
+    private static double? Coord(JsonElement root, string n)
+    {
+        try
+        {
+            var a = root.GetProperty("nearest_area")[0];
+            return double.TryParse(a.GetProperty(n).GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : null;
+        }
+        catch { return null; }
+    }
 
     public static WeatherDetail? Parse(string json, DateTime now)
     {
@@ -107,6 +131,9 @@ public static class WttrParser
             Days = dayList, Pressure = D(cur, "pressure"),
             MoonPhase = Moon(astro.TryGetProperty("moon_phase", out var mp) ? mp.GetString() ?? "" : ""),
             MoonIllum = (int)D(astro, "moon_illumination"),
+            Area = AreaName(root),
+            Lat = Coord(root, "latitude"),
+            Lon = Coord(root, "longitude"),
         };
     }
 }

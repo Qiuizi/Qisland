@@ -139,7 +139,7 @@ public sealed partial class IslandWindow
         {
             var ic = new WeatherIcon { Code = 2, Width = 34, Height = 34, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 18, 0, 6), Opacity = 0.55 };
             sp.Children.Add(ic);
-            var t = T("正在获取成都天气", 12.5, FontWeights.Medium, Theme.Secondary); t.Margin = new Thickness(0, 0, 0, 20); t.HorizontalAlignment = HorizontalAlignment.Center;
+            var t = T("正在获取天气", 12.5, FontWeights.Medium, Theme.Secondary); t.Margin = new Thickness(0, 0, 0, 20); t.HorizontalAlignment = HorizontalAlignment.Center;
             sp.Children.Add(t);
             return card;
         }
@@ -150,7 +150,7 @@ public sealed partial class IslandWindow
         top.ColumnDefinitions.Add(new ColumnDefinition());
         var left = new StackPanel();
         var place = new StackPanel { Orientation = Orientation.Horizontal };
-        place.Children.Add(T("成都", 14, FontWeights.SemiBold, W1));
+        place.Children.Add(T(App.WeatherLabel.Length > 0 ? App.WeatherLabel : "本地", 14, FontWeights.SemiBold, W1));
         var loc = Glyph("\uE707", 10, W2); loc.Margin = new Thickness(4, 2, 0, 0);
         place.Children.Add(loc);
         left.Children.Add(place);

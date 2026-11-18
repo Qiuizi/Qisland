@@ -907,9 +907,10 @@ public sealed partial class IslandWindow : Window
             line.Children.Add(new TextBlock { Text = $"{w.Temperature:0}°", FontFamily = Theme.Display, FontSize = 30, FontWeight = FontWeights.Medium, Foreground = Theme.Primary });
             right.Children.Add(line);
             var d = Txt(12.5, FontWeights.Medium, Theme.Secondary);
+            var at = App.WeatherLabel.Length > 0 ? App.WeatherLabel + " · " : "";
             d.Text = _wx is { } x
-                ? $"成都 · {WeatherParser.Describe(w.Code)} · 体感 {w.FeelsLike:0}°"
-                : $"成都 · {WeatherParser.Describe(w.Code)}  {w.Low:0}° / {w.High:0}°";
+                ? $"{at}{WeatherParser.Describe(w.Code)} · 体感 {w.FeelsLike:0}°"
+                : $"{at}{WeatherParser.Describe(w.Code)}  {w.Low:0}° / {w.High:0}°";
             d.HorizontalAlignment = HorizontalAlignment.Right;
             right.Children.Add(d);
             Grid.SetColumn(right, 1);

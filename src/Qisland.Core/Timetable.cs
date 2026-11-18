@@ -10,7 +10,7 @@ public sealed record ClassSession(string Name, string Location, string Teacher, 
 }
 
 /// <summary>
-/// 解析课表 ICS（SCU Plus / WakeUp / 不高山上导出的都行）。
+/// 解析课表 ICS（学校教务 App、WakeUp 课程表等导出的都行）。
 /// 只认 VEVENT 的 SUMMARY / LOCATION / DESCRIPTION / DTSTART / DTEND / RRULE / EXDATE，
 /// RRULE 支持 DAILY / WEEKLY / MONTHLY / YEARLY（见 Occurrences），课表导出和日历订阅都够用。纯数据，可在 Linux 上单测。
 /// </summary>

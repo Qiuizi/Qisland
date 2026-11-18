@@ -96,6 +96,7 @@ Qisland 是给 Windows 做的「灵动岛」。它最早是为一个大学生自
 - `Ctrl+Alt+Q`：全屏时把岛叫回来，平时临时隐藏；也可以把鼠标推到屏幕顶边。
 - 托盘右键：导入课表、扫码登录、日历订阅、岛上提示开关、外观、开机自启、改动账本。
 - 配置都是 `%APPDATA%\Qisland\` 下的纯文本（`todo.md`、`widgets.txt`、`countdown.txt` 等），可以直接改。
+- 天气地点写在 `weather.txt`（如 `杭州 30.27,120.15`），留空就按网络位置自动判断；学校的雨课堂有专属域名的，写进 `yuketang-host.txt`。
 
 ## Island API
 

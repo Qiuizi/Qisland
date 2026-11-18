@@ -120,7 +120,7 @@ AppPaths.EnsureDirectories();
             _settings.Update(s =>
             {
                 s.QislandPersonalized = true;
-                if (string.IsNullOrWhiteSpace(s.WeatherCity)) s.WeatherCity = "成都";
+                if (string.IsNullOrWhiteSpace(s.WeatherCity)) s.WeatherCity = "北京";
                 s.WidgetShowWeather = true;
                 s.Components.WeatherWhenIdle = true;
                 s.Components.TodoWhenIdle = true;

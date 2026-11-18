@@ -9,7 +9,7 @@
 安装（桌面版用 desktop 配置）：
 
 ```powershell
-dsh plugin --profile desktop add file:D:/Qiuizi/project/Qisland/integrations/dsh-qisland-bridge
+dsh plugin --profile desktop add file:<Qisland 仓库路径>/integrations/dsh-qisland-bridge
 ```
 
 然后在 `~/.dsh/profiles/desktop/package.json` 的 `dsh.profile.bundles` 里确认有 `dsh-qisland-bridge`，重启 DSH。

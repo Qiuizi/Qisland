@@ -107,7 +107,7 @@ public sealed partial class IslandWindow
         _store.Upsert(new Qisland.Core.IslandActivity("agent:codex:demo", "codex", "Codex 进行中", "重构 HomeworkHub · Qisland", Qisland.Core.ActivityKind.Running, 55, DurationSeconds: 600));
         Approvals = new ApprovalBroker(a => a());
         Approvals.Changed += OnApprovalsChanged;
-        _ = Approvals.Request("codex", "{\"hook_event_name\":\"PermissionRequest\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"dotnet publish src/Qisland.App -c Release -o app && git commit -am 'v2 step 5'\"},\"cwd\":\"D:\\\\Qiuizi\\\\project\\\\Qisland\"}");
+        _ = Approvals.Request("codex", "{\"hook_event_name\":\"PermissionRequest\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"dotnet publish src/Qisland.App -c Release -o app && git commit -am 'v2 step 5'\"},\"cwd\":\"C:\\\\src\\\\Qisland\"}");
         await Task.Delay(200);
         _page = Page.Home; _expDirty = true; _pageCache.Clear();
         await Shot(dir, "17-codex-approval", Mode.Expanded);
