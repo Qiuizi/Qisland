@@ -4,7 +4,7 @@
 
 # Qisland
 
-**事情需要你的时候，它在屏幕顶上告诉你；不需要的时候，它只是一个时钟。**
+**该知道的，抬眼就知道。**
 
 ![version](https://img.shields.io/badge/version-3.0.0-ff9f0a?style=flat-square)
 ![platform](https://img.shields.io/badge/Windows-10%20%7C%2011-0a84ff?style=flat-square)
@@ -17,7 +17,7 @@
 
 ---
 
-Qisland 是给 Windows 做的「灵动岛」。它最早是为一个大学生自己写的：课在哪上、作业几点截止、Agent 跑完没有、谁在用麦克风——这些答案都很短，却总要切窗口去看。Qisland 把它们收进屏幕顶上的一颗胶囊：平时只显示时间，有事才变形，事情过去就缩回去。
+Qisland 是给 Windows 做的「灵动岛」。它最早是为一个大学生自己写的：课在哪上、作业几点截止、Agent 跑完没有、谁在用麦克风——这些答案都很短，却总要切窗口去看。Qisland 把它们收进屏幕顶上的一颗胶囊：平时只显示时间，有事才展开，事情过去就收回去。
 
 ## 三个出发点
 
