@@ -62,7 +62,10 @@ public sealed partial class IslandWindow : Window
     private Mode _mode = Mode.Idle;
     private bool _animating, _clickThrough = true, _pinned, _hidden;
     private TimeSpan _lastRender;
-    private DateTime _hoverSince = DateTime.MaxValue, _outsideSince = DateTime.MinValue, _edgeSince = DateTime.MaxValue;
+    private DateTime _hoverSince = DateTime.MaxValue, _outsideSince = DateTime.MinValue;
+    // 顶边呼出：停 220 ms、期间挪动不超过 10 DIP；收起的岛上悬停展开：停 180 ms、同样要停稳
+    private readonly DwellGate _edgeGate = new(220, 10), _hoverGate = new(180, 10);
+    private const double EdgeMarginDip = 24;
     private bool _edgeArmed = true, _edgeSummoned, _edgeShow;
     private DateTime _peekUntil = DateTime.MinValue;
     private string? _lastTopId;
@@ -353,23 +356,23 @@ public sealed partial class IslandWindow : Window
 
         var now = DateTime.Now;
 
-        // 鼠标顶到屏幕最上沿（岛所在的那块屏、任意横向位置）停一下就呼出岛；
-        // 按着鼠标键（拖窗口到顶部最大化之类）不算；全屏时也能呼出，手动隐藏时不打扰
+        // 鼠标顶到屏幕最上沿、正好在岛的正上方（左右各留 24 DIP），停稳一下就呼出岛；
+        // 一路划过去（去点浏览器标签 / 关闭按钮）不算，按着鼠标键（拖窗口到顶部最大化之类）不算；
+        // 全屏时岛藏起来也按它本来的位置算，照样能呼出；手动隐藏时不打扰
         var m = _monRect;
-        var onEdge = _winAtTop && !(_hidden && _manualHide) && p.Y <= m.Top + 1 && p.X >= m.Left && p.X < m.Right
-                     && (Native.GetAsyncKeyState(0x01) & 0x8000) == 0 && (Native.GetAsyncKeyState(0x02) & 0x8000) == 0;
+        var buttons = (Native.GetAsyncKeyState(0x01) & 0x8000) != 0 || (Native.GetAsyncKeyState(0x02) & 0x8000) != 0;
+        var spanL = (int)Math.Round((Left + pillLeft) * dpi.DpiScaleX);
+        var spanR = (int)Math.Round((Left + pillLeft + _w.Value) * dpi.DpiScaleX);
+        var onEdge = _winAtTop && !(_hidden && _manualHide) && !buttons
+                     && EdgeZone.Contains(p.X, p.Y, new Box(m.Left, m.Top, m.Right, m.Bottom), spanL, spanR, (int)Math.Round(EdgeMarginDip * dpi.DpiScaleX));
         if (!onEdge && p.Y > m.Top + 8) _edgeArmed = true;
-        if (onEdge && _edgeArmed)
+        var dipX = (int)Math.Round(p.X / dpi.DpiScaleX); var dipY = (int)Math.Round(p.Y / dpi.DpiScaleY);
+        if (_edgeGate.Update(onEdge && _edgeArmed && _mode != Mode.Expanded, dipX, dipY, now))
         {
-            if (_edgeSince == DateTime.MaxValue) _edgeSince = now;
-            if (_mode != Mode.Expanded && (now - _edgeSince).TotalMilliseconds > 140)
-            {
-                _edgeArmed = false; _edgeSummoned = true;
-                if (_hidden) { _edgeShow = true; _hidden = false; _show.Target = 1; Kick(); }   // 全屏时也给呼出，收回后下一秒自动再藏
-                SetMode(Mode.Expanded);
-            }
+            _edgeArmed = false; _edgeSummoned = true; _edgeGate.Reset();
+            if (_hidden) { _edgeShow = true; _hidden = false; _show.Target = 1; Kick(); }   // 全屏时也给呼出，收回后下一秒自动再藏
+            SetMode(Mode.Expanded);
         }
-        else _edgeSince = DateTime.MaxValue;
         // 从顶边呼出后，鼠标还贴在顶部那一条里就别收回去，给它时间挪进岛
         var keep = _edgeSummoned && p.Y <= m.Top + 6;
         if (_mode != Mode.Expanded) _edgeSummoned = false;
@@ -379,11 +382,12 @@ public sealed partial class IslandWindow : Window
             if (_hoverSince == DateTime.MaxValue) _hoverSince = now;
             _outsideSince = DateTime.MinValue;
             _edgeSummoned = false;
-            if (_mode != Mode.Expanded && (now - _hoverSince).TotalMilliseconds > 90) SetMode(Mode.Expanded);
+            // 收起的岛：指针停稳一下才展开（擦过去不展开）；已经展开的岛照常
+            if (_mode != Mode.Expanded && _hoverGate.Update(!buttons, dipX, dipY, now)) { _hoverGate.Reset(); SetMode(Mode.Expanded); }
         }
         else
         {
-            _hoverSince = DateTime.MaxValue;
+            _hoverSince = DateTime.MaxValue; _hoverGate.Reset();
             if (keep) _outsideSince = now;
             else if (_outsideSince == DateTime.MinValue) _outsideSince = now;
             if (_mode == Mode.Expanded && !_pinned && !_swiping && !_editing && now > _peekUntil && (now - _outsideSince).TotalMilliseconds > 420)
