@@ -53,27 +53,21 @@ internal static class Native
         if (next != cur) SetWindowLongPtr(hwnd, GWL_EXSTYLE, new IntPtr(next));
     }
 
-    /// <summary>前台窗口是否覆盖整个显示器（全屏视频、游戏、演示）。</summary>
-    public static bool ForegroundIsFullscreen()
+    /// <summary>前台窗口是否全屏（全屏视频、游戏、演示、F11）。规则见 Qisland.Core.FullscreenRule。</summary>
+    public static bool ForegroundIsFullscreen(int notifyState = 0) => IsFullscreen(GetForegroundWindow(), notifyState);
+
+    public static bool IsFullscreen(IntPtr fg, int notifyState = 0)
     {
-        var fg = GetForegroundWindow();
         if (fg == IntPtr.Zero || fg == GetShellWindow() || fg == GetDesktopWindow()) return false;
         var sb = new System.Text.StringBuilder(64);
         GetClassName(fg, sb, sb.Capacity);
-        var cls = sb.ToString();
-        if (cls is "Progman" or "WorkerW" or "Shell_TrayWnd") return false;
         if (!GetWindowRect(fg, out var r)) return false;
-        var mon = MonitorFromWindow(fg, 2);
         var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
-        if (!GetMonitorInfo(mon, ref info)) return false;
+        if (!GetMonitorInfo(MonitorFromWindow(fg, 2), ref info)) return false;
         var m = info.rcMonitor;
-        if (!(r.Left <= m.Left && r.Top <= m.Top && r.Right >= m.Right && r.Bottom >= m.Bottom)) return false;
-        // 带标题栏、而且窗口框伸出屏幕边缘的，是最大化 / 拉满屏的普通窗口（四边各多出几像素看不见的缩放边框），不是全屏。
-        // 任务栏自动隐藏时这种窗口会盖满整块屏，以前被当成全屏：浏览器、资源管理器一最大化岛就藏起来。
-        // 真全屏（F11、视频全屏、游戏、PotPlayer 全屏）要么去掉了标题栏，要么矩形正好等于屏幕。
         var captioned = ((long)GetWindowLongPtr(fg, -16 /*GWL_STYLE*/) & 0x00C00000 /*WS_CAPTION*/) == 0x00C00000;
-        if (captioned && (r.Left < m.Left || r.Top < m.Top || r.Right > m.Right || r.Bottom > m.Bottom)) return false;
-        return true;
+        return Qisland.Core.FullscreenRule.IsFullscreen(new(r.Left, r.Top, r.Right, r.Bottom), new(m.Left, m.Top, m.Right, m.Bottom),
+            IsZoomed(fg), captioned, sb.ToString(), notifyState);
     }
 
     [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr h);

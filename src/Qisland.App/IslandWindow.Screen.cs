@@ -118,8 +118,9 @@ public sealed partial class IslandWindow
     private bool FullscreenOnMyScreen(IntPtr fg)
     {
         if (SHQueryUserNotificationState(out var st) == 0 && st is 3 or 4) return true;   // D3D 独占全屏 / 演示模式
-        if (fg == IntPtr.Zero || fg == _hwnd || !Native.ForegroundIsFullscreen()) return false;
-        return MonitorFromWindow(fg, 2) == (_monitor == IntPtr.Zero ? MonitorFromWindow(_hwnd, 2) : _monitor);
+        if (fg == IntPtr.Zero || fg == _hwnd || !Native.IsFullscreen(fg)) return false;
+        // 用岛窗口此刻所在的屏比较，不用缓存的 _monitor：插拔显示器 / 改分辨率后旧句柄会失效，导致全屏永远判不出来
+        return MonitorFromWindow(fg, 2) == MonitorFromWindow(_hwnd, 2);
     }
 
     private void Follow(IntPtr fg)
