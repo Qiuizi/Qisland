@@ -62,15 +62,18 @@ internal static class Native
         GetClassName(fg, sb, sb.Capacity);
         var cls = sb.ToString();
         if (cls is "Progman" or "WorkerW" or "Shell_TrayWnd") return false;
-        // 最大化的普通窗口（带标题栏）不是全屏。任务栏设成自动隐藏时，最大化窗口的矩形会盖满整块屏（四边各多出几像素边框），
-        // 以前会被当成全屏，岛在浏览器、编辑器最大化时一直藏着。真全屏（F11、视频全屏、游戏）都会去掉标题栏或先还原再铺满。
-        if (IsZoomed(fg) && ((long)GetWindowLongPtr(fg, -16 /*GWL_STYLE*/) & 0x00C00000 /*WS_CAPTION*/) == 0x00C00000) return false;
         if (!GetWindowRect(fg, out var r)) return false;
         var mon = MonitorFromWindow(fg, 2);
         var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
         if (!GetMonitorInfo(mon, ref info)) return false;
         var m = info.rcMonitor;
-        return r.Left <= m.Left && r.Top <= m.Top && r.Right >= m.Right && r.Bottom >= m.Bottom;
+        if (!(r.Left <= m.Left && r.Top <= m.Top && r.Right >= m.Right && r.Bottom >= m.Bottom)) return false;
+        // 带标题栏、而且窗口框伸出屏幕边缘的，是最大化 / 拉满屏的普通窗口（四边各多出几像素看不见的缩放边框），不是全屏。
+        // 任务栏自动隐藏时这种窗口会盖满整块屏，以前被当成全屏：浏览器、资源管理器一最大化岛就藏起来。
+        // 真全屏（F11、视频全屏、游戏、PotPlayer 全屏）要么去掉了标题栏，要么矩形正好等于屏幕。
+        var captioned = ((long)GetWindowLongPtr(fg, -16 /*GWL_STYLE*/) & 0x00C00000 /*WS_CAPTION*/) == 0x00C00000;
+        if (captioned && (r.Left < m.Left || r.Top < m.Top || r.Right > m.Right || r.Bottom > m.Bottom)) return false;
+        return true;
     }
 
     [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr h);
