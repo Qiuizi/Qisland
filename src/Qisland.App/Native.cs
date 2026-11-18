@@ -66,8 +66,27 @@ internal static class Native
         if (!GetMonitorInfo(MonitorFromWindow(fg, 2), ref info)) return false;
         var m = info.rcMonitor;
         var captioned = ((long)GetWindowLongPtr(fg, -16 /*GWL_STYLE*/) & 0x00C00000 /*WS_CAPTION*/) == 0x00C00000;
+        Qisland.Core.Box? vis = DwmGetWindowAttribute(fg, 9 /*DWMWA_EXTENDED_FRAME_BOUNDS*/, out var d, Marshal.SizeOf<RECT>()) == 0
+            ? new(d.Left, d.Top, d.Right, d.Bottom) : null;
         return Qisland.Core.FullscreenRule.IsFullscreen(new(r.Left, r.Top, r.Right, r.Bottom), new(m.Left, m.Top, m.Right, m.Bottom),
-            IsZoomed(fg), captioned, sb.ToString(), notifyState);
+            IsZoomed(fg), captioned, sb.ToString(), notifyState, vis);
+    }
+
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT r, int size);
+
+    /// <summary>调试：前台窗口的判定依据，写进「岛隐藏 / 岛显示」日志，方便查「为什么没藏」。</summary>
+    public static string Describe(IntPtr fg)
+    {
+        if (fg == IntPtr.Zero) return "";
+        var sb = new System.Text.StringBuilder(64);
+        GetClassName(fg, sb, sb.Capacity);
+        GetWindowRect(fg, out var r);
+        var vis = DwmGetWindowAttribute(fg, 9, out var d, Marshal.SizeOf<RECT>()) == 0 ? $"{d.Left},{d.Top},{d.Right},{d.Bottom}" : "-";
+        var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        GetMonitorInfo(MonitorFromWindow(fg, 2), ref info);
+        var m = info.rcMonitor;
+        var style = (long)GetWindowLongPtr(fg, -16);
+        return $"{sb} rect={r.Left},{r.Top},{r.Right},{r.Bottom} vis={vis} mon={m.Left},{m.Top},{m.Right},{m.Bottom} zoomed={IsZoomed(fg)} style=0x{style:X8}";
     }
 
     [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr h);

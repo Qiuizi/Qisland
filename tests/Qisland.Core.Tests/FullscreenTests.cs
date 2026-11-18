@@ -3,44 +3,38 @@ using Xunit;
 
 namespace Qisland.Core.Tests;
 
+/// <summary>矩形取自真机采样（3120×2080，200%，任务栏自动隐藏）。</summary>
 public class FullscreenTests
 {
-    private static readonly Box Mon4K = new(0, 0, 3840, 2160);
-    private static readonly Box MonSmall = new(0, 0, 1560, 1040);
+    private static readonly Box Mon = new(0, 0, 3120, 2080);
 
-    [Fact] public void MaximizedExplorerWithAutoHideTaskbarIsNotFullscreen()
-        => Assert.False(FullscreenRule.IsFullscreen(new(-16, -16, 3856, 2176), Mon4K, zoomed: true, captioned: true, "CabinetWClass"));
+    private static bool Fs(Box win, bool zoomed, bool cap, Box? vis = null, string cls = "Chrome_WidgetWin_1", int st = 0)
+        => FullscreenRule.IsFullscreen(win, Mon, zoomed, cap, cls, st, vis);
 
-    [Fact] public void MaximizedEdgeWithAutoHideTaskbarIsNotFullscreen()
-        => Assert.False(FullscreenRule.IsFullscreen(new(-11, -11, 3851, 2171), Mon4K, zoomed: true, captioned: true, "Chrome_WidgetWin_1"));
+    // —— 不该藏 ——
+    [Fact] public void MaximizedChrome() => Assert.False(Fs(new(-13, -13, 3133, 2093), zoomed: true, cap: true, new(0, 0, 3120, 2080)));
+    [Fact] public void MaximizedExplorer() => Assert.False(Fs(new(-13, -13, 3133, 2093), zoomed: true, cap: true, new(0, 0, 3120, 2080), "CabinetWClass"));
+    [Fact] public void MaximizedWinForms() => Assert.False(Fs(new(-16, -16, 3136, 2096), zoomed: true, cap: true, new(0, 0, 3120, 2080), "WindowsForms10"));
+    [Fact] public void RestoredExplorerSizedToScreenIsNotFullscreen()   // 以前误藏的元凶
+        => Assert.False(Fs(new(0, 0, 3120, 2080), zoomed: false, cap: true, new(11, 0, 3109, 2069), "CabinetWClass"));
+    [Fact] public void RestoredWindowSizedToScreenAt100Percent()
+        => Assert.False(FullscreenRule.IsFullscreen(new(0, 0, 1920, 1080), new(0, 0, 1920, 1080), false, true, "CabinetWClass", 0, new(7, 0, 1913, 1073)));
+    [Fact] public void StretchedWindowWithFrameOverhang() => Assert.False(Fs(new(-11, 0, 3131, 2091), zoomed: false, cap: true, new(0, 0, 3120, 2080), "CabinetWClass"));
+    [Fact] public void NormalWindow() => Assert.False(Fs(new(526, 268, 2626, 1800), zoomed: false, cap: true, new(537, 268, 2615, 1789)));
+    [Fact] public void Desktop() => Assert.False(Fs(new(0, 0, 3120, 2080), zoomed: false, cap: false, cls: "WorkerW"));
 
-    [Fact] public void StretchedNonMaximizedWindowWithFrameOverhangIsNotFullscreen()
-        => Assert.False(FullscreenRule.IsFullscreen(new(-11, 0, 3851, 2171), Mon4K, zoomed: false, captioned: true, "CabinetWClass"));
-
-    [Fact] public void ElectronFullscreenKeepingCaptionIsFullscreen()
-        => Assert.True(FullscreenRule.IsFullscreen(new(1, 1, 1561, 1041), MonSmall, zoomed: false, captioned: true, "Chrome_WidgetWin_1"));
-
-    [Fact] public void ChromeF11IsFullscreen()
-        => Assert.True(FullscreenRule.IsFullscreen(new(0, 0, 3840, 2160), Mon4K, zoomed: false, captioned: false, "Chrome_WidgetWin_1"));
-
-    [Fact] public void CaptionedWindowExactlyOnMonitorIsFullscreen()
-        => Assert.True(FullscreenRule.IsFullscreen(new(0, 0, 3840, 2160), Mon4K, zoomed: false, captioned: true, "Chrome_WidgetWin_1"));
-
-    [Fact] public void MaximizedWithoutCaptionIsFullscreen()
-        => Assert.True(FullscreenRule.IsFullscreen(new(0, 0, 3840, 2160), Mon4K, zoomed: true, captioned: false, "PotPlayer64"));
-
-    [Fact] public void BorderlessGameOnSecondMonitorIsFullscreen()
-        => Assert.True(FullscreenRule.IsFullscreen(new(3840, 0, 5760, 1080), new(3840, 0, 5760, 1080), zoomed: false, captioned: false, "UnityWndClass"));
-
-    [Fact] public void WindowSmallerThanMonitorIsNotFullscreen()
-        => Assert.False(FullscreenRule.IsFullscreen(new(0, 0, 3840, 2100), Mon4K, zoomed: false, captioned: false, "Chrome_WidgetWin_1"));
-
-    [Fact] public void DesktopIsNotFullscreen()
-        => Assert.False(FullscreenRule.IsFullscreen(new(0, 0, 3840, 2160), Mon4K, zoomed: false, captioned: false, "WorkerW"));
-
-    [Fact] public void ShellD3DOrPresentationStateIsFullscreen()
+    // —— 该藏 ——
+    [Fact] public void ChromeStartFullscreen() => Assert.True(Fs(new(0, 0, 3120, 2080), zoomed: false, cap: false, new(0, 0, 3120, 2080)));
+    [Fact] public void ChromeMaximizedThenF11OrVideoFullscreen() => Assert.True(Fs(new(0, 0, 3120, 2080), zoomed: true, cap: false, new(0, 0, 3120, 2080)));
+    [Fact] public void ElectronFullscreenOnePixelInsideKeepingCaption() => Assert.True(Fs(new(2, 2, 3122, 2082), zoomed: false, cap: true, new(2, 2, 3122, 2082)));
+    [Fact] public void BorderlessForm() => Assert.True(Fs(new(0, 0, 3120, 2080), zoomed: false, cap: false, new(0, 0, 3120, 2080), "WindowsForms10"));
+    [Fact] public void BorderlessMaximizedForm() => Assert.True(Fs(new(0, 0, 3120, 2080), zoomed: true, cap: false, new(0, 0, 3120, 2080), "WindowsForms10"));
+    [Fact] public void NoDwmRectFallsBackToWindowRect() => Assert.True(Fs(new(0, 0, 3120, 2080), zoomed: false, cap: false));
+    [Fact] public void GameOnSecondMonitor()
+        => Assert.True(FullscreenRule.IsFullscreen(new(3120, 0, 5040, 1080), new(3120, 0, 5040, 1080), false, false, "UnityWndClass"));
+    [Fact] public void ShellD3DOrPresentation()
     {
-        Assert.True(FullscreenRule.IsFullscreen(new(0, 0, 100, 100), Mon4K, false, true, "x", notifyState: 3));
-        Assert.True(FullscreenRule.IsFullscreen(new(0, 0, 100, 100), Mon4K, false, true, "x", notifyState: 4));
+        Assert.True(Fs(new(0, 0, 100, 100), false, true, st: 3));
+        Assert.True(Fs(new(0, 0, 100, 100), false, true, st: 4));
     }
 }
