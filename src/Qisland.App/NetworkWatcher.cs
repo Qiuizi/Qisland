@@ -66,23 +66,38 @@ public sealed class NetworkWatcher : IDisposable
     /// <summary>从睡眠醒来：先按当前状态静默同步，不把「睡前断网 → 醒来恢复」当新闻。</summary>
     public void OnResume() { if (_started) _ui.BeginInvoke(() => Evaluate(announce: false), DispatcherPriority.Background); }
 
+    /// <summary>
+    /// 看实体网卡（Wi-Fi / 蜂窝 / 有线），不看「接入 Internet 的那个」：开着 Clash / Mihomo 的 TUN 时，
+    /// 系统眼里上网的是虚拟网卡，名字永远是 Mihomo，换 Wi-Fi、校园网掉线都看不出来。
+    /// Hyper-V 的虚拟有线网卡只有本地连接，按「有线必须能上网才算」排除掉。
+    /// </summary>
     private (Net, string) Read()
     {
         try
         {
-            var p = NetworkInformation.GetInternetConnectionProfile();
-            if (p == null) return (Net.Offline, "");
-            var name = "";
-            try { if (p.IsWlanConnectionProfile) name = p.WlanConnectionProfileDetails?.GetConnectedSsid() ?? ""; } catch { }
-            if (string.IsNullOrEmpty(name)) name = p.ProfileName ?? "";
-            var level = p.GetNetworkConnectivityLevel();
-            return (level switch
+            var best = Net.Offline; var name = "";
+            foreach (var p in NetworkInformation.GetConnectionProfiles())
             {
-                NetworkConnectivityLevel.InternetAccess => Net.Online,
-                NetworkConnectivityLevel.ConstrainedInternetAccess => Net.Captive,
-                NetworkConnectivityLevel.LocalAccess => Net.Local,
-                _ => Net.Offline,
-            }, name);
+                NetworkConnectivityLevel level;
+                try { level = p.GetNetworkConnectivityLevel(); } catch { continue; }
+                if (level == NetworkConnectivityLevel.None) continue;
+                var wireless = p.IsWlanConnectionProfile || p.IsWwanConnectionProfile;
+                var iana = 0u;
+                try { iana = p.NetworkAdapter?.IanaInterfaceType ?? 0; } catch { }
+                var s = level switch
+                {
+                    NetworkConnectivityLevel.InternetAccess => Net.Online,
+                    NetworkConnectivityLevel.ConstrainedInternetAccess => Net.Captive,
+                    _ => Net.Local,
+                };
+                if (!wireless && !(iana == 6 && s is Net.Online or Net.Captive)) continue;
+                if (s <= best && name.Length > 0) continue;
+                var n = "";
+                try { if (p.IsWlanConnectionProfile) n = p.WlanConnectionProfileDetails?.GetConnectedSsid() ?? ""; } catch { }
+                if (string.IsNullOrEmpty(n)) n = p.ProfileName ?? "";
+                if (s > best || name.Length == 0) { best = s; name = n; }
+            }
+            return (best, best == Net.Offline ? "" : name);
         }
         catch (Exception ex) { App.Log("网络状态: " + ex.Message); return (Net.Unknown, ""); }
     }
