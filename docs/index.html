@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Qisland 2.0 · Windows 灵动岛</title>
+<title>Qisland 3.0 · Windows 灵动岛</title>
 <meta name="description" content="给 Windows 做的灵动岛：顺滑、安静，不挡事。">
 <meta property="og:image" content="assets/shots/03-home.png">
 <style>
@@ -52,12 +52,12 @@ footer{border-top:1px solid var(--line);color:var(--mute);font-size:13px;padding
 <nav><b>Qisland</b><div><a href="#new">新功能</a><a href="#pain">痛点</a><a href="#look">界面</a><a href="#start">开始使用</a><a href="https://github.com/Qiuizi/Qisland">GitHub</a></div></nav>
 
 <section class="hero">
-  <span class="tag">2.0 正式版</span>
+  <span class="tag">3.0 正式版</span>
   <h1>Qisland</h1>
   <p class="sub">给 Windows 做的灵动岛。<span class="grad">现在，它开始替你记事。</span></p>
   <div class="island"><img src="assets/shots/02-compact.png" alt="Qisland 紧凑态"></div>
   <div class="cta">
-    <a class="btn" href="https://github.com/Qiuizi/Qisland/releases/tag/v2.0.3">下载 2.0</a>
+    <a class="btn" href="https://github.com/Qiuizi/Qisland/releases/latest">下载 3.0</a>
     <a class="btn ghost" href="#film">观看宣传片</a>
   </div>
 </section>
@@ -83,7 +83,7 @@ footer{border-top:1px solid var(--line);color:var(--mute);font-size:13px;padding
   <div class="pains">
     <div class="pain reveal"><div class="q">岛下面的按钮点不到？</div><h3>只占岛那么大</h3><p>透明大窗口会吞掉点击。Qisland 把可点击区域收紧到岛本身，其余像素全部穿透给下面的程序。</p></div>
     <div class="pain reveal"><div class="q">游戏和全屏视频被挡住？</div><h3>全屏自动让路</h3><p>识别全屏游戏和演示模式自动隐藏，<code>Ctrl+Alt+Q</code> 随时叫回。按进程名配置白名单和黑名单。</p></div>
-    <div class="pain reveal"><div class="q">闲着也在耗电？</div><h3>不动就不画</h3><p>只有动画在跑时才启动帧循环，其余时间几乎不占资源。</p><div class="n">≈0.5%<small>闲置 CPU（作者机器实测）</small></div></div>
+    <div class="pain reveal"><div class="q">闲着也在耗电？</div><h3>不动就不画</h3><p>只有动画在跑时才启动帧循环，其余时间几乎不占资源。</p><div class="n">≈0.3%<small>闲置 CPU（作者机器实测，30 秒平均）</small></div></div>
     <div class="pain reveal"><div class="q">动画发涩？</div><h3>跟上屏幕刷新率</h3><p>读取显示器刷新率驱动弹簧动画，页面预热缓存，翻页时整页转成位图只做平移。</p><div class="n">110+ fps<small>展开动画 · 120 Hz 屏实测</small></div></div>
     <div class="pain reveal"><div class="q">玻璃效果卡顿、留黑块？</div><h3>模糊在后台算</h3><p>系统亚克力裁不出胶囊。Qisland 自己截取岛背后的画面做模糊，截屏和模糊都在后台线程，展开全程都有通透质感。</p></div>
     <div class="pain reveal"><div class="q">崩了就没了？</div><h3>自己爬起来</h3><p>开机自启，崩溃后自动重启；一分钟内重复崩溃就停下，不会死循环。</p></div>
@@ -115,10 +115,10 @@ footer{border-top:1px solid var(--line);color:var(--mute);font-size:13px;padding
 <section id="start" class="reveal">
   <h2>三十秒开始。</h2>
   <p class="sub">需要 Windows 10/11 和 .NET 8 桌面运行时。下载、解压、运行 <code>Qisland.exe</code>。</p>
-  <div class="cta"><a class="btn" href="https://github.com/Qiuizi/Qisland/releases/tag/v2.0.3">下载 2.0</a><a class="btn ghost" href="https://github.com/Qiuizi/Qisland#readme">阅读文档</a></div>
+  <div class="cta"><a class="btn" href="https://github.com/Qiuizi/Qisland/releases/latest">下载 3.0</a><a class="btn ghost" href="https://github.com/Qiuizi/Qisland#readme">阅读文档</a></div>
 </section>
 
-<footer>Qisland 2.0 · MIT · 基于 <a href="https://github.com/JudeKwong/WinIslands">WinIslands</a> 起步 · 由 <a href="https://github.com/Qiuizi">Qiuizi</a> 制作</footer>
+<footer>Qisland 3.0 · MIT · 基于 <a href="https://github.com/JudeKwong/WinIslands">WinIslands</a> 起步 · 由 <a href="https://github.com/Qiuizi">Qiuizi</a> 制作</footer>
 <script>
 const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('on');io.unobserve(e.target)}}),{threshold:.15});
 document.querySelectorAll('.reveal').forEach(el=>io.observe(el));

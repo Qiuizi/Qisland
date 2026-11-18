@@ -90,7 +90,8 @@ public sealed class CodexQuota
             while (DateTime.Now < until)
             {
                 var t = p.StandardOutput.ReadLineAsync();
-                if (!t.Wait(until - DateTime.Now) || t.Result == null) return null;
+                var left = until - DateTime.Now;
+                if (left <= TimeSpan.Zero || !t.Wait(left) || t.Result == null) return null;
                 if (t.Result.StartsWith("{\"id\":2")) return t.Result;
             }
             return null;

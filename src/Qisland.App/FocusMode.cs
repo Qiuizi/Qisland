@@ -23,6 +23,7 @@ public static class FocusMode
     // 项目引用的 Windows SDK 投影是 19041，没有这个类型：直接走 WinRT 激活工厂 + vtable 调用，只读 IsFocusActive。
     private static readonly Guid IidStatics = new("834df764-cb9a-5d0a-aa9f-73df4f249395");
     private static IntPtr _mgr;
+    private static GetBool? _isActive;
     private static bool _tried, _supported;
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetPtr(IntPtr self, out IntPtr value);
@@ -49,6 +50,7 @@ public static class FocusMode
             // IInspectable 占 0–5，IFocusSessionManagerStatics: 6 GetDefault, 7 get_IsSupported
             if (Slot<GetBool>(statics, 7)(statics, out var sup) != 0 || !sup) { App.Log("系统专注: 这台电脑不支持专注会话"); return; }
             if (Slot<GetPtr>(statics, 6)(statics, out _mgr) != 0 || _mgr == IntPtr.Zero) { App.Log("系统专注: GetDefault 失败"); return; }
+            _isActive = Slot<GetBool>(_mgr, 6);   // IFocusSessionManager: 6 get_IsFocusActive
             _supported = true;
             App.Log("系统专注: 已接上 Windows 专注会话");
         }
@@ -68,8 +70,7 @@ public static class FocusMode
         if (!_supported) return false;
         try
         {
-            // IFocusSessionManager: 6 get_IsFocusActive
-            if (Slot<GetBool>(_mgr, 6)(_mgr, out var on) != 0) return false;
+            if (_isActive!(_mgr, out var on) != 0) return false;
             Counters.Hit("focus.poll");
             if (on == System) return false;
             System = on;

@@ -43,12 +43,15 @@ public sealed class BluetoothWatcher
         try
         {
             _ready = false;
-            _watcher = DeviceInformation.CreateWatcher(Aqs, [IsConnected, Major, Container, "System.ItemNameDisplay"], DeviceInformationKind.AssociationEndpoint);
-            _watcher.Added += (_, info) => _ui.BeginInvoke(() => OnAdded(info));
-            _watcher.Updated += (_, upd) => _ui.BeginInvoke(() => OnUpdated(upd));
-            _watcher.Removed += (_, upd) => _ui.BeginInvoke(() => _devs.Remove(upd.Id));
-            _watcher.EnumerationCompleted += (_, _) => _ui.BeginInvoke(() =>
+            var w = DeviceInformation.CreateWatcher(Aqs, [IsConnected, Major, Container, "System.ItemNameDisplay"], DeviceInformationKind.AssociationEndpoint);
+            _watcher = w;
+            // 关掉再打开时，旧 watcher 排在队列里的事件不能混进新的设备表
+            w.Added += (_, info) => _ui.BeginInvoke(() => { if (_watcher == w) OnAdded(info); });
+            w.Updated += (_, upd) => _ui.BeginInvoke(() => { if (_watcher == w) OnUpdated(upd); });
+            w.Removed += (_, upd) => _ui.BeginInvoke(() => { if (_watcher == w) _devs.Remove(upd.Id); });
+            w.EnumerationCompleted += (_, _) => _ui.BeginInvoke(() =>
             {
+                if (_watcher != w) return;
                 _ready = true;
                 var on = _devs.Values.Where(d => d.Connected && d.Audio).ToList();
                 App.Log($"蓝牙监听: 已开始，{_devs.Count} 个已配对设备，{_devs.Values.Count(d => d.Audio)} 个音频设备，连着 {on.Count} 个");
@@ -64,13 +67,14 @@ public sealed class BluetoothWatcher
     {
         try { if (_watcher is { Status: DeviceWatcherStatus.Started or DeviceWatcherStatus.EnumerationCompleted }) _watcher.Stop(); } catch { }
         _watcher = null;
+        _ready = false;
         _devs.Clear();
     }
 
     private void OnAdded(DeviceInformation info)
     {
         Counters.Hit("bt.event");
-        var d = new Dev { Id = info.Id, Name = info.Name };
+        var d = new Dev { Id = info.Id, Name = string.IsNullOrWhiteSpace(info.Name) ? "蓝牙耳机" : info.Name };
         Apply(d, info.Properties);
         _devs[info.Id] = d;
     }

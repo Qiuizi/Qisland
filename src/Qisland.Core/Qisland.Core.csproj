@@ -8,4 +8,7 @@
     <AssemblyName>Qisland.Core</AssemblyName>
     <Description>Qisland 活动提供方：解析与优先级，不依赖 WPF。</Description>
   </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Qisland.Core.Tests" />
+  </ItemGroup>
 </Project>

@@ -83,3 +83,59 @@ public class CalendarTests
     [Fact]
     public void NoLink_ReturnsNull() => Assert.Null(MeetingLink.Find("教学楼 A201", null, ""));
 }
+
+public class RruleTests
+{
+    private static List<DateTime> Run(string start, string rrule, string from = "20260101", string to = "20280101")
+    {
+        var s = Timetable.ParseDate(start, "")!.Value;
+        return Timetable.Occurrences(s, rrule, Timetable.ParseDate(from, "")!.Value, Timetable.ParseDate(to, "")!.Value).ToList();
+    }
+
+    [Fact]
+    public void Monthly_SecondTuesday_Count()
+    {
+        var r = Run("20261110T190000", "FREQ=MONTHLY;BYDAY=2TU;COUNT=3");
+        Assert.Equal([new DateTime(2026, 11, 10, 19, 0, 0), new DateTime(2026, 12, 8, 19, 0, 0), new DateTime(2027, 1, 12, 19, 0, 0)], r);
+    }
+
+    [Fact]
+    public void Monthly_LastFriday_Until()
+    {
+        var r = Run("20261127T100000", "FREQ=MONTHLY;BYDAY=-1FR;UNTIL=20270201T000000Z");
+        Assert.Equal([new DateTime(2026, 11, 27, 10, 0, 0), new DateTime(2026, 12, 25, 10, 0, 0), new DateTime(2027, 1, 29, 10, 0, 0)], r);
+    }
+
+    [Fact]
+    public void Monthly_31st_SkipsShortMonths_AndLastDay()
+    {
+        var r = Run("20270131T090000", "FREQ=MONTHLY;COUNT=3");
+        Assert.Equal([new DateTime(2027, 1, 31, 9, 0, 0), new DateTime(2027, 3, 31, 9, 0, 0), new DateTime(2027, 5, 31, 9, 0, 0)], r);
+        var last = Run("20270131T090000", "FREQ=MONTHLY;BYMONTHDAY=-1;COUNT=2");
+        Assert.Equal(new DateTime(2027, 2, 28, 9, 0, 0), last[1]);
+    }
+
+    [Fact]
+    public void Monthly_Interval_And_LastWeekday_SetPos()
+    {
+        var r = Run("20261130T080000", "FREQ=MONTHLY;INTERVAL=2;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1;COUNT=2");
+        Assert.Equal([new DateTime(2026, 11, 30, 8, 0, 0), new DateTime(2027, 1, 29, 8, 0, 0)], r);
+    }
+
+    [Fact]
+    public void Yearly_Birthday_And_Feb29()
+    {
+        Assert.Equal(3, Run("20261118", "FREQ=YEARLY", "20260101", "20290101").Count);
+        var leap = Run("20280229", "FREQ=YEARLY;COUNT=2", "20280101", "20400101");
+        Assert.Equal([new DateTime(2028, 2, 29), new DateTime(2032, 2, 29)], leap);
+        var thanks = Run("20261126", "FREQ=YEARLY;BYMONTH=11;BYDAY=4TH;COUNT=2", "20260101", "20300101");
+        Assert.Equal(new DateTime(2027, 11, 25), thanks[1]);
+    }
+
+    [Fact]
+    public void Weekly_And_Daily_StillWork()
+    {
+        Assert.Equal(4, Run("20261116T080000", "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4").Count);
+        Assert.Equal(5, Run("20261116T080000", "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR", "20261116", "20261123").Count);
+    }
+}

@@ -12,7 +12,7 @@ public sealed record ClassSession(string Name, string Location, string Teacher, 
 /// <summary>
 /// 解析课表 ICS（SCU Plus / WakeUp / 不高山上导出的都行）。
 /// 只认 VEVENT 的 SUMMARY / LOCATION / DESCRIPTION / DTSTART / DTEND / RRULE / EXDATE，
-/// RRULE 支持 WEEKLY / DAILY 的 INTERVAL、COUNT、UNTIL、BYDAY，够覆盖所有课表导出。纯数据，可在 Linux 上单测。
+/// RRULE 支持 DAILY / WEEKLY / MONTHLY / YEARLY（见 Occurrences），课表导出和日历订阅都够用。纯数据，可在 Linux 上单测。
 /// </summary>
 public static class Timetable
 {
@@ -141,48 +141,164 @@ public static class Timetable
         return t;
     }
 
+    /// <summary>
+    /// 按 RRULE 展开开始时间。支持 DAILY / WEEKLY / MONTHLY / YEARLY，INTERVAL、COUNT、UNTIL，
+    /// BYDAY（含序号：2MO 第二个周一、-1FR 最后一个周五）、BYMONTHDAY（含负数：-1 月末）、BYMONTH、BYSETPOS。
+    /// COUNT 从第一次算起（包括 from 之前的），和 RFC 5545 一致；EXDATE 由调用方过滤。
+    /// </summary>
     internal static IEnumerable<DateTime> Occurrences(DateTime start, string rrule, DateTime from, DateTime to)
     {
         if (string.IsNullOrWhiteSpace(rrule)) { yield return start; yield break; }
         var r = rrule.Split(';', StringSplitOptions.RemoveEmptyEntries)
             .Select(p => p.Split('=', 2)).Where(p => p.Length == 2)
-            .ToDictionary(p => p[0].ToUpperInvariant(), p => p[1], StringComparer.Ordinal);
+            .GroupBy(p => p[0].Trim().ToUpperInvariant()).ToDictionary(g => g.Key, g => g.First()[1].Trim(), StringComparer.Ordinal);
         var freq = r.GetValueOrDefault("FREQ", "WEEKLY").ToUpperInvariant();
         var interval = int.TryParse(r.GetValueOrDefault("INTERVAL"), out var iv) && iv > 0 ? iv : 1;
-        int? count = int.TryParse(r.GetValueOrDefault("COUNT"), out var c) ? c : null;
+        int? count = int.TryParse(r.GetValueOrDefault("COUNT"), out var c) && c > 0 ? c : null;
         DateTime? until = r.TryGetValue("UNTIL", out var u) ? ParseDate(u, "") : null;
         if (until is { } uu && uu.TimeOfDay == TimeSpan.Zero && u!.Length == 8) until = uu.AddDays(1).AddTicks(-1);
-        var byDay = r.TryGetValue("BYDAY", out var bd)
-            ? bd.Split(',').Select(x => x.Length >= 2 ? x[^2..].ToUpperInvariant() : "").Select(Day).Where(x => x != null).Select(x => x!.Value).ToHashSet()
-            : null;
+        var byDay = r.TryGetValue("BYDAY", out var bd) ? ParseByDay(bd) : [];
+        var byMonthDay = Ints(r.GetValueOrDefault("BYMONTHDAY")).Where(x => x != 0 && x >= -31 && x <= 31).ToList();
+        var byMonth = Ints(r.GetValueOrDefault("BYMONTH")).Where(x => x is >= 1 and <= 12).ToList();
+        var bySetPos = Ints(r.GetValueOrDefault("BYSETPOS")).Where(x => x != 0).ToList();
         var n = 0;
-        if (freq == "DAILY")
+        var periods = 0;
+        foreach (var day in Candidates(start, freq, interval, byDay, byMonthDay, byMonth, bySetPos))
         {
-            for (var t = start; ; t = t.AddDays(interval))
-            {
-                if (until is { } un && t > un || count is { } cc && n >= cc || t >= to) yield break;
-                n++;
-                if (t >= from.AddDays(-1)) yield return t;
-            }
-        }
-        if (freq != "WEEKLY") { yield return start; yield break; }
-        var days = byDay is { Count: > 0 } ? byDay : [start.DayOfWeek];
-        var weekStart = start.Date.AddDays(-(((int)start.DayOfWeek + 6) % 7));   // 周一
-        for (var w = weekStart; ; w = w.AddDays(7 * interval))
-        {
-            if (w >= to) yield break;
-            for (var k = 0; k < 7; k++)
-            {
-                var day = w.AddDays(k);
-                if (!days.Contains(day.DayOfWeek)) continue;
-                var t = day + start.TimeOfDay;
-                if (t < start) continue;
-                if (until is { } un && t > un || count is { } cc && n >= cc) yield break;
-                n++;
-                if (t >= from.AddDays(-1) && t < to) yield return t;
-            }
+            var t = day.Date + start.TimeOfDay;
+            if (t < start) continue;
+            if (until is { } un && t > un || count is { } cc && n >= cc || t >= to) yield break;
+            n++;
+            if (t >= from.AddDays(-1)) yield return t;
+            if (++periods > 20000) yield break;   // 坏数据兜底
         }
     }
+
+    private static IEnumerable<DateTime> Candidates(DateTime start, string freq, int interval, List<(int ord, DayOfWeek day)> byDay,
+        List<int> byMonthDay, List<int> byMonth, List<int> bySetPos)
+    {
+        var d0 = start.Date;
+        switch (freq)
+        {
+            case "DAILY":
+                for (var k = 0; k < 200000; k++)
+                {
+                    var d = d0.AddDays((long)k * interval);
+                    if (byMonth.Count > 0 && !byMonth.Contains(d.Month)) continue;
+                    if (byDay.Count > 0 && !byDay.Any(b => b.day == d.DayOfWeek)) continue;
+                    if (byMonthDay.Count > 0 && !MatchesMonthDay(d, byMonthDay)) continue;
+                    yield return d;
+                }
+                yield break;
+            case "WEEKLY":
+                var days = byDay.Count > 0 ? byDay.Select(b => b.day).ToHashSet() : [start.DayOfWeek];
+                var weekStart = d0.AddDays(-(((int)d0.DayOfWeek + 6) % 7));   // 周一
+                for (var k = 0; k < 20000; k++)
+                {
+                    var w = weekStart.AddDays(7L * interval * k);
+                    for (var i = 0; i < 7; i++)
+                    {
+                        var d = w.AddDays(i);
+                        if (days.Contains(d.DayOfWeek) && (byMonth.Count == 0 || byMonth.Contains(d.Month))) yield return d;
+                    }
+                }
+                yield break;
+            case "MONTHLY":
+                var m0 = new DateTime(d0.Year, d0.Month, 1);
+                for (var k = 0; k < 6000; k++)
+                {
+                    var m = m0.AddMonths(k * interval);
+                    if (byMonth.Count > 0 && !byMonth.Contains(m.Month)) continue;
+                    foreach (var d in InMonth(m, start, byDay, byMonthDay, bySetPos)) yield return d;
+                }
+                yield break;
+            case "YEARLY":
+                for (var k = 0; k < 500; k++)
+                {
+                    var y = d0.Year + k * interval;
+                    if (y > 9998) yield break;
+                    var months = byMonth.Count > 0 ? byMonth.OrderBy(x => x).ToList() : [start.Month];
+                    var set = new List<DateTime>();
+                    foreach (var mo in months)
+                    {
+                        var m = new DateTime(y, mo, 1);
+                        // 只有 BYMONTH 没有日子：用开始那天的日期（2 月 29 日在平年就没有）
+                        set.AddRange(InMonth(m, start, byDay, byMonthDay, []));
+                    }
+                    set.Sort();
+                    foreach (var d in ApplySetPos(set, bySetPos)) yield return d;
+                }
+                yield break;
+            default:
+                yield return d0;
+                yield break;
+        }
+    }
+
+    private static List<DateTime> InMonth(DateTime month, DateTime start, List<(int ord, DayOfWeek day)> byDay, List<int> byMonthDay, List<int> bySetPos)
+    {
+        var dim = DateTime.DaysInMonth(month.Year, month.Month);
+        var set = new List<DateTime>();
+        if (byMonthDay.Count > 0)
+        {
+            foreach (var md in byMonthDay)
+            {
+                var day = md > 0 ? md : dim + md + 1;
+                if (day >= 1 && day <= dim) set.Add(new DateTime(month.Year, month.Month, day));
+            }
+            if (byDay.Count > 0) set = set.Where(d => byDay.Any(b => b.day == d.DayOfWeek)).ToList();
+        }
+        else if (byDay.Count > 0)
+        {
+            foreach (var (ord, dow) in byDay)
+            {
+                var all = Enumerable.Range(1, dim).Select(i => new DateTime(month.Year, month.Month, i)).Where(d => d.DayOfWeek == dow).ToList();
+                if (ord == 0) set.AddRange(all);
+                else
+                {
+                    var idx = ord > 0 ? ord - 1 : all.Count + ord;
+                    if (idx >= 0 && idx < all.Count) set.Add(all[idx]);
+                }
+            }
+        }
+        else if (start.Day <= dim) set.Add(new DateTime(month.Year, month.Month, start.Day));   // 31 号在小月里没有，按 RFC 跳过
+        set = set.Distinct().OrderBy(d => d).ToList();
+        return ApplySetPos(set, bySetPos);
+    }
+
+    private static List<DateTime> ApplySetPos(List<DateTime> set, List<int> bySetPos)
+    {
+        if (bySetPos.Count == 0 || set.Count == 0) return set;
+        var res = new List<DateTime>();
+        foreach (var p in bySetPos)
+        {
+            var i = p > 0 ? p - 1 : set.Count + p;
+            if (i >= 0 && i < set.Count) res.Add(set[i]);
+        }
+        return res.Distinct().OrderBy(d => d).ToList();
+    }
+
+    private static bool MatchesMonthDay(DateTime d, List<int> byMonthDay)
+    {
+        var dim = DateTime.DaysInMonth(d.Year, d.Month);
+        return byMonthDay.Any(md => (md > 0 ? md : dim + md + 1) == d.Day);
+    }
+
+    private static List<(int ord, DayOfWeek day)> ParseByDay(string v)
+    {
+        var list = new List<(int, DayOfWeek)>();
+        foreach (var raw in v.Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var x = raw.Trim().ToUpperInvariant();
+            if (x.Length < 2 || Day(x[^2..]) is not { } d) continue;
+            var ord = x.Length > 2 && int.TryParse(x[..^2], out var o) ? o : 0;
+            list.Add((ord, d));
+        }
+        return list;
+    }
+
+    private static IEnumerable<int> Ints(string? v) =>
+        (v ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => int.TryParse(x.Trim(), out var i) ? (int?)i : null).Where(x => x != null).Select(x => x!.Value);
 
     private static DayOfWeek? Day(string s) => s switch
     {

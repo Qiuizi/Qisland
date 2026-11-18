@@ -45,7 +45,7 @@ public sealed partial class IslandWindow
         foreach (var a in _store.Ranked())
         {
             if (a.Quiet || FocusMode.Passes(a) || (now - a.Updated).TotalSeconds >= 2 || LevelOf(a) < Level.Active) continue;
-            if (!_held.Contains(a.Title)) _held.Add(a.Title);
+            if (!_held.Contains(a.Title) && _held.Count < 99) _held.Add(a.Title);
         }
     }
 

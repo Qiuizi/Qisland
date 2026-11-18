@@ -26,22 +26,33 @@ public sealed class CalendarWatcher
     public event Action? Changed;
     private TaskCompletionSource _kick = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public CalendarWatcher(ActivityStore store, HttpClient http)
+    public CalendarWatcher(ActivityStore store, HttpClient http) { _store = store; _http = http; }
+    private Task? _load;
+
+    /// <summary>读加密的订阅和缓存（后台线程，不占启动时间）。</summary>
+    private async Task LoadAsync()
     {
-        _store = store; _http = http;
-        _feeds = (Dpapi.Load(FeedsPath) ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-        try
+        var (feeds, cache) = await Task.Run(() =>
         {
-            var cached = Dpapi.Load(CachePath);
-            if (cached != null)
-                foreach (var block in cached.Split("\u0001\u0001", StringSplitOptions.RemoveEmptyEntries))
-                {
-                    var i = block.IndexOf('\u0001');
-                    if (i > 0 && _feeds.Contains(block[..i])) _cache[block[..i]] = block[(i + 1)..];
-                }
-        }
-        catch { }
-        Rebuild();
+            var f = File.Exists(FeedsPath) ? (Dpapi.Load(FeedsPath) ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList() : [];
+            var c = new Dictionary<string, string>();
+            try
+            {
+                var cached = f.Count > 0 && File.Exists(CachePath) ? Dpapi.Load(CachePath) : null;
+                if (cached != null)
+                    foreach (var block in cached.Split("\u0001\u0001", StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        var i = block.IndexOf('\u0001');
+                        if (i > 0 && f.Contains(block[..i])) c[block[..i]] = block[(i + 1)..];
+                    }
+            }
+            catch { }
+            return (f, c);
+        });
+        foreach (var u in feeds) if (!_feeds.Contains(u)) _feeds.Add(u);
+        foreach (var kv in cache) _cache.TryAdd(kv.Key, kv.Value);
+        if (_feeds.Count > 0) App.Log($"日历: {_feeds.Count} 个订阅，缓存 {_cache.Count} 个");
+        await Rebuild();
     }
 
     public IReadOnlyList<string> Feeds => _feeds;
@@ -60,6 +71,7 @@ public sealed class CalendarWatcher
     public async Task<(bool ok, string msg)> Add(string raw)
     {
         if (Normalize(raw) is not { } url) return (false, "不是有效的 http(s) / webcal 链接");
+        try { if (_load != null) await _load; } catch { }   // 先等已保存的订阅读完，免得保存时把它们覆盖掉
         if (_feeds.Contains(url)) return (false, "这个日历已经订阅过了");
         try
         {
@@ -68,7 +80,7 @@ public sealed class CalendarWatcher
             _feeds.Add(url);
             _cache[url] = ics;
             Save();
-            Rebuild();
+            await Rebuild();
             var n = CalendarIcs.Expand(ics, DateTime.Today, DateTime.Today.AddDays(8)).Count;
             App.Log($"日历: 添加订阅 {Host(url)}，未来一周 {n} 个日程");
             return (true, $"已添加（{Host(url)}），未来一周有 {n} 个日程");
@@ -81,7 +93,7 @@ public sealed class CalendarWatcher
         if (!_feeds.Remove(url)) return;
         _cache.Remove(url);
         Save();
-        Rebuild();
+        _ = Rebuild();
         App.Log($"日历: 删除订阅 {Host(url)}");
     }
 
@@ -111,6 +123,8 @@ public sealed class CalendarWatcher
     /// <summary>后台循环：15 分钟一次；电脑醒来、点「立即刷新」时提前。</summary>
     public async Task Loop()
     {
+        _load = LoadAsync();
+        try { await _load; } catch (Exception ex) { App.Log("日历读取: " + ex.Message); }
         await Task.Delay(TimeSpan.FromSeconds(30));
         while (true)
         {
@@ -124,7 +138,7 @@ public sealed class CalendarWatcher
                 }
                 if (ok > 0) { LastOk = DateTime.Now; Save(); }
                 LastError = err;
-                Rebuild();
+                await Rebuild();
             }
             var kick = _kick.Task;
             await Task.WhenAny(App.Nap(TimeSpan.FromMinutes(15)), kick);
@@ -132,19 +146,27 @@ public sealed class CalendarWatcher
         }
     }
 
-    private void Rebuild()
+    /// <summary>解析放到后台线程（大的日历文件几十毫秒），结果回到 UI 线程再换上。</summary>
+    private async Task Rebuild()
     {
+        var sources = _cache.Values.ToList();
         var from = DateTime.Today.AddDays(-1);
-        var all = new List<CalEvent>();
-        foreach (var ics in _cache.Values)
+        var events = await Task.Run(() =>
         {
-            try { all.AddRange(CalendarIcs.Expand(ics, from, DateTime.Today.AddDays(8))); }
-            catch (Exception ex) { App.Log("日历解析: " + ex.Message); }
-        }
-        Events = all.GroupBy(e => (e.Title, e.Start)).Select(g => g.First()).OrderBy(e => e.Start).ToList();
+            var all = new List<CalEvent>();
+            foreach (var ics in sources)
+            {
+                try { all.AddRange(CalendarIcs.Expand(ics, from, DateTime.Today.AddDays(8))); }
+                catch (Exception ex) { App.Log("日历解析: " + ex.Message); }
+            }
+            return all.GroupBy(e => (e.Title, e.Start)).Select(g => g.First()).OrderBy(e => e.Start).ToList();
+        });
+        Events = events;
         Tick();
         Changed?.Invoke();
     }
+
+    private DateTime _day = DateTime.Today;
 
     /// <summary>今天还没结束的、以及之后几天的日程（给组件用）。</summary>
     public IReadOnlyList<CalEvent> Upcoming(int max)
@@ -156,6 +178,7 @@ public sealed class CalendarWatcher
     /// <summary>每 30 秒调一次：更新列表里的「接下来」、到点前 10 分钟提醒。</summary>
     public void Tick()
     {
+        if (_day != DateTime.Today) { _day = DateTime.Today; _ = Rebuild(); return; }   // 过了零点：展开窗口往后挪一天
         if (!Features.On(Features.Calendar) || _feeds.Count == 0)
         {
             _store.ReplaceSource(ListSource, []);
