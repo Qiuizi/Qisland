@@ -87,7 +87,7 @@ Qisland 是给 Windows 做的「灵动岛」。它最早是为一个大学生自
 
 - Codex 审批：托盘 → Codex → 「在岛上批准 Codex 请求」，或运行 `scripts\install-codex-hooks.ps1`。
 - DeepSeek Harness：装上 [integrations/dsh-qisland-bridge](integrations/dsh-qisland-bridge)，见 [docs/deepseek-harness.md](docs/deepseek-harness.md)。
-- Claude Code：`scripts\install-claude-hooks.ps1`；WSL2 里用 `scripts/qisland-push`。
+- Claude Code：`scripts\install-claude-hooks.ps1`；WSL2 里用 `scripts/qisland-push`。装了之后，等你确认时岛上会弹出提示，但不能在岛上点审批（能点允许 / 拒绝的只有 Codex 和 DeepSeek Harness）。
 - 豆包、Trae、WorkBuddy 不用装：它们的系统通知会被岛接住。
 
 ## 用法
@@ -96,7 +96,7 @@ Qisland 是给 Windows 做的「灵动岛」。它最早是为一个大学生自
 - `Ctrl+Alt+Q`：全屏时把岛叫回来，平时临时隐藏；也可以把鼠标推到岛正上方的屏幕顶边停一下。
 - 托盘右键：导入课表、扫码登录、日历订阅、岛上提示开关、外观、开机自启、改动账本。
 - 配置都是 `%APPDATA%\Qisland\` 下的纯文本（`todo.md`、`widgets.txt`、`countdown.txt` 等），可以直接改。
-- 天气地点写在 `weather.txt`（如 `杭州 30.27,120.15`），留空就按网络位置自动判断；学校的雨课堂有专属域名的，写进 `yuketang-host.txt`。
+- 天气地点写在 `weather.txt`（如 `北京 39.90,116.41`），留空就按网络位置自动判断；学校的雨课堂有专属域名的，写进 `yuketang-host.txt`。
 
 ## Island API
 

@@ -17,9 +17,9 @@
 - 托盘「岛上提示」里每一项都能单独关。
 
 ## 开发者
-- **Codex 审批上岛**：Codex 请求执行命令时在岛上点允许 / 拒绝，100 秒不点就回终端问，不会默认同意。
+- **审批上岛**：Codex 和 DeepSeek Harness 请求执行命令时，在岛上点允许 / 拒绝；100 秒不点就回终端问，不会默认同意。Claude Code 等你确认时只会弹出提示，不能在岛上点审批。
 - **点哪跳哪**：点活动直接切到对应软件 / Codex 会话 / 作业网页。
-- **Codex 额度**、DeepSeek Harness 状态、Claude Code / Codex hook 事件。
+- **Codex 额度**、DeepSeek Harness 状态、Claude Code / Codex hook 事件（Claude Code 的 hook 只用于状态和等待提示）。
 - `/v1/perf` 增加各监听器的事件计数，方便确认它们是事件驱动的。
 
 ## 小而有用
