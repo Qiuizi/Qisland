@@ -9,7 +9,7 @@ using Qisland.Core;
 namespace Qisland.App;
 
 /// <summary>
-/// 剪贴板历史：文字、文件和图片（图片最多留 4 张），最多 30 条，只放在内存里（退出即清空，不落盘）。
+/// 剪贴板历史：文字、文件和图片（图片最多留 3 张、每张不超过 1600 万像素），最多 30 条，只放在内存里（退出即清空，不落盘）。
 /// 密码管理器复制的内容会带 ExcludeClipboardContentFromMonitorProcessing / CanIncludeInClipboardHistory=0 标记，直接跳过。
 /// </summary>
 public sealed partial class IslandWindow
@@ -20,6 +20,9 @@ public sealed partial class IslandWindow
     private readonly List<ClipItem> _clips = new();
     private string? _selfCopy;
     private DateTime _copiedFlash = DateTime.MinValue;
+    // 图片很占内存（4K 截图 ≈ 33 MB）：最多留 3 张，超过 1600 万像素的不进历史
+    private const int MaxClipImages = 3;
+    private const long MaxClipPixels = 16_000_000;
 
     private void SetupClipboard()
     {
@@ -48,7 +51,7 @@ public sealed partial class IslandWindow
                 item = new ClipItem(string.Join("  ", files.Select(Path.GetFileName)), files, DateTime.Now);
             else if (data.GetDataPresent(DataFormats.UnicodeText) && data.GetData(DataFormats.UnicodeText) is string t && !string.IsNullOrWhiteSpace(t) && t.Length < 100_000)
                 item = new ClipItem(t, null, DateTime.Now);
-            else if (data.GetDataPresent(DataFormats.Bitmap) && Clipboard.GetImage() is { } img && (long)img.PixelWidth * img.PixelHeight <= 40_000_000)
+            else if (data.GetDataPresent(DataFormats.Bitmap) && Clipboard.GetImage() is { } img && (long)img.PixelWidth * img.PixelHeight <= MaxClipPixels)
             {
                 img.Freeze();
                 // 同一张图连着复制两次不重复记；用尺寸 + 采样像素粗判
@@ -60,7 +63,7 @@ public sealed partial class IslandWindow
             if (item.Files == null && item.Text == _selfCopy) { _selfCopy = null; return; }
             if (item.Image == null) _clips.RemoveAll(c => c.Image == null && c.Text == item.Text);
             _clips.Insert(0, item);
-            foreach (var old in _clips.Where(c => c.Image != null).Skip(4).ToList()) _clips.Remove(old);
+            foreach (var old in _clips.Where(c => c.Image != null).Skip(MaxClipImages).ToList()) _clips.Remove(old);
             if (_clips.Count > 30) _clips.RemoveRange(30, _clips.Count - 30);
             if (_mode == Mode.Expanded && _page is Page.Clip or Page.Widgets && !_animating && !_widgetEdit) RebuildExpanded(); else _expDirty = true;
         }

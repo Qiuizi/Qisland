@@ -227,6 +227,7 @@ public sealed partial class App : Application
             if (_api != null) _api.Bench = () => _window?.RunBench();
             if (_api != null) { _api.PerfJson = _perf.Json; _api.Peek = s => _window?.PeekFor(s); }
             PerfGuard.Changed += () => _window?.OnPerfChanged();
+            PerfGuard.MemoryPressure += () => _window?.OnMemoryPressure();
             _quota = new CodexQuota(a => Dispatcher.BeginInvoke(a));
             _window.Quota = _quota; _quota.Changed += _window.OnQuotaChanged;
             _quota.Changed += _window.OnAiQuotaChanged;

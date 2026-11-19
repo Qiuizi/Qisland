@@ -13,6 +13,10 @@ public sealed class PerfGuard
     /// <summary>超过这个（占整机 CPU 的百分比，30 秒平均）就降级。</summary>
     public const double Budget = 3.0;
     private const double RestoreBelow = 1.2;
+    /// <summary>私有内存目标：超过就（最多 10 分钟一次）丢掉收起状态下用不到的缓存并回收。</summary>
+    public const double MemoryTargetMb = 180;
+    public static event Action? MemoryPressure;
+    private long _lastMemTrim = -1;
 
     public static bool Degraded { get; private set; }
     public static event Action? Changed;
@@ -73,10 +77,17 @@ public sealed class PerfGuard
                 Changed?.Invoke();
             }
         }
+        if (_n % 12 == 1 && PrivateMb > MemoryTargetMb && (_lastMemTrim < 0 || now - _lastMemTrim > 10 * 60_000))
+        {
+            _lastMemTrim = now;
+            App.Log($"性能护栏: 私有内存 {PrivateMb:0} MB 超过 {MemoryTargetMb} MB 目标 → 丢掉页面缓存并回收一次");
+            MemoryPressure?.Invoke();
+            App.TrimSoon();
+        }
         if (Threads > 120 || Handles > 4000) { if (_n % 60 == 1) App.Log($"性能护栏: 线程 {Threads} / 句柄 {Handles} 偏多，可能有泄漏"); }
         if (_n % 120 == 0) { App.Log($"perf: CPU 30s 平均 {Avg30:0.00}%，峰值 {Peak:0.0}%，线程 {Threads}，句柄 {Handles}，私有内存 {PrivateMb:0} MB{(Degraded ? "（降级中）" : "")}"); Peak = 0; }
     }
 
     public string Json() =>
-        $"{{\"ok\":true,\"cpu\":{Cpu:0.00},\"cpu_avg30\":{Avg30:0.00},\"threads\":{Threads},\"handles\":{Handles},\"private_mb\":{PrivateMb:0.0},\"degraded\":{(Degraded ? "true" : "false")},\"budget\":{Budget},\"events\":{Counters.Json()}}}";
+        $"{{\"ok\":true,\"cpu\":{Cpu:0.00},\"cpu_avg30\":{Avg30:0.00},\"threads\":{Threads},\"handles\":{Handles},\"private_mb\":{PrivateMb:0.0},\"degraded\":{(Degraded ? "true" : "false")},\"budget\":{Budget},\"memory_target_mb\":{MemoryTargetMb},\"events\":{Counters.Json()}}}";
 }

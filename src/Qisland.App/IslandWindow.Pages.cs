@@ -354,6 +354,17 @@ public sealed partial class IslandWindow
         // 收起后回到主页，下次悬停先看到消息
         EndEditing();
         if (_page != Page.Home && !_dragging) { _page = Page.Home; _expDirty = true; }
+        // 收起后别的页的预建缓存用不到了：丢掉，下次展开空闲时再建（省几 MB 到几十 MB 的可视树）
+        foreach (var p in _pageCache.Keys.Where(p => p != Page.Home).ToList()) _pageCache.Remove(p);
+    }
+
+    /// <summary>性能护栏发现内存超目标：收起状态下把能重建的都丢掉。</summary>
+    public void OnMemoryPressure()
+    {
+        if (_mode == Mode.Expanded) return;
+        _pageCache.Clear();
+        _expDirty = true;
+        _translated.Clear();
     }
 
     private static Border Card(UIElement? child) => new()
