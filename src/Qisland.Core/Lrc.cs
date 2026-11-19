@@ -20,6 +20,9 @@ public static partial class Lrc
     {
         var main = ParseRaw(lrc);
         if (main.Count == 0) return [];
+        // 没有单独的翻译歌词时，有的 LRC（LRCLIB 上常见）把原文和译文写成同一时间戳的两行：
+        // 以前排序后取「最后一行」，岛上显示的就成了译文、下一句也错位。这里把同一时刻的第二行并成翻译。
+        if (string.IsNullOrWhiteSpace(translation)) main = MergeSameTime(main);
         if (!string.IsNullOrWhiteSpace(translation))
         {
             var tr = ParseRaw(translation).Where(t => t.Text.Length > 0).ToList();
@@ -41,12 +44,17 @@ public static partial class Lrc
     private static List<LyricLine> ParseRaw(string lrc)
     {
         var list = new List<LyricLine>();
+        var lines = lrc.Replace("\r", "").Split('\n');
+        // [offset:+500] 表示歌词整体提前 0.5 秒。它可能出现在文件任意位置（不一定在第一句之前），对整首都生效
         var offset = TimeSpan.Zero;
-        foreach (var raw in lrc.Replace("\r", "").Split('\n'))
+        foreach (var raw in lines)
+            if (Offset().Match(raw.Trim()) is { Success: true } om && int.TryParse(om.Groups[1].Value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var ofs))
+                offset = TimeSpan.FromMilliseconds(-ofs);
+        foreach (var raw in lines)
         {
             var line = raw.Trim();
             if (line.Length == 0) continue;
-            if (Offset().Match(line) is { Success: true } om) { offset = TimeSpan.FromMilliseconds(-int.Parse(om.Groups[1].Value, CultureInfo.InvariantCulture)); continue; }
+            if (Offset().IsMatch(line)) continue;
             var tags = new List<TimeSpan>();
             var pos = 0;
             Match mt;
@@ -64,8 +72,25 @@ public static partial class Lrc
             if (Credit().IsMatch(text)) continue;
             foreach (var t in tags) list.Add(new LyricLine(t + offset < TimeSpan.Zero ? TimeSpan.Zero : t + offset, text));
         }
-        list.Sort((a, b) => a.At.CompareTo(b.At));
-        return list;
+        // 稳定排序：同一时间戳的行保持文件里的先后（List.Sort 不稳定，原文和译文会随机颠倒）
+        return list.OrderBy(l => l.At).ToList();
+    }
+
+    private static List<LyricLine> MergeSameTime(List<LyricLine> list)
+    {
+        var res = new List<LyricLine>(list.Count);
+        foreach (var l in list)
+        {
+            if (res.Count > 0 && res[^1] is var prev && prev.At == l.At && prev.Translation == null
+                && prev.Text.Length > 0 && l.Text.Length > 0 && prev.Text != l.Text)
+            {
+                res[^1] = prev with { Translation = l.Text };
+                continue;
+            }
+            if (res.Count > 0 && res[^1].At == l.At && res[^1].Text == l.Text) continue; // 完全重复的行
+            res.Add(l);
+        }
+        return res;
     }
 
     /// <summary>当前应显示的行号（-1 表示还没到第一句）。</summary>

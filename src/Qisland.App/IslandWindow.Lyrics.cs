@@ -48,11 +48,31 @@ public sealed partial class IslandWindow
         return (c.Text.Length > 0 ? c.Text : "♪", c.Translation ?? next);
     }
 
+    /// <summary>查歌词用的时间：当前进度 + 0.25 秒（换句略提前一点，读起来不拖）+ 这首歌用户调过的偏移。</summary>
+    private TimeSpan LyricClock() =>
+        (Media?.LivePosition() ?? TimeSpan.Zero) + TimeSpan.FromMilliseconds(250) + (Lyrics?.UserOffset ?? TimeSpan.Zero);
+
+    /// <summary>在歌词上滚滚轮：往上 = 歌词提前 0.3 秒，往下 = 推后 0.3 秒；每首歌单独记住。</summary>
+    private void HookLyricWheel(FrameworkElement el)
+    {
+        el.ToolTip = "滚轮微调歌词快慢（每格 0.3 秒，按歌记住）";
+        el.MouseWheel += (_, e) =>
+        {
+            if (Lyrics == null) return;
+            e.Handled = true;
+            Lyrics.Nudge(e.Delta > 0 ? 0.3 : -0.3);
+            var o = Lyrics.UserOffset.TotalSeconds;
+            App.Log($"歌词偏移 {o:+0.0;-0.0;0} 秒");
+            if (_cardLyric2 != null) _cardLyric2.Text = Math.Abs(o) < 0.05 ? "歌词偏移已复位" : $"歌词{(o > 0 ? "提前" : "推后")} {Math.Abs(o):0.0} 秒";
+            _lyricIdx = -2;
+        };
+    }
+
     private void LyricTick()
     {
         var l = LiveLyrics;
         if (l == null || Media == null) return;
-        var idx = Lrc.IndexAt(l, Media.LivePosition() + TimeSpan.FromMilliseconds(250));
+        var idx = Lrc.IndexAt(l, LyricClock());
         if (idx == _lyricIdx) return;
         _lyricIdx = idx;
         var (cur, sub) = LyricAt(idx, l);
@@ -76,13 +96,15 @@ public sealed partial class IslandWindow
         var l = LiveLyrics;
         _cardLyric = _cardLyric2 = null;
         if (l == null) return null;
-        var (cur, sub) = LyricAt(Media is { } md ? Lrc.IndexAt(l, md.LivePosition() + TimeSpan.FromMilliseconds(250)) : -1, l);
+        var (cur, sub) = LyricAt(Media is { } md ? Lrc.IndexAt(l, LyricClock()) : -1, l);
         var sp = new StackPanel { Margin = new Thickness(60, -2, 8, 8) };
         var a = Txt(14, FontWeights.SemiBold, Theme.Primary);
         a.Text = cur; a.TextTrimming = TextTrimming.CharacterEllipsis;
         var b = Txt(12, FontWeights.Normal, Theme.Secondary);
         b.Text = sub ?? ""; b.TextTrimming = TextTrimming.CharacterEllipsis; b.Margin = new Thickness(0, 2, 0, 0);
         sp.Children.Add(a); sp.Children.Add(b);
+        sp.Background = System.Windows.Media.Brushes.Transparent; // 让空白处也能收到滚轮
+        HookLyricWheel(sp);
         _cardLyric = a; _cardLyric2 = b;
         return sp;
     }

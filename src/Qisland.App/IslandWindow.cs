@@ -1124,7 +1124,7 @@ public sealed partial class IslandWindow : Window
         if (lyr != null)
         {
             title.Foreground = Theme.Primary; title.FontWeight = FontWeights.SemiBold;
-            title.Text = LyricAt(Lrc.IndexAt(lyr, (Media?.LivePosition() ?? TimeSpan.Zero) + TimeSpan.FromMilliseconds(250)), lyr).cur;
+            title.Text = LyricAt(Lrc.IndexAt(lyr, LyricClock()), lyr).cur;
             title.ToolTip = $"{m.Title}  {m.Artist}";
             _compactLyric = title;
         }
