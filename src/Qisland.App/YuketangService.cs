@@ -55,6 +55,7 @@ public sealed class YuketangService
     private DateTime _lastExtendLog = DateTime.MinValue;
     private bool _busy;
     private bool _loggedCookieNames;
+    private int _okButFailing;
     public string? UserName { get; private set; }
     public bool LoggedIn { get { lock (_ckLock) return _cookies["sessionid"] != null; } }
     public bool Expired { get; private set; }
@@ -156,7 +157,7 @@ public sealed class YuketangService
                     ExpiresAt = set.ExpiresOf("sessionid")?.LocalDateTime;
                     UserName = d["Name"]?.ToString() ?? "";
                     Expired = false;
-                    _health.Reset();
+                    _health.Reset(); _okButFailing = 0;
                     Save();
                     App.Log($"雨课堂: 已登录 {UserName}（Cookie：{string.Join(", ", set.All.Keys)}；sessionid 到 {ExpiresAt:MM-dd HH:mm}）");
                     _next = DateTime.Now;
@@ -173,7 +174,7 @@ public sealed class YuketangService
     public void Logout()
     {
         lock (_ckLock) _cookies = new CookieSet();
-        UserName = null; Expired = false; ExpiresAt = null; _health.Reset();
+        UserName = null; Expired = false; ExpiresAt = null; _health.Reset(); _okButFailing = 0;
         try { File.Delete(CredPath); } catch { }
         _hub.Clear(Platform);
         _store.Remove("ykt:expired");
@@ -205,6 +206,7 @@ public sealed class YuketangService
             var items = await Task.Run(Fetch);
             if (items == null) return;
             LastOk = DateTime.Now;
+            _okButFailing = 0;
             _health.Report(AuthVerdict.Ok, DateTime.Now);
             _hub.Update(Platform, items);
             App.Log($"雨课堂: {items.Count(i => !i.Done)} 项未完成");
@@ -214,7 +216,12 @@ public sealed class YuketangService
             App.Log($"雨课堂: 接口说可能没登录（{ap.Message}），用户信息接口确认一下");
             var confirm = await Task.Run(Confirm);
             var v = confirm == AuthVerdict.Transient ? ap.Verdict : confirm; // 确认接口自己也说不准时，按原来的结论记一笔（仍要两次才判过期）
-            if (confirm == AuthVerdict.Ok) { App.Log("雨课堂: 确认登录还在，只是这次接口出错，5 分钟后再拉"); _health.Report(AuthVerdict.Ok, DateTime.Now); _next = DateTime.Now.AddMinutes(5); }
+            if (confirm == AuthVerdict.Ok && ++_okButFailing >= 4)
+            {
+                // 确认接口一直说没事，业务接口却连着几次说没登录：确认接口对匿名用户也可能返回 0，不能无限信它
+                MarkExpired($"业务接口连续 {_okButFailing} 次说没登录（{ap.Message}），确认接口却说正常");
+            }
+            else if (confirm == AuthVerdict.Ok) { App.Log($"雨课堂: 确认登录还在，只是这次接口出错（第 {_okButFailing} 次），5 分钟后再拉"); _next = DateTime.Now.AddMinutes(5); }
             else if (_health.Report(v, DateTime.Now)) MarkExpired($"连续 {_health.Strikes} 次确认未登录（{ap.Message}；确认接口：{confirm}）");
             else { App.Log($"雨课堂: 疑似掉线（第 {_health.Strikes} 次，{confirm}），2 分钟后再确认，先不提示"); _next = DateTime.Now.AddMinutes(2); }
         }
