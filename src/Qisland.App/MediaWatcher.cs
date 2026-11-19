@@ -416,6 +416,7 @@ public sealed class MediaWatcher
         var dur = tl.EndTime - tl.StartTime;
         _start = tl.StartTime;
         var canSeek = pb?.Controls?.IsPlaybackPositionEnabled == true && dur > TimeSpan.FromSeconds(1);
+        if (dur <= TimeSpan.Zero && LocalLyricCaches.DurationFor(title, artist) is { } hint) dur = hint;   // 酷狗 SMTC 不给时长：用它本机歌词里的 [total]
         return new MediaState(title, artist, app, src, playing, _art,
             tl.Position - tl.StartTime, dur < TimeSpan.Zero ? TimeSpan.Zero : dur, tl.LastUpdatedTime.LocalDateTime,
             video, Math.Max(1, All().Count), canSeek, Aumid: aumid);

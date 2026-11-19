@@ -64,7 +64,7 @@ public sealed class LyricsService
         _name = CacheName(m.Title, m.Artist, m.Duration, m.SongId);
         UserOffset = TimeSpan.FromSeconds(LoadOffsets().GetValueOrDefault(_name));
         if (!sameSong) { Lines = null; Changed?.Invoke(); }
-        _ = LoadAsync(key, m.Title, m.Artist, m.Duration, m.SongId, keepIfNone: sameSong);
+        _ = LoadAsync(key, m.Title, m.Artist, m.Duration, m.SongId, keepIfNone: sameSong, app: m.AppSource);
     }
 
     /// <summary>在歌词上滚滚轮：±0.3 秒一档。正数 = 歌词提前（觉得歌词慢了就往上滚）。</summary>
@@ -86,9 +86,14 @@ public sealed class LyricsService
         return _offsets ??= [];
     }
 
-    private async Task LoadAsync(string key, string title, string artist, TimeSpan dur, string? songId, bool keepIfNone = false)
+    private async Task LoadAsync(string key, string title, string artist, TimeSpan dur, string? songId, bool keepIfNone = false, string app = "")
     {
         List<LyricLine>? lines = null;
+        // 酷狗 / 汽水：先读它们自己下好的本机缓存（只读），没有再上网查
+        try { lines = await Task.Run(() => LocalLyricCaches.Find(app, title, artist, dur)); }
+        catch (Exception ex) { App.Log("本机歌词: " + ex.GetType().Name); }
+        if (key != _key) return;
+        if (lines is { Count: > 0 }) { Lines = lines; Changed?.Invoke(); return; }
         try { lines = await Task.Run(() => Fetch(title, artist, dur, songId)); }
         catch (Exception ex) { App.Log("歌词: " + ex.Message); }
         if (key != _key) return;      // 已经切歌了：迟到的结果丢掉
