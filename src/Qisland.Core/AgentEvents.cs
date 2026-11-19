@@ -36,12 +36,12 @@ public static class AgentEventParser
         }
 
         source = NormalizeSource(source);
-        if (source is not ("claude-code" or "codex" or "deepseek-harness" or "doubao" or "trae" or "workbuddy")) return null;
+        if (!Known(source)) return null;
 
         // 会话刚打开、模型请求这类事件不代表在干活，不上岛
-        if (hook is "SessionStart" or "PreModelRequest" or "PostModelRequest" or "PreCompact" or "PostCompact") return null;
+        if (Ignored(hook)) return null;
         var kind = Classify(source, hook, codexType, root);
-        var session = FirstString(root, "session_id", "sessionId", "thread-id", "thread_id", "turn-id", "id");
+        var session = FirstString(root, "session_id", "sessionId", "sessionID", "conversation_id", "conversationId", "thread-id", "thread_id", "turn-id", "id");
         if (string.IsNullOrEmpty(session)) session = "default";
         var tool = FirstString(root, "tool_name", "toolName", "command");
         if (root.TryGetProperty("tool_input", out var ti) && ti.ValueKind == JsonValueKind.Object)
@@ -80,7 +80,7 @@ public static class AgentEventParser
             ActivityKind.WaitingApproval => 4 * 60 * 60,
             ActivityKind.Running => 4 * 60 * 60,
             ActivityKind.Error => 25,
-            ActivityKind.Done => hook is "SessionEnd" ? 2 : 45,
+            ActivityKind.Done => hook.Equals("SessionEnd", StringComparison.OrdinalIgnoreCase) ? 2 : 45,
             _ => 30,
         };
 
@@ -109,9 +109,21 @@ public static class AgentEventParser
             "doubao" or "豆包" => "doubao",
             "trae" or "trae-cn" => "trae",
             "workbuddy" or "work-buddy" => "workbuddy",
+            "gemini" or "gemini-cli" => "gemini-cli",
+            "cursor" or "cursor-agent" => "cursor",
+            "kimi" or "kimi-cli" or "kimi-code" => "kimi-cli",
+            "qwen" or "qwen-code" => "qwen-code",
+            "opencode" or "open-code" => "opencode",
             _ => s,
         };
     }
+
+    public static bool Known(string source) => source is "claude-code" or "codex" or "deepseek-harness" or "doubao" or "trae" or "workbuddy"
+        or "gemini-cli" or "cursor" or "kimi-cli" or "qwen-code" or "opencode";
+
+    /// <summary>会话刚打开、模型请求、压缩上下文这类事件不代表在干活，不上岛。</summary>
+    private static bool Ignored(string hook) => hook.ToLowerInvariant() is "sessionstart" or "premodelrequest" or "postmodelrequest" or "precompact" or "postcompact"
+        or "beforemodel" or "aftermodel" or "beforetoolselection" or "precompress" or "session.start" or "session.created" or "session.updated" or "message.part.updated";
 
     private static bool LooksLikeCodex(string type)
     {
@@ -126,12 +138,16 @@ public static class AgentEventParser
         if (status is "waiting_approval" or "awaiting_approval" or "needs_approval" or "approval" or "permission")
             return ActivityKind.WaitingApproval;
         if (status is "error" or "failed" or "failure") return ActivityKind.Error;
-        if (status is "done" or "completed" or "complete" or "idle" or "stopped") return ActivityKind.Done;
+        if (status is "done" or "completed" or "complete" or "idle" or "stopped" or "aborted" or "cancelled") return ActivityKind.Done;
         if (status is "running" or "working" or "busy") return ActivityKind.Running;
 
         if (source == "claude-code" || !string.IsNullOrEmpty(hook))
         {
             var name = hook.Trim();
+            var low = name.ToLowerInvariant();
+            if (low is "permission.asked" or "permission.updated" or "beforeshellexecution_ask") return ActivityKind.WaitingApproval;
+            if (low is "session.error") return ActivityKind.Error;
+            if (low is "stop" or "sessionend" or "afteragent" or "session.idle" or "session.deleted" or "interrupt") return ActivityKind.Done;
             if (name.Equals("PermissionRequest", StringComparison.OrdinalIgnoreCase)) return ActivityKind.WaitingApproval;
             if (name.Equals("Notification", StringComparison.OrdinalIgnoreCase)) return ActivityKind.WaitingApproval;
             if (name.Contains("Failure", StringComparison.OrdinalIgnoreCase) || HasError(root)) return ActivityKind.Error;
@@ -174,6 +190,7 @@ public static class AgentEventParser
             "claude-code" => "Claude Code",
             "codex" => "Codex",
             "deepseek-harness" => "DeepSeek Harness",
+            "gemini-cli" or "cursor" or "kimi-cli" or "qwen-code" or "opencode" => AgentPolicy.Name(source),
             _ => AgentToasts.Name(source) ?? source,
         };
         return kind switch
