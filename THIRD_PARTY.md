@@ -41,3 +41,13 @@ WinIslands 应用本体为 **MIT License**（见 [LICENSE](LICENSE)）。
 | --- | --- | --- |
 | LRCLIB（lrclib.net） | 非网易云播放器的同步歌词：按歌名 + 歌手搜索，本地按时长（≤ 3 秒）和版本过滤，结果缓存在本机，低频请求 | 公开免费 API，歌词内容版权归原权利人 |
 | 岛仔 Daozai（Renly1994/xiaotang-daozai） | 思路参考：Apple Music 的「歌手 — 专辑」字段拆分、歌词候选时长约束与版本过滤、迟到歌词作废、按歌记住的歌词偏移；C# 自行实现，未复制代码 | MIT |
+
+## 翻译、AI 与本机缓存（v4 第二阶段）
+
+| 项目 / 服务 | 用途 | 许可证 / 说明 |
+| --- | --- | --- |
+| MyMemory（api.mymemory.translated.net） | 默认免 Key 翻译，只在你按快捷键或点「译」时发送选中的文字 | 公开免费 API，有每日额度 |
+| 豆包（火山方舟）/ DeepSeek / Kimi（Moonshot）/ 通义（百炼兼容模式）/ Ollama | 可选翻译与问 AI 引擎，用你自己的 Key（Ollama 为本机） | 各自服务条款；Qisland 只调用 OpenAI 兼容的 chat/completions 与官方余额接口 |
+| 岛仔 Daozai（Renly1994/xiaotang-daozai） | 思路参考：豆包网页额度接口与字段含义（window_limit_groups、window_type、used_percent、end_time、710012001 登录失效）、Cookie 中 sessionid 的校验规则；酷狗 KRC 缓存目录（KuGou.ini 的 LyricPath）与文件名格式；汽水音乐 LunaCacheV2（LMDB + MessagePack）里歌词字段的位置。C# 自行实现，未复制代码 | MIT |
+| KRC 格式公开资料（krc1 头 + 16 字节异或表 + zlib） | 解码酷狗本机歌词缓存 | 公开格式说明，自行实现 |
+| Gemini CLI / Qwen Code / Cursor / OpenCode 的 hooks / 插件文档 | 接入格式（只在你逐个同意后写入） | 各自文档 |
