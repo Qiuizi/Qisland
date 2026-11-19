@@ -36,6 +36,9 @@ public sealed class HomeworkHub
         return _byPlatform.Values.SelectMany(x => x).Where(i => !i.Done && i.Deadline > now).OrderBy(i => i.Deadline).ToList();
     }
 
+    /// <summary>某个平台上次拉到的全部条目（拉取时有课程失败，就沿用这些课程的旧数据）。</summary>
+    public IReadOnlyList<HomeworkItem> Previous(string platform) => _byPlatform.TryGetValue(platform, out var l) ? l.ToList() : [];
+
     public void Update(string platform, IReadOnlyList<HomeworkItem> items)
     {
         _byPlatform[platform] = items.ToList();

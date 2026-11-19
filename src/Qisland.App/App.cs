@@ -164,6 +164,7 @@ public sealed class App : Application
                 _window?.OnResume();
                 _media?.Reconnect();
                 _net?.OnResume();
+                _ykt?.OnResume();
                 await Task.Delay(TimeSpan.FromSeconds(20));   // 等网络
                 Interlocked.Exchange(ref _wake, new(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
             });
@@ -190,7 +191,7 @@ public sealed class App : Application
         _sys = new SystemWatch(_store);
         _upd = new Updater(_store, Http, Quit);
         _ = _upd.Loop();
-        _window!.OpenRequested = a => _upd.Open(a) || _sys.Open(a) || (_calls?.Open(a) ?? false) || Launcher.Open(a);
+        _window!.OpenRequested = a => OpenLogin(a) || _upd.Open(a) || _sys.Open(a) || (_calls?.Open(a) ?? false) || Launcher.Open(a);
         _window.ApplyLook(LoadLook());
         _timer = new FocusTimer(_store);
         _window.Timer = _timer;
@@ -372,6 +373,14 @@ public sealed class App : Application
         }
     }
 
+    /// <summary>岛上「登录过期了」那条：点一下直接弹扫码窗口（以前点了没反应，只能去托盘里找）。</summary>
+    private bool OpenLogin(LiveActivity a)
+    {
+        if (a.Id is "ykt:expired" or "ykt:expired-note") { Dispatcher.BeginInvoke(YuketangLoginOrOut); return true; }
+        if (a.Id is "xxt:expired" or "xxt:expired-note") { Dispatcher.BeginInvoke(XuexitongLoginOrOut); return true; }
+        return false;
+    }
+
     private void YuketangLoginOrOut()
     {
         if (_ykt == null) return;
@@ -387,6 +396,7 @@ public sealed class App : Application
         {
             if (!w.Success) return;
             _store.Remove("ykt:expired");
+            _store.Remove("ykt:expired-note");
             _store.Upsert(new IslandActivity("ykt:login", HomeworkHub.Source, "雨课堂已连接", $"{ykt.UserName} · 正在读取作业…", ActivityKind.Done, 60, DurationSeconds: 5));
         };
         w.Show();

@@ -965,7 +965,8 @@ public sealed partial class IslandWindow : Window
         Grid.SetColumn(right, 2);
         g.Children.Add(right);
 
-        var canOpen = a.Source == "otp" || a.OpenUri != null || Launcher.CanOpen(a.Source) || a.Source is "update" or "system" or "battery" or "device" or "copy" or "download";
+        var canOpen = a.Source == "otp" || a.OpenUri != null || Launcher.CanOpen(a.Source) || a.Source is "update" or "system" or "battery" or "device" or "copy" or "download"
+            || a.Id is "ykt:expired" or "ykt:expired-note" or "xxt:expired" or "xxt:expired-note"; // 登录过期：点一下弹扫码
         if (a.Source == "otp") right.Children.Add(Chip("复制", () => CopyOtp(a)));
         if (a.Source is "agenda" or "calendar" && a.OpenUri is { } join) right.Children.Add(Chip("加入", () => Launcher.OpenUri(join, a.Source), "打开会议链接"));
         // QQ 等发系统通知的软件：原通知还在时，给一个去通知中心的入口——点原通知，软件自己会跳到那个会话
