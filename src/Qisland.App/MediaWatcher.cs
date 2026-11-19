@@ -1,3 +1,4 @@
+using Qisland.Core;
 ﻿using System.IO;
 using System.Net.Http;
 using System.Runtime.InteropServices;
@@ -11,9 +12,13 @@ namespace Qisland.App;
 public sealed record MediaState(
     string Title, string Artist, string App, string AppSource, bool Playing,
     BitmapSource? Art, TimeSpan Position, TimeSpan Duration, DateTime PositionAt,
-    bool Video = false, int Sessions = 1, bool CanSeek = false, string? SongId = null);
+    bool Video = false, int Sessions = 1, bool CanSeek = false, string? SongId = null, bool FromSmtc = true, string Aumid = "");
 
-/// <summary>系统媒体会话（网易云、QQ 音乐、Spotify、浏览器都会上报）：读歌名/封面/进度，并能切歌暂停。</summary>
+/// <summary>
+/// 系统媒体会话（SMTC：网易云、QQ 音乐、酷狗、酷我、Apple Music、Spotify、foobar2000、浏览器……）：读歌名/封面/进度，并能切歌暂停。
+/// 进度统一走 <see cref="PlaybackClock"/>：播放器报的时间轴只在差得多时才对齐，平时按本地时钟推，歌词不抖。
+/// 网易云同时读它的日志拿 songId（歌词按 id 取，不会取到别的版本）；网易云的 SMTC 时间轴不在动时，退回日志里的进度。
+/// </summary>
 public sealed class MediaWatcher
 {
     private readonly Dispatcher _ui;
@@ -23,6 +28,9 @@ public sealed class MediaWatcher
     // 每个会话挂一个播放状态监听；会话关掉（浏览器标签页、播放器退出）就摘掉，不让它们越攒越多
     private readonly Dictionary<GlobalSystemMediaTransportControlsSession, Windows.Foundation.TypedEventHandler<GlobalSystemMediaTransportControlsSession, PlaybackInfoChangedEventArgs>> _hooked = [];
     private TimeSpan _start;
+    private readonly PlaybackClock _clock = new();
+    private string _sessionsLogged = "";
+    private string? _clockCompared;
     private string _artKey = "";
     private BitmapSource? _art;
     public MediaState? Current { get; private set; }
@@ -87,6 +95,7 @@ public sealed class MediaWatcher
     private string? _ncmLogged;
     private long _ncmCheckedAt;
     private bool _ncmEligible;
+    private volatile bool _ncmSmtc;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string title, string artist, string pic, double dur)> _ncmMeta = new();
     private readonly HashSet<string> _ncmMetaLoading = [];
     private volatile Tuple<string, BitmapSource>? _ncmArt; // 封面和它的 songId 一起换，避免串歌
@@ -109,7 +118,8 @@ public sealed class MediaWatcher
             MediaState? st = null;
             // 查进程和系统会话比读文件贵：每 3 秒才查一次，中间沿用结果
             var now = Environment.TickCount64;
-            if (now - _ncmCheckedAt > 3000) { _ncmCheckedAt = now; _ncmEligible = !SmtcHasCloudMusic() && NcmElog.ClientRunning(); }
+            // 网易云开了 SMTC 以后，歌名 / 封面 / 状态 / 控制都走 SMTC；日志照样读（只读、共享读），为了拿 songId 和备用进度
+            if (now - _ncmCheckedAt > 3000) { _ncmCheckedAt = now; _ncmSmtc = SmtcHasCloudMusic(); _ncmEligible = NcmElog.ClientRunning(); }
             if (_ncmEligible)
             {
                 _ncm.Poll();
@@ -117,8 +127,9 @@ public sealed class MediaWatcher
             }
             var prev = _ncmCur;
             _ncmCur = st;
-            var drift = st != null && prev != null && Current?.SongId == st.SongId && Current?.AppSource == "music"
+            var drift = st != null && prev != null && Current?.SongId == st.SongId && Current is { AppSource: "music", FromSmtc: false }
                 && Math.Abs((LivePosition() - st.Position).TotalSeconds) > 1.5;
+            CompareClocks(st);
             if (st?.SongId != null && st.SongId != _ncmLogged) { _ncmLogged = st.SongId; App.Log($"网易云(日志): {st.SongId} {st.Title} - {st.Artist} {(st.Playing ? "播放" : "暂停")} {st.Position:mm\\:ss}"); }
             if (!Same(prev, st) || prev?.SongId != st?.SongId || drift) _ = RefreshAsync();
         }
@@ -143,7 +154,17 @@ public sealed class MediaWatcher
         var pos = c.Position;
         if (dur > TimeSpan.Zero && pos > dur) pos = dur;
         return new MediaState(title, artist, "网易云音乐", "music", c.Playing, _ncmArt is { } art && art.Item1 == id ? art.Item2 : null,
-            pos, dur, DateTime.Now, false, 1, false, id);
+            pos, dur, DateTime.Now, false, 1, false, id, FromSmtc: false, Aumid: "cloudmusic.exe");
+    }
+
+    // 网易云同时有 SMTC 和日志时，每首歌放到 15 秒左右记一次两边进度的差，方便判断哪边准（只记时间，不记别的）
+    private void CompareClocks(MediaState? log)
+    {
+        if (log?.SongId is not { } id || !log.Playing || Current is not { AppSource: "music", FromSmtc: true } c || c.SongId != id) return;
+        if (_clockCompared == id || log.Position < TimeSpan.FromSeconds(15)) return;
+        _clockCompared = id;
+        var smtc = _clock.Position(DateTime.Now, c.Duration);
+        App.Log($"网易云 进度对比: SMTC {smtc:mm\\:ss\\.f}（{(_clock.Live ? "时间轴在走" : "时间轴不动")}）/ 日志 {log.Position:mm\\:ss\\.f}，差 {(smtc - log.Position).TotalMilliseconds:+0;-0} ms");
     }
 
     // songId → 歌名、歌手、封面（公开接口，不带任何账号信息）
@@ -195,11 +216,12 @@ public sealed class MediaWatcher
         keybd_event(vk, 0, Extended | KeyUp, UIntPtr.Zero);
         App.Log($"网易云控制：媒体键 0x{vk:X2}");
     }
-    private bool CurrentIsNcm => Current is { AppSource: "music", SongId: not null } && _ncmCur != null;
+    private bool CurrentIsNcm => Current is { AppSource: "music", SongId: not null, FromSmtc: false } && _ncmCur != null;
 
     private void Attach()
     {
         HookAll();
+        LogSessions();
         var s = Pick();
         if (!ReferenceEquals(s, _session))
         {
@@ -244,6 +266,31 @@ public sealed class MediaWatcher
             }
         }
         catch { }
+    }
+
+    /// <summary>会话列表变化时记一行：有哪些软件在向系统报播放（只记软件名和状态，不记歌名）。</summary>
+    private void LogSessions()
+    {
+        try
+        {
+            var list = All().Select(x =>
+            {
+                var id = x.SourceAppUserModelId ?? "";
+                return $"{AppName(id).Item1}[{ShortAumid(id)}]";
+            }).ToList();
+            var line = string.Join(", ", list);
+            if (line == _sessionsLogged) return;
+            _sessionsLogged = line;
+            App.Log($"media: {list.Count} 个会话 · {(list.Count == 0 ? "无" : line)}");
+        }
+        catch { }
+    }
+
+    private static string ShortAumid(string a)
+    {
+        var i = a.IndexOf('_'); var j = a.IndexOf('!');
+        if (i > 0 && j > i) a = a[..i] + a[j..];      // 去掉包族名里的哈希
+        return a.Length > 40 ? a[..40] : a;
     }
 
     private List<GlobalSystemMediaTransportControlsSession> All()
@@ -298,6 +345,7 @@ public sealed class MediaWatcher
                 var st = Choose(await Read(_session));
                 await _ui.InvokeAsync(() =>
                 {
+                    Clock(st);
                     var changed = !Same(Current, st);
                     Current = st;
                     if (changed) Changed?.Invoke();
@@ -314,6 +362,14 @@ public sealed class MediaWatcher
     {
         var n = _ncmCur;
         if (n == null) return smtc;
+        if (_ncmSmtc)
+        {
+            // 网易云自己在报 SMTC：界面以 SMTC 为准，只从日志补 songId（歌词按 id 取）和时长；SMTC 一时读不到才用日志
+            if (smtc == null) return n;
+            if (smtc is { AppSource: "music" } && Lrc.Norm(smtc.Title) is var a && Lrc.Norm(n.Title) is var b && a.Length > 0 && (a == b || a.Contains(b) || b.Contains(a)))
+                return smtc with { SongId = n.SongId, Duration = smtc.Duration > TimeSpan.Zero ? smtc.Duration : n.Duration };
+            return smtc;
+        }
         if (smtc is { Playing: true } && !n.Playing) return smtc with { Sessions = smtc.Sessions + 1 };
         return smtc == null ? n : n with { Sessions = smtc.Sessions + 1 }; // 都没在放时网易云优先（浏览器标签页常年挂着暂停的会话）
     }
@@ -338,6 +394,11 @@ public sealed class MediaWatcher
         var video = props.PlaybackType == Windows.Media.MediaPlaybackType.Video;
         var title = props.Title.Trim();
         var artist = (props.Artist ?? "").Trim();
+        // Apple Music（Windows）把「歌手 — 专辑」放在 Artist 里
+        if (src == "applemusic") artist = MediaText.SplitAppleArtist(artist, props.AlbumTitle).artist;
+        // 个别播放器不报歌手，把「歌名 - 歌手」塞在标题里
+        if (!video && artist.Length == 0 && src is not ("chrome" or "edge" or "firefox" or "browser" or "bilibili" or "potplayer"))
+            (title, artist) = MediaText.SplitTitleArtist(title, artist);
         if (src is "chrome" or "edge" or "firefox" or "browser")
         {
             var (clean, site) = CleanWebTitle(title);
@@ -357,7 +418,7 @@ public sealed class MediaWatcher
         var canSeek = pb?.Controls?.IsPlaybackPositionEnabled == true && dur > TimeSpan.FromSeconds(1);
         return new MediaState(title, artist, app, src, playing, _art,
             tl.Position - tl.StartTime, dur < TimeSpan.Zero ? TimeSpan.Zero : dur, tl.LastUpdatedTime.LocalDateTime,
-            video, Math.Max(1, All().Count), canSeek);
+            video, Math.Max(1, All().Count), canSeek, Aumid: aumid);
     }
 
     private static async Task<BitmapSource?> LoadArt(Windows.Storage.Streams.IRandomAccessStreamReference r)
@@ -391,16 +452,23 @@ public sealed class MediaWatcher
         if (a.Contains("kugou")) return ("酷狗音乐", "kugou");
         if (a.Contains("kwmusic") || a.Contains("kuwo")) return ("酷我音乐", "kuwo");
         if (a.Contains("applemusic") || a.Contains("appleinc")) return ("Apple Music", "applemusic");
+        if (a.Contains("foobar")) return ("foobar2000", "foobar");
+        if (a.Contains("toside") || a.Contains("lx-music") || a.Contains("lxmusic")) return ("洛雪音乐", "exe:lx-music-desktop");
+        if (a.Contains("sodamusic") || a.Contains("汽水")) return ("汽水音乐", "exe:SodaMusic");
+        if (a.Contains("musicbee")) return ("MusicBee", "exe:MusicBee");
+        if (a.Contains("aimp")) return ("AIMP", "exe:AIMP");
+        if (a.Contains("tidal")) return ("TIDAL", "exe:TIDAL");
         if (a.Contains("zunemusic")) return ("媒体播放器", "player");
         if (a.Contains("potplayer")) return ("PotPlayer", "potplayer");
         if (a.Contains("vlc")) return ("VLC", "potplayer");
-        if (a.Contains("foobar")) return ("foobar2000", "player");
         if (a.Contains("bilibili") || a.Contains("哔哩")) return ("哔哩哔哩", "bilibili");
         if (a.Contains("msedge")) return ("Edge", "edge");
         if (a.Contains("chrome")) return ("Chrome", "chrome");
         if (a.Contains("firefox") || a.Contains("308046b0af4a39cb")) return ("Firefox", "firefox");
         if (a.Contains("opera") || a.Contains("brave") || a.Contains("360") || a.Contains("qqbrowser")) return ("浏览器", "browser");
         var n = Path.GetFileNameWithoutExtension(aumid);
+        // 其它直接用 exe 名报会话的软件：按进程名找图标
+        if (aumid.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && n.Length > 0) return (n, "exe:" + n);
         return (string.IsNullOrEmpty(n) ? "正在播放" : n, "player");
     }
 
@@ -421,12 +489,26 @@ public sealed class MediaWatcher
         return (t, null);
     }
 
+    /// <summary>每次读到新状态时喂给进度时钟（UI 线程）。</summary>
+    private void Clock(MediaState? st)
+    {
+        if (st == null) { _clock.Reset(); return; }
+        var key = $"{st.Aumid}\u0001{st.SongId ?? st.Title}\u0001{st.Artist}";
+        _clock.Sample(key, st.Position, st.PositionAt, st.Playing, DateTime.Now);
+    }
+
+    /// <summary>
+    /// 当前进度。一般用进度时钟；网易云的 SMTC 时间轴从来没动过（只在开始时报一次 0）而日志里有同一首歌时，用日志推算的进度。
+    /// </summary>
     public TimeSpan LivePosition()
     {
         if (Current is not { } c) return TimeSpan.Zero;
-        var p = c.Playing ? c.Position + (DateTime.Now - c.PositionAt) : c.Position;
-        if (c.Duration > TimeSpan.Zero && p > c.Duration) p = c.Duration;
-        return p < TimeSpan.Zero ? TimeSpan.Zero : p;
+        if (c is { AppSource: "music", FromSmtc: true, SongId: { } id } && !_clock.Live && _ncmCur is { } n && n.SongId == id)
+        {
+            var p = n.Playing ? n.Position + (DateTime.Now - n.PositionAt) : n.Position;
+            return n.Duration > TimeSpan.Zero && p > n.Duration ? n.Duration : p;
+        }
+        return _clock.Position(DateTime.Now, c.Duration > TimeSpan.Zero ? c.Duration : null);
     }
 
     /// <summary>拖进度条：fraction 0~1。</summary>
@@ -435,11 +517,12 @@ public sealed class MediaWatcher
         if (Current is not { CanSeek: true } c) return;
         var target = _start + TimeSpan.FromSeconds(c.Duration.TotalSeconds * Math.Clamp(fraction, 0, 1));
         Current = c with { Position = target - _start, PositionAt = DateTime.Now };
+        _clock.Seek(target - _start, DateTime.Now);
         Run(s => s.TryChangePlaybackPositionAsync(target.Ticks));
     }
 
     /// <summary>截图演示用：直接塞一个播放状态，不连系统会话。</summary>
-    public void ShowDemo(MediaState s) { Current = s; Changed?.Invoke(); }
+    public void ShowDemo(MediaState s) { Current = s; Clock(s); Changed?.Invoke(); }
 
     public void Toggle() { if (CurrentIsNcm) NcmCommand(14); else Run(s => s.TryTogglePlayPauseAsync()); }
     public void Next() { if (CurrentIsNcm) NcmCommand(11); else Run(s => s.TrySkipNextAsync()); }

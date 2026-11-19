@@ -136,7 +136,7 @@ public sealed partial class IslandWindow : Window
             RebuildBubble(_store.Pill());
             if (_mode == Mode.Expanded && !_animating) RebuildExpanded(); else _expDirty = true;
         });
-        foreach (var src in new[] { "wechat", "qq", "music", "qqmusic", "codex", "deepseek-harness", "doubao", "trae", "workbuddy", "info-station", "spotify", "kugou", "kuwo", "potplayer" })
+        foreach (var src in new[] { "wechat", "qq", "music", "qqmusic", "codex", "deepseek-harness", "doubao", "trae", "workbuddy", "info-station", "spotify", "kugou", "kuwo", "potplayer", "applemusic", "foobar" })
             AppIcons.Warm(src);
         _poll.Tick += (_, _) => Poll();
         _tick.Tick += (_, _) => OnSecond();

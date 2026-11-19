@@ -638,7 +638,7 @@ public sealed class App : Application
         ledger.DropDownItems.Add("…");
         menu.Items.Add(ledger);
         menu.Items.Add("编辑倒计时", null, (_, _) => Process.Start(new ProcessStartInfo("notepad.exe", "\"" + Countdowns.PathName + "\"") { UseShellExecute = true }));
-        var lyr = new System.Windows.Forms.ToolStripMenuItem("显示歌词") { CheckOnClick = true, Checked = LyricsService.Enabled, ToolTipText = "播放音乐时胶囊里滚动显示当前这句歌词（网易云 / LRCLIB）" };
+        var lyr = new System.Windows.Forms.ToolStripMenuItem("显示歌词") { CheckOnClick = true, Checked = LyricsService.Enabled, ToolTipText = "播放音乐时胶囊里滚动显示当前这句歌词。网易云按歌曲 id 取；Apple Music、QQ 音乐、酷狗、Spotify 等按歌名 + 歌手 + 时长到网易云 / LRCLIB 查，查不到就不显示。在歌词上滚滚轮可微调快慢" };
         lyr.CheckedChanged += (_, _) => Dispatcher.BeginInvoke(() => { LyricsService.Enabled = lyr.Checked; _lyrics?.OnTrack(null); _lyrics?.OnTrack(_media?.Current); });
         menu.Items.Add(lyr);
         var otp = new System.Windows.Forms.ToolStripMenuItem("通知里的验证码一键复制") { CheckOnClick = true, Checked = ToastMirror.OtpEnabled, ToolTipText = "通知预览里有验证码时，岛上单独弹一条带「复制」的卡片；验证码只在内存里，不记日志、不进剪贴板历史" };

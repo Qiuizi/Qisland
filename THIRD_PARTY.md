@@ -35,3 +35,9 @@ WinIslands 应用本体为 **MIT License**（见 [LICENSE](LICENSE)）。
 | 岛仔 Daozai（Renly1994/xiaotang-daozai） | 岛体布局、纯黑/液态玻璃配色、字体层级、页标题、圆形徽标、页码豆与组件视觉语言；WPF 端按其设计常量重实现 | MIT |
 | LiquidMusic（JudeKwong） | 歌词滚动 ease-out cubic tween、逐行焦点缩放/透明度、程序坞液态玻璃配方（半透明底 + 1px 内高光 + 柔和投影）；WPF 端按相同参数重实现 | 同作者项目，随本仓库分发 |
 
+## 在线数据源 / 思路参考（v4）
+
+| 项目 | 用途 | 许可证 |
+| --- | --- | --- |
+| LRCLIB（lrclib.net） | 非网易云播放器的同步歌词：按歌名 + 歌手搜索，本地按时长（≤ 3 秒）和版本过滤，结果缓存在本机，低频请求 | 公开免费 API，歌词内容版权归原权利人 |
+| 岛仔 Daozai（Renly1994/xiaotang-daozai） | 思路参考：Apple Music 的「歌手 — 专辑」字段拆分、歌词候选时长约束与版本过滤、迟到歌词作废、按歌记住的歌词偏移；C# 自行实现，未复制代码 | MIT |
