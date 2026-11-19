@@ -73,10 +73,14 @@ h2{font-size:clamp(32px,5.2vw,64px);font-weight:700;letter-spacing:-.03em;line-h
 #mic{width:6px;height:6px;border-radius:3px;background:var(--orange);margin-left:8px;opacity:0;transform:scale(0);transition:opacity .3s,transform .4s var(--spring);box-shadow:0 0 8px rgba(255,159,10,.9)}
 #mic.on{opacity:1;transform:scale(1);animation:pulse 1.6s ease-in-out infinite}
 @keyframes pulse{50%{box-shadow:0 0 3px rgba(255,159,10,.5)}}
-.v{position:absolute;top:0;left:50%;opacity:0;filter:blur(6px);transform:scale(.96);transition:opacity .22s,filter .22s,transform .35s var(--out);pointer-events:none;font-size:13px;color:var(--fg)}
-.v.on{opacity:1;filter:none;transform:none;pointer-events:auto;transition-delay:.04s}
-.v .st{opacity:0;transform:translateY(6px)}
-.v.on .st{animation:rowIn .42s var(--out) both;animation-delay:calc(var(--i,0) * 50ms + 60ms)}
+.v{position:absolute;top:0;left:50%;opacity:0;pointer-events:none;font-size:13px;color:var(--fg)}
+.v.on{opacity:1;filter:none;transform:none;pointer-events:auto}
+.v .st{opacity:1;transform:none}
+@media (prefers-reduced-motion:no-preference){
+  .v{filter:blur(6px);transform:scale(.96);transition:opacity .22s,filter .22s,transform .35s var(--out)}
+  .v.on{transition-delay:.04s}
+  .v.on .st{animation:rowIn .42s var(--out) both;animation-delay:calc(var(--i,0) * 50ms + 60ms)}
+}
 @keyframes rowIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
 .cmp{display:flex;align-items:center;gap:9px;height:36px;padding:0 12px 0 7px;white-space:nowrap}
 .cmp .grow{flex:1;min-width:0;overflow:hidden;display:flex;gap:6px;align-items:center}
@@ -202,6 +206,8 @@ footer a{color:var(--mute)}footer a:hover{color:var(--fg)}
   html{scroll-behavior:auto}
   *,*::before,*::after{animation:none!important;transition:none!important}
   .rv{opacity:1;transform:none;filter:none}
+  .v.on{opacity:1;filter:none;transform:none}
+  .v .st{opacity:1;transform:none;filter:none}
 }
 </style>
 </head>
@@ -214,7 +220,7 @@ footer a{color:var(--mute)}footer a:hover{color:var(--fg)}
 <!-- 岛：固定在顶上，按当前页变形 -->
 <div id="iwrap">
   <div id="island" role="button" tabindex="0" aria-label="Qisland 演示：悬停或点击展开"><div class="sweep"></div>
-    <div class="v" data-v="idle" style="width:176px;height:34px;margin-left:-88px">
+    <div class="v on" data-v="idle" style="width:176px;height:34px;margin-left:-88px">
       <div style="display:flex;justify-content:space-between;align-items:center;height:34px;padding:0 16px"><b class="clock" style="font-size:15px;font-variant-numeric:tabular-nums">--:--</b><span class="sec wk" style="font-size:12.5px">周三</span></div>
     </div>
     <div class="v" data-v="home" style="width:452px;height:150px;margin-left:-226px">
@@ -417,7 +423,7 @@ addEventListener('resize', paint); paint();
 let cur = null, base = 'idle', hoverAlt = null, pinned = false, cycleT = null, resetT = null;
 function show(n) {
   if (n === cur) return;
-  if (n === 'hidden') { wrap.classList.add('hide'); return; }
+  if (n === 'hidden') { wrap.classList.add('hide'); cur = 'hidden'; return; }
   wrap.classList.remove('hide');
   const [w, h] = size(n);
   island.style.width = w + 'px'; island.style.height = h + 'px'; island.style.borderRadius = (h <= 40 ? h / 2 : 30) + 'px';
@@ -526,6 +532,10 @@ slides.forEach(s => io.observe(s));
 
 /* ---- 翻页：一次手势一页 ---- */
 const nearest = () => { let b = 0, d = 1e9; slides.forEach((s, i) => { const x = Math.abs(s.offsetTop - scrollY); if (x < d) { d = x; b = i; } }); return b; };
+/* 不等 IntersectionObserver：hash 直达或首屏立刻露出对应岛内容 */
+{ const i = slides.findIndex(s => s.id === location.hash.slice(1)); activate(i >= 0 ? i : nearest()); }
+let scrollEndT = 0;
+addEventListener('scroll', () => { clearTimeout(scrollEndT); scrollEndT = setTimeout(() => activate(nearest()), 160); }, { passive: true });
 function go(i) { i = Math.max(0, Math.min(slides.length - 1, i)); scrollTo({ top: slides[i].offsetTop, behavior: reduce ? 'auto' : 'smooth' }); }
 let lastWheel = 0, lastGo = 0;
 addEventListener('wheel', e => {
