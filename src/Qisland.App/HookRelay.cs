@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net.Sockets;
 using System.Text;
+using Qisland.Core;
 
 namespace Qisland.App;
 
@@ -21,8 +22,8 @@ public static class HookRelay
         }
         catch { body = ""; }
 
-        var output = "{}";
-        if (approve && body.Contains("PermissionRequest"))
+        var output = HookPlans.RelayOutput(source, body);
+        if (approve && AgentPolicy.CanApproveOnIsland(source) && body.Contains("PermissionRequest"))
         {
             // 没拿到决定就什么都不输出，Codex 回到终端里正常问你
             output = "";

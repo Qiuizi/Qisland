@@ -22,6 +22,8 @@ public sealed class ApiServer : IDisposable
     private readonly CancellationTokenSource _cts = new();
     /// <summary>挂起式审批：hook 连着不放，直到岛上给出决定（allow / deny / 空）。</summary>
     public Func<string, string, Task<string>>? Approval { get; set; }
+    /// <summary>每条 Agent 事件（已经在 UI 线程上），给 AI 页的多会话列表用。</summary>
+    public Action<IslandActivity>? AgentEvent { get; set; }
 
     public ApiServer(int port, ActivityStore store, Action<Action> postToUi)
     {
@@ -148,7 +150,7 @@ public sealed class ApiServer : IDisposable
         if (method == "POST" && path.StartsWith("/v1/agent/", StringComparison.Ordinal))
         {
             var a = AgentEventParser.Parse(body, path["/v1/agent/".Length..]);
-            if (a is not null) _post(() => _store.Upsert(a));
+            if (a is not null) _post(() => { _store.Upsert(a); AgentEvent?.Invoke(a); });
             return (200, "{\"ok\":true}");
         }
 

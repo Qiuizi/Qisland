@@ -35,6 +35,8 @@ public sealed class ApprovalBroker
 
     public async Task<string> Request(string source, string body)
     {
+        // 只有 Codex 和 DeepSeek Harness 能在岛上审批；其它（包括 Claude Code）立即回「去原处确认」，岛上只显示等待提示
+        if (!AgentPolicy.CanApproveOnIsland(source)) return "";
         var p = Parse(source, body);
         _pending[p.Id] = p;
         _post(() => Changed?.Invoke());

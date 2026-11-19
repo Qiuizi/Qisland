@@ -9,7 +9,7 @@ using ActivityKind = Qisland.Core.ActivityKind;
 
 namespace Qisland.App;
 
-public sealed class App : Application
+public sealed partial class App : Application
 {
     public const int Port = 9840;
     private static App? _self;
@@ -37,6 +37,8 @@ public sealed class App : Application
     private static bool? _debugDumps;
 
     private ApprovalBroker? _approvals;
+    private readonly AiSettings _ai = AiSettings.Load();
+    private DoubaoQuotaService? _doubao;
     private CodexQuota? _quota;
     private VolumeWatcher? _volume;
     private SystemWatch _sys = null!;
@@ -111,7 +113,7 @@ public sealed class App : Application
         catch (Exception ex) { Log("帧率设置: " + ex.Message); }
         Log($"屏幕刷新率 {Hz} Hz");
 
-        _window = new IslandWindow(_store);
+        _window = new IslandWindow(_store) { Ai = _ai };
         _window.Show();
 
         try
@@ -221,13 +223,23 @@ public sealed class App : Application
             _approvals = new ApprovalBroker(a => Dispatcher.BeginInvoke(a));
             _window.Approvals = _approvals; _approvals.Changed += _window.OnApprovalsChanged;
             if (_api != null) _api.Approval = _approvals.Request;
+            if (_api != null) _api.AgentEvent = a => _window?.OnAgentEvent(a);
             if (_api != null) _api.Bench = () => _window?.RunBench();
             if (_api != null) { _api.PerfJson = _perf.Json; _api.Peek = s => _window?.PeekFor(s); }
             PerfGuard.Changed += () => _window?.OnPerfChanged();
             _quota = new CodexQuota(a => Dispatcher.BeginInvoke(a));
             _window.Quota = _quota; _quota.Changed += _window.OnQuotaChanged;
+            _quota.Changed += _window.OnAiQuotaChanged;
         }
         catch (Exception ex) { Log("Codex: " + ex.Message); }
+        try
+        {
+            _doubao = new DoubaoQuotaService(_ai, a => Dispatcher.BeginInvoke(a));
+            _window.Doubao = _doubao; _doubao.Changed += _window.OnAiQuotaChanged;
+            _doubao.Start();
+            _ = BalanceLoop();
+        }
+        catch (Exception ex) { Log("AI 额度: " + ex.Message); }
         try { _todo = new TodoFile(_store); _window.Todo = _todo; _todo.Changed += () => _window.SetTodos(_todo.Open); _window.SetTodos(_todo.Open); }
         catch (Exception ex) { Log("待办: " + ex.Message); }
         _ime = new ImeWatch();
@@ -421,6 +433,31 @@ public sealed class App : Application
             _store.Upsert(new IslandActivity("xxt:login", HomeworkHub.Source, "学习通已连接", $"{xxt.UserName} · 正在读取作业…", ActivityKind.Done, 60, DurationSeconds: 5));
         };
         w.Show();
+    }
+
+    /// <summary>DeepSeek / Kimi 余额：只在填了 Key 时读，1 小时一次。</summary>
+    private async Task BalanceLoop()
+    {
+        await Task.Delay(TimeSpan.FromSeconds(40));
+        while (true)
+        {
+            try
+            {
+                if (_ai.BalancesOn && _window != null)
+                {
+                    _window.Balances = await AiClient.Balances(CancellationToken.None);
+                    _window.OnAiQuotaChanged();
+                }
+            }
+            catch (Exception ex) { Log("余额: " + ex.GetType().Name); }
+            await Task.Delay(TimeSpan.FromHours(1));
+        }
+    }
+
+    private void OpenAiSettings()
+    {
+        if (_window == null) return;
+        new AiSettingsWindow(_ai, _window.ApplyAiHotkeys).Show();
     }
 
     private void RestoreChanges()
@@ -621,6 +658,8 @@ public sealed class App : Application
                 : "额度：还没读到（点击刷新）";
         };
         menu.Items.Add(cdx);
+        menu.Items.Add(AiMenu());
+        menu.Items.Add(IntegrationsMenu());
         var ledger = new System.Windows.Forms.ToolStripMenuItem("对其他软件的改动");
         ledger.DropDownOpening += (_, _) =>
         {
@@ -630,7 +669,7 @@ public sealed class App : Application
             foreach (var e in list)
                 ledger.DropDownItems.Add(new System.Windows.Forms.ToolStripMenuItem($"{e.App} · {e.What}") { Enabled = false, ToolTipText = $"{e.Target}\n{(e.Detected ? "启动时检测到" : "记录于")} {e.At:yyyy-MM-dd HH:mm}" });
             ledger.DropDownItems.Add(new System.Windows.Forms.ToolStripSeparator());
-            var restore = new System.Windows.Forms.ToolStripMenuItem("一键还原…") { Enabled = list.Any(x => x.Id is "codex-hooks" or "dsh-bridge") };
+            var restore = new System.Windows.Forms.ToolStripMenuItem("一键还原…") { Enabled = list.Any(x => x.Id is "codex-hooks" or "dsh-bridge" || HookPlans.ById(x.Id) != null) };
             restore.Click += (_, _) => Dispatcher.BeginInvoke(RestoreChanges);
             ledger.DropDownItems.Add(restore);
             ledger.DropDownItems.Add("打开账本文件", null, (_, _) => { ChangeLedger.Sync(); if (File.Exists(ChangeLedger.PathName)) Process.Start(new ProcessStartInfo("notepad.exe", "\"" + ChangeLedger.PathName + "\"") { UseShellExecute = true }); });

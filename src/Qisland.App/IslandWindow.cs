@@ -834,6 +834,7 @@ public sealed partial class IslandWindow : Window
         var music = Media?.Current;
 
         foreach (var ac in ApprovalCards()) stack.Children.Add(ac);
+        if (AiCardView() is { } aiCard) stack.Children.Add(aiCard);
         if (FocusDoneCard() is { } fd) stack.Children.Add(fd);
         if (ranked.Count == 0)
         {

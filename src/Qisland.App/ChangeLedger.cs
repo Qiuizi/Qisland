@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 namespace Qisland.App;
 
 /// <summary>
-/// 外部改动账本：Qisland 往别的软件里写过的每一处（Codex 的 hooks.json、DSH 的桥接插件）都记在
+/// 外部改动账本：Qisland 往别的软件里写过的每一处（Codex 的 hooks.json、DSH 的桥接插件、你同意接入的 Gemini / Qwen / Cursor / OpenCode）都记在
 /// %APPDATA%\Qisland\changes.json；托盘里一键还原。还原只删 Qisland 自己加的条目，你自己的配置原样保留，改前先备份。
 /// 早先用脚本装的改动没有记录：启动时按特征（命令里带 Qisland.exe、依赖名 dsh-qisland-bridge）认出来补记。
 /// </summary>
@@ -59,6 +59,15 @@ public static class ChangeLedger
                 list.Add(new Entry("dsh-bridge", "DeepSeek Harness", DshPackage, "桌面版配置里装了 dsh-qisland-bridge 审批插件", File.GetLastWriteTime(DshPackage), true));
         }
         else list.RemoveAll(e => e.Id == "dsh-bridge");
+        foreach (var t in Qisland.Core.HookPlans.All)
+        {
+            if (Integrations.Installed(t))
+            {
+                if (list.All(e => e.Id != t.Id))
+                    list.Add(new Entry(t.Id, t.App, Integrations.FullPath(t), "检测到 Qisland 的接入", File.GetLastWriteTime(Integrations.FullPath(t)), true));
+            }
+            else list.RemoveAll(e => e.Id == t.Id);
+        }
         if (JsonSerializer.Serialize(list) != before) Save(list);
         return list;
     }
@@ -138,6 +147,7 @@ public static class ChangeLedger
                 {
                     "codex-hooks" when File.Exists(CodexHooks) => RestoreCodex(),
                     "dsh-bridge" when File.Exists(DshPackage) => RestoreDsh(),
+                    _ when Qisland.Core.HookPlans.ById(e.Id) is { } t => Integrations.Remove(t, ask: false),
                     _ => null,
                 };
                 if (r != null) { results.Add(r); App.Log("改动账本还原: " + r); }

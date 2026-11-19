@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using Qisland.Core;
 
 namespace Qisland.App;
 
@@ -31,6 +32,7 @@ public sealed partial class IslandWindow
 
     private void ReadClipboard()
     {
+        if (DateTime.Now < SelectionGrabber.SuppressClipUntil) return;   // 划词时的临时复制 / 还原，不进历史
         try
         {
             var data = Clipboard.GetDataObject();
@@ -162,7 +164,7 @@ public sealed partial class IslandWindow
         if (c.Image == null && c.Files == null && !LooksLikeUrl(c.Text) && c.Text.Trim().Length is > 0 and <= 2000)
         {
             var busy = _translating.Contains(c);
-            var tb = RoundIcon(busy ? "\uE895" : "\uE8C1", 22, () => _ = TranslateClip(c), Theme.Blue, QuickTranslate.HasCjk(c.Text) ? "译成英文" : "译成中文");
+            var tb = RoundIcon(busy ? "\uE895" : "\uE8C1", 22, () => _ = TranslateClip(c), Theme.Blue, AiCatalog.HasCjk(c.Text) ? "译成英文" : "译成中文");
             tb.Margin = new Thickness(0, 0, 4, 0);
             tb.Opacity = _translated.ContainsKey(c) || busy ? 1 : 0;
             g.MouseEnter += (_, _) => tb.Opacity = 1;
@@ -184,8 +186,9 @@ public sealed partial class IslandWindow
         if (_translated.Remove(c)) { RebuildExpanded(); return; }   // 再点一次收起
         _translating.Add(c);
         RebuildExpanded();
-        try { _translated[c] = await QuickTranslate.Run(c.Text); }
-        catch (Exception ex) { _translated[c] = "⚠ 翻译失败：" + ex.Message; }
+        try { _translated[c] = await AiClient.Translate(Ai, c.Text, CancellationToken.None); }
+        catch (AiException ex) { _translated[c] = "⚠ 翻译失败：" + ex.Message; }
+        catch (Exception ex) { _translated[c] = "⚠ 翻译失败：" + ex.GetType().Name; }
         finally { _translating.Remove(c); }
         if (_mode == Mode.Expanded && _page == Page.Clip && !_animating) RebuildExpanded(); else _expDirty = true;
     }
