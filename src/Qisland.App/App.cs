@@ -193,7 +193,8 @@ public sealed partial class App : Application
         _sys = new SystemWatch(_store);
         _upd = new Updater(_store, Http, Quit);
         _ = _upd.Loop();
-        _window!.OpenRequested = a => OpenLogin(a) || _upd.Open(a) || _sys.Open(a) || (_calls?.Open(a) ?? false) || Launcher.Open(a);
+        StartHealth();
+        _window!.OpenRequested = a => OpenHealth(a) || OpenLogin(a) || _upd.Open(a) || _sys.Open(a) || (_calls?.Open(a) ?? false) || Launcher.Open(a);
         _window.ApplyLook(LoadLook());
         _timer = new FocusTimer(_store);
         _window.Timer = _timer;

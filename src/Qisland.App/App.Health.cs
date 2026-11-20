@@ -1,0 +1,89 @@
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Windows.Threading;
+using Qisland.Core;
+
+namespace Qisland.App;
+
+/// <summary>
+/// 健康：喝水记录（water.txt，只存今天的杯数）、喝水提醒、久坐提醒。
+/// 两个提醒默认关（托盘 → 岛上提示里打开）；判断“在用电脑”只看系统的最后输入时间（GetLastInputInfo），不看按了什么。
+/// 思路参考小糖岛仔（MIT）的健康页，C# 重写。
+/// </summary>
+public sealed partial class App
+{
+    public static readonly HealthSettings Health = new();
+    private static string WaterFile => Path.Combine(DataDir, "water.txt");
+    private static WaterLog? _water;
+    public static WaterLog Water => _water ??= WaterLog.Parse(File.Exists(WaterFile) ? SafeRead(WaterFile) : null, DateTime.Now);
+    private DateTime _waterNudge = DateTime.MinValue, _sitNudge = DateTime.MinValue, _activeSince = DateTime.Now;
+    private DispatcherTimer? _healthTimer;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
+    [DllImport("user32.dll")] private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+
+    /// <summary>距离最后一次键盘 / 鼠标输入多久了。</summary>
+    public static TimeSpan IdleTime()
+    {
+        var li = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
+        if (!GetLastInputInfo(ref li)) return TimeSpan.Zero;
+        var ms = unchecked((uint)Environment.TickCount - li.dwTime);
+        return TimeSpan.FromMilliseconds(ms);
+    }
+
+    /// <summary>连续使用电脑的起点（离开超过 5 分钟就重新算）。</summary>
+    public DateTime ActiveSince => _activeSince;
+
+    private void StartHealth()
+    {
+        // 一分钟看一次，够用且几乎不耗电
+        _healthTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMinutes(1) };
+        _healthTimer.Tick += (_, _) => HealthTick();
+        _healthTimer.Start();
+    }
+
+    private void HealthTick()
+    {
+        var now = DateTime.Now;
+        var idle = IdleTime();
+        _activeSince = HealthClock.TrackActivity(Health, _activeSince, idle, now);
+        var w = Water;
+        w.Roll(now);
+        if (Features.On(Features.Water) && HealthClock.WaterDue(Health, w, _waterNudge, now) && idle < TimeSpan.FromMinutes(2))
+        {
+            _waterNudge = now;
+            _store.Upsert(new IslandActivity("health:water", "health", "该喝水了",
+                $"今天 {w.TotalMl}/{Health.GoalMl} ml · 点一下记一杯 {Health.ServingMl} ml", ActivityKind.Info, 30, DurationSeconds: 12, ResetTtl: true));
+        }
+        if (Features.On(Features.Sit) && HealthClock.SitDue(Health, _activeSince, _sitNudge, idle, now))
+        {
+            _sitNudge = now;
+            var mins = (int)(now - _activeSince).TotalMinutes;
+            _store.Upsert(new IslandActivity("health:sit", "health", $"已经连续坐了 {mins} 分钟",
+                "起来走走、看看远处，离开 5 分钟就重新计时", ActivityKind.Info, 30, DurationSeconds: 12, ResetTtl: true));
+        }
+        _window?.OnHealthChanged();
+    }
+
+    /// <summary>记一杯（ml 可以是负数：撤销）。</summary>
+    public static void DrinkWater(int ml)
+    {
+        Water.Drink(ml, DateTime.Now);
+        try { File.WriteAllText(WaterFile, Water.Serialize()); }
+        catch (Exception ex) { Log("保存 water.txt: " + ex.Message); }
+    }
+
+    private bool OpenHealth(LiveActivity a)
+    {
+        if (a.Id == "health:water")
+        {
+            DrinkWater(Health.ServingMl);
+            _store.Remove(a.Id);
+            _window?.OnHealthChanged();
+            return true;
+        }
+        if (a.Id == "health:sit") { _store.Remove(a.Id); return true; }
+        return false;
+    }
+}

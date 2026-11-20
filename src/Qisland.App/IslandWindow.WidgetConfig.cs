@@ -24,6 +24,7 @@ public sealed partial class IslandWindow
         new("clip", "剪贴板", "\uE77F", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF))), true),
         new("calendar", "日历", "\uE787", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x45, 0x3A))), true),
         new("timer", "专注", "\uE823", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x9F, 0x0A))), true),
+        new("health", "健康", "\uEB51", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0x32, 0xAD, 0xE6))), false),
         new("system", "系统", "\uE950", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0x30, 0xD1, 0x58))), false),
     ];
     private static string WidgetFile => System.IO.Path.Combine(App.DataDir, "widgets.txt");
@@ -158,7 +159,7 @@ public sealed partial class IslandWindow
         _wxTabs.Clear();
         _wxIcons.Clear();
         _cpuT = _memT = _batT = null; _netT = null; _calHost = null; _timerCard = null; _sun = null; _sunHint = null; _wxBody = null;
-        _wView = null;
+        _wView = null; _healthT = null;
         if (_widgetEdit) { BuildWidgetEditor(stack); return; }
 
         // 内容比视口高时必须顶端对齐：WPF 默认会把超高的子元素居中，上面的天气和下面的系统行会被同时裁掉
@@ -255,6 +256,7 @@ public sealed partial class IslandWindow
             case "timer":
                 _timerCard = WCard(null); _timerCard.Height = HalfH; return _timerCard;
             case "todo": return TodoWidget();
+            case "health": return HealthWidget();
             default: return ClipWidget();
         }
     }
@@ -305,6 +307,7 @@ public sealed partial class IslandWindow
             "timer" => (C(0xFFC34D), C(0xFF8A00)),
             "shelf" => (C(0x5FD4DA), C(0x149FB5)),
             "school" => (C(0xD08CFF), C(0x9B3FDB)),
+            "health" => (C(0x7FDBFF), C(0x1A9BE0)),
             _ => (C(0x5EE07A), C(0x24AE45)),
         };
         var bg = new LinearGradientBrush(top, bottom, 90); bg.Freeze();
@@ -365,6 +368,9 @@ public sealed partial class IslandWindow
                 Fill("M12 3.6 22.4 8.6 12 13.6 1.6 8.6Z");
                 Fill("M6 11.4v4.4c0 1.9 2.7 3.6 6 3.6s6-1.7 6-3.6v-4.4l-6 2.9Z", 0.92);
                 Fill("M20.2 9.8h1.4v6.4h-1.4Z", 0.85);
+                break;
+            case "health": // 水滴
+                Fill("M12 2.4c3.6 4.5 6.6 8.3 6.6 12a6.6 6.6 0 0 1-13.2 0c0-3.7 3-7.5 6.6-12Z");
                 break;
             default: // 系统：芯片
                 Fill("F1 M8.5 5h7A3.5 3.5 0 0 1 19 8.5v7a3.5 3.5 0 0 1-3.5 3.5h-7A3.5 3.5 0 0 1 5 15.5v-7A3.5 3.5 0 0 1 8.5 5Z M9.5 9.5v5h5v-5Z");
