@@ -188,7 +188,16 @@ public sealed class YuketangService
     {
         // sessionid 是 12 小时的滑动 Cookie，只要在用就会续，不再拿它提示「几小时后过期」（以前登录后一直挂着「11 小时后过期」）
         HomeworkHub.WarnExpiring(_store, "ykt:expiring", "雨课堂", null);
-        if (!LoggedIn || _busy || DateTime.Now < _next || !App.NetReady()) return;
+        if (!LoggedIn || _busy || DateTime.Now < _next) return;
+        // 本机存的会话 Cookie 已经过期 / 缺失：不发请求（空 Cookie 头会直接抛错，也没意义），直接按登录过期提示扫码
+        bool usable; lock (_ckLock) usable = _cookies.CanAuthenticate("sessionid", DateTimeOffset.UtcNow);
+        if (!usable)
+        {
+            _next = DateTime.Now.AddMinutes(30);
+            if (!Expired) MarkExpired("本机保存的会话 Cookie 已过期或缺失（不再发请求）");
+            return;
+        }
+        if (!App.NetReady()) return;
         _ = Expired ? RecheckExpiredAsync() : RefreshAsync();
     }
 
@@ -269,7 +278,8 @@ public sealed class YuketangService
         using var req = new HttpRequestMessage(HttpMethod.Get, $"https://{Host}{path}");
         if (classroom != null) req.Headers.Add("classroom-id", classroom);
         string cookieHeader; lock (_ckLock) cookieHeader = _cookies.Header(DateTimeOffset.UtcNow);
-        req.Headers.Add("Cookie", cookieHeader);
+        if (cookieHeader.Length == 0) throw new AuthProblem(AuthVerdict.Rejected, "本机没有可用的会话 Cookie");
+        req.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
         req.Headers.Add("xtbz", "ykt");
         using var res = await h.SendAsync(req);
         var deleted = AbsorbCookies(res);

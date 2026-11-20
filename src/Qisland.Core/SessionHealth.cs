@@ -82,9 +82,19 @@ public sealed class CookieSet
 
     public void Set(string name, string value, DateTimeOffset? expires = null) => _c[name] = new Entry(value, expires);
 
+    /// <summary>这个 Cookie 在、有值、没过期（没写过期时间的算会话 Cookie，视为有效）。</summary>
+    public bool IsLive(string name, DateTimeOffset now) =>
+        _c.TryGetValue(name, out var e) && e.Value.Length > 0 && (e.Expires is not { } x || x > now);
+
+    /// <summary>
+    /// 能不能拿去请求：会话 Cookie 有效、而且拼出来的请求头不为空。
+    /// 不能的话就不该发请求（空的 Cookie 头会让 HttpClient 直接抛 FormatException），应当按「登录过期」处理。
+    /// </summary>
+    public bool CanAuthenticate(string sessionCookie, DateTimeOffset now) => IsLive(sessionCookie, now) && Header(now).Length > 0;
+
     /// <summary>Cookie 请求头；过期的不带。</summary>
     public string Header(DateTimeOffset now) =>
-        string.Join("; ", _c.Where(kv => kv.Value.Expires is not { } e || e > now).Select(kv => kv.Key + "=" + kv.Value.Value));
+        string.Join("; ", _c.Where(kv => kv.Value.Value.Length > 0 && (kv.Value.Expires is not { } e || e > now)).Select(kv => kv.Key + "=" + kv.Value.Value));
 
     /// <summary>合并一个 Set-Cookie 头。返回 (changed：值或过期时间有变化, deleted：服务器要删掉它)。</summary>
     public (bool changed, bool deleted) Apply(string setCookie, DateTimeOffset now)
