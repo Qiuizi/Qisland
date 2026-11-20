@@ -18,15 +18,16 @@ public sealed class ClassWatcher : IDisposable
     private readonly ActivityStore _store;
     private readonly FileSystemWatcher? _watcher;
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
-    private string _ics = "";
+    // 课表文本 + 展开的一周；导入时直接换上（不等文件监视），文件删了就清空
+    private readonly TimetableBook _book = new();
+    private IReadOnlyList<ClassSession> _week => _book.Week;
     private DateTime _builtFor = DateTime.MinValue;
-    private IReadOnlyList<ClassSession> _week = [];
     private readonly HashSet<string> _live = [];
     private bool _soon;
     private DateTime _shownDay;
 
     public event Action? Changed;
-    public bool HasTimetable => _ics.Length > 0;
+    public bool HasTimetable => _book.HasTimetable;
     public ClassSession? Current { get; private set; }
     public ClassSession? Next { get; private set; }
 
@@ -35,35 +36,46 @@ public sealed class ClassWatcher : IDisposable
     {
         _store = store;
         _debounce.Tick += (_, _) => { _debounce.Stop(); Load(); };
-        if (demoIcs != null) { _ics = demoIcs; Tick(); return; }
+        if (demoIcs != null) { _book.SetText(demoIcs); Tick(); return; }
         _watcher = new FileSystemWatcher(App.DataDir, "timetable.ics") { NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName, EnableRaisingEvents = true };
         _watcher.Changed += (_, _) => _debounce.Dispatcher.BeginInvoke(Kick);
         _watcher.Created += (_, _) => _debounce.Dispatcher.BeginInvoke(Kick);
         _watcher.Renamed += (_, _) => _debounce.Dispatcher.BeginInvoke(Kick);
+        _watcher.Deleted += (_, _) => _debounce.Dispatcher.BeginInvoke(Kick);   // 删了课表文件：清空，不再显示旧课
         Load();
     }
 
     private void Kick() { _debounce.Stop(); _debounce.Start(); }
 
-    public static bool Import(string file)
+    /// <summary>把选中的 .ics 复制成 timetable.ics；text 是读到的内容（给 Use 立即换上）。</summary>
+    public static bool Import(string file, out string text)
     {
+        text = "";
         try
         {
-            var text = File.ReadAllText(file);
+            text = File.ReadAllText(file);
             if (!text.Contains("BEGIN:VEVENT", StringComparison.OrdinalIgnoreCase)) return false;
-            File.WriteAllText(PathName, text);
+            if (!AtomicFile.TryWrite(PathName, System.Text.Encoding.UTF8.GetBytes(text), out var err)) { App.Log("导入课表: " + err); return false; }
             return true;
         }
         catch (Exception ex) { App.Log("导入课表: " + ex.Message); return false; }
     }
 
+    /// <summary>立即换上新课表并重算（导入后马上要报「今天几节课」，不能等文件监视的防抖）。</summary>
+    public void Use(string? ics)
+    {
+        _book.SetText(ics);
+        _builtFor = DateTime.MinValue; _shownDay = DateTime.MinValue;   // 换了课表一定通知界面
+        Tick();
+    }
+
     private void Load()
     {
-        try { _ics = File.Exists(PathName) ? File.ReadAllText(PathName) : ""; }
+        string text;
+        try { text = File.Exists(PathName) ? File.ReadAllText(PathName) : ""; }
         catch (IOException) { Kick(); return; }
-        _builtFor = DateTime.MinValue;
-        Tick();
-        if (_ics.Length > 0) App.Log($"课表: 本周 {_week.Count} 节");
+        Use(text);
+        if (_book.HasTimetable) App.Log($"课表: 本周 {_week.Count} 节");
     }
 
     /// <summary>今天剩下（含正在上）的课。</summary>
@@ -81,8 +93,8 @@ public sealed class ClassWatcher : IDisposable
         if (_builtFor != now.Date)
         {
             _builtFor = now.Date;
-            try { _week = _ics.Length == 0 ? [] : Timetable.Expand(_ics, now.Date, now.Date.AddDays(8)); }
-            catch (Exception ex) { App.Log("课表解析: " + ex.Message); _week = []; }
+            try { _book.Rebuild(now); }
+            catch (Exception ex) { App.Log("课表解析: " + ex.Message); _book.SetText(null); }
         }
         var cur = _week.FirstOrDefault(c => c.Start <= now && c.End > now);
         var next = _week.FirstOrDefault(c => c.Start > now);

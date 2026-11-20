@@ -498,12 +498,12 @@ public sealed partial class App : Application
     {
         var dlg = new Microsoft.Win32.OpenFileDialog { Title = "选择课表 .ics（教务 App / WakeUp 课程表导出）", Filter = "日历文件 (*.ics)|*.ics|所有文件|*.*" };
         if (dlg.ShowDialog() != true) return;
-        if (!ClassWatcher.Import(dlg.FileName))
+        if (!ClassWatcher.Import(dlg.FileName, out var ics))
         {
             _store.Upsert(new IslandActivity("class:import", ClassWatcher.Source, "课表导入失败", "这个文件里没有找到课程（需要 .ics 日历格式）", ActivityKind.Error, 70, DurationSeconds: 6));
             return;
         }
-        _classes?.Tick();
+        _classes?.Use(ics);   // 立即换上新课表再数，不读防抖前的旧数据
         var n = _classes?.Day(DateTime.Today).Count ?? 0;
         _store.Upsert(new IslandActivity("class:import", ClassWatcher.Source, "课表已导入", n > 0 ? $"今天有 {n} 节课" : "今天没有课", ActivityKind.Done, 60, DurationSeconds: 5));
     }
