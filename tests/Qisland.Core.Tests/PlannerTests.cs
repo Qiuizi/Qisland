@@ -213,3 +213,38 @@ public class GlassPrefTests
     [InlineData(GlassMode.Off, 26100, true, GlassRender.None)]
     public void Resolves(GlassMode mode, int build, bool transparency, GlassRender want) => Assert.Equal(want, GlassPref.Resolve(mode, build, transparency));
 }
+
+public class IslandShadowTests
+{
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(0.5)]
+    [InlineData(1.0)]
+    public void SymmetricAndCentered(double p)
+    {
+        const double left = 100, top = 10, w = 180, h = 36, r = 18;
+        for (var i = 0; i < IslandShadow.Layers; i++)
+        {
+            var (x, y, lw, lh, _) = IslandShadow.Layer(i, left, top, w, h, r, p);
+            Assert.Equal(left + w / 2, x + lw / 2, 6);          // 水平居中
+            Assert.Equal(left - x, x + lw - (left + w), 6);    // 左右一样宽
+            Assert.True(y + lh >= top + h);                       // 下沿有影子
+        }
+        var (ox, oy, _, _, _) = IslandShadow.Layer(IslandShadow.Layers - 1, left, top, w, h, r, p);
+        Assert.True(oy < top);                                   // 上沿也有影子（只是略往下偏）
+        Assert.True(top - oy > 0.5 * (left - ox));               // 下偏不超过扩展的一半
+    }
+
+    [Fact]
+    public void CollapsedFitsTightRegion()
+    {
+        var (spread, drop) = IslandShadow.Size(0);
+        Assert.True(spread <= 6);         // 收起时窗口区域左右余量
+        Assert.True(spread + drop <= 11); // 收起时窗口区域下方余量
+        var (s1, d1) = IslandShadow.Size(1);
+        Assert.True(s1 <= 16 && s1 + d1 <= 20);
+    }
+
+    [Fact]
+    public void AlphaSumsNearTheme() => Assert.InRange(IslandShadow.Alpha(0x22) * IslandShadow.Layers, 0x22, 0x30);
+}

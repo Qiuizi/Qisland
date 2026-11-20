@@ -64,7 +64,6 @@ public sealed partial class IslandWindow : Window
     private readonly Grid _idle = new(), _compact = new(), _expanded = new();
     private readonly Border _bubble = new() { Background = Theme.Pill, Width = CompactH, Height = CompactH, CornerRadius = new CornerRadius(CompactH / 2) };
     private readonly TranslateTransform _rootShift = new();
-    private static readonly (double k, byte a)[] ShadowLayers = [(14, 0x07), (9, 0x0C), (5, 0x14), (2, 0x22)];
     private readonly List<RectangleGeometry> _shadows = [];
 
     private readonly Spring _w = new(IdleW), _h = new(IdleH), _r = new(IdleH / 2);
@@ -174,15 +173,19 @@ public sealed partial class IslandWindow : Window
     private void BuildVisuals()
     {
         _root.RenderTransform = _rootShift;
-        // 阴影不用 DropShadowEffect（每帧都要重新模糊整块像素），用几层半透明圆角矩形叠出柔和的投影
-        foreach (var (k, a) in ShadowLayers)
+        // 阴影不用 DropShadowEffect（每帧都要重新模糊整块像素），用几层同样淡的同心圆角矩形叠出四周均匀、线性变淡的软影。
+        // 整组挖掉胶囊本身：玻璃胶囊是半透明的，影子不能透到胶囊里面（以前下移的影子透进来，看着像底下还垫着一块偏到右下的板）
+        var shadowHost = new Canvas { Width = WinW, Height = WinH, IsHitTestVisible = false };
+        shadowHost.Clip = new CombinedGeometry(GeometryCombineMode.Exclude, new RectangleGeometry(new Rect(-WinW, -WinH, WinW * 3, WinH * 3)), _pillGeo);
+        for (var i = 0; i < IslandShadow.Layers; i++)
         {
             var g = new RectangleGeometry();
             _shadows.Add(g);
-            var sp = new Path { Data = g, Fill = Theme.Freeze(new SolidColorBrush(Color.FromArgb(a, 0, 0, 0))), IsHitTestVisible = false };
+            var sp = new Path { Data = g, Fill = Theme.Freeze(new SolidColorBrush(Color.FromArgb(IslandShadow.Alpha(Theme.ShadowAlpha), 0, 0, 0))), IsHitTestVisible = false };
             _shadowPaths.Add(sp);
-            _root.Children.Add(sp);
+            shadowHost.Children.Add(sp);
         }
+        _root.Children.Add(shadowHost);
         _glass = new GlassBackdrop(this, GlassArea, WinW, WinH) { ShiftY = () => _rootShift.Y, Animating = () => _animating && (!_w.IsSettled || !_h.IsSettled), Slow = () => _mode != Mode.Expanded && !_animating };
         _glass.Host.Clip = _pillGeo;
         _root.Children.Add(_glass.Host);
@@ -504,16 +507,16 @@ public sealed partial class IslandWindow : Window
         var h = Math.Max(4, _h.Value);
         var r = Math.Min(Math.Max(_r.Value, 2), Math.Min(w, h) / 2);
         var (left, top) = Origin(w, h);
-        var drop = 5 + 4 * ShapeProgress(h); // 展开越大，影子落得越低（更「浮」）
+        var shapeP = ShapeProgress(h); // 展开越大，影子扩得越开、落得略低（更「浮」）
 
         _pillGeo.Rect = new Rect(left, top, w, h);
         _pillGeo.RadiusX = _pillGeo.RadiusY = r;
         for (var i = 0; i < _shadows.Count; i++)
         {
-            var k = ShadowLayers[i].k;
+            var (sx, sy, sw, sh, sr) = IslandShadow.Layer(i, left, top, w, h, r, shapeP);
             var g = _shadows[i];
-            g.Rect = new Rect(left - k, top - k + drop, w + 2 * k, h + 2 * k);
-            g.RadiusX = g.RadiusY = r + k;
+            g.Rect = new Rect(sx, sy, sw, sh);
+            g.RadiusX = g.RadiusY = sr;
         }
         // 内容层按「顶部居中」排版，整体平移到胶囊实际位置（侧边停靠时贴边、竖直居中）
         var cl = (WinW - w) / 2;
@@ -556,7 +559,7 @@ public sealed partial class IslandWindow : Window
         _sheen.Visibility = Theme.Sheen == null ? Visibility.Collapsed : Visibility.Visible;
         for (var i = 0; i < _shadowPaths.Count; i++)
         {
-            var a = (byte)(ShadowLayers[i].a * Theme.ShadowAlpha / 0x22);
+            var a = IslandShadow.Alpha(Theme.ShadowAlpha);
             _shadowPaths[i].Fill = Theme.Freeze(new SolidColorBrush(Color.FromArgb(a, 0, 0, 0)));
             _shadowPaths[i].Visibility = Visibility.Visible;
         }
@@ -645,11 +648,10 @@ public sealed partial class IslandWindow : Window
         var dpi = VisualTreeHelper.GetDpi(this);
         int P(double v) => (int)Math.Round(v * dpi.DpiScaleX);
         static double Up(double v) => Math.Ceiling(v / 24) * 24;
-        // 收起停稳时窗口区域只比岛大一圈（外两层很淡的阴影先不画）：区域里的点击会被岛吃掉，
+        // 收起停稳时窗口区域只比岛大一圈（收起时影子只扩 5、下偏 1，正好落在这圈里，见 IslandShadow）：区域里的点击会被岛吃掉，
         // 以前四周 16、下面 20 的阴影带会挡住最大化浏览器标签栏 / 地址栏正中间那一小块。展开和动画时照旧留足阴影。
         var tight = !_animating && _mode != Mode.Expanded;
         double side = tight ? 6 : 16, below = tight ? 11 : 20;
-        for (var i = 0; i < _shadowPaths.Count && i < 2; i++) { var op = tight ? 0.0 : 1.0; if (_shadowPaths[i].Opacity != op) _shadowPaths[i].Opacity = op; }
         var visible = show >= 0.02 || _show.Target > 0.5;
         var bw = Up(Math.Max(w, _w.Target));
         var bh = Up(Math.Max(h, _h.Target));
