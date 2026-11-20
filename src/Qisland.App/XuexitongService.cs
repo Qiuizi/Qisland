@@ -16,15 +16,16 @@ namespace Qisland.App;
 public sealed partial class XuexitongService
 {
     public const string Platform = "学习通";
-    private static string CredPath => Path.Combine(App.DataDir, "xuexitong.bin");
+    private readonly string _credPath;
     // 凭据文件 + 退出标记：删不掉时重启也不会恢复已退出的登录
-    private readonly LoginFile _login = new(CredPath);
+    private readonly LoginFile _login;
     private static string DebugDir => Path.Combine(App.DataDir, "debug");
     private const string UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
     private static readonly Uri Root = new("https://chaoxing.com/");
 
     private readonly HomeworkHub _hub;
     private readonly ActivityStore _store;
+    private readonly object _state = new();
     // 会话代数：退出登录 / 换账号换一代，旧一代的拉取结果不能写回作业列表、缓存、Cookie 和登录状态
     private readonly HomeworkSync _sync;
     private CookieContainer? _jar;
@@ -48,9 +49,13 @@ public sealed partial class XuexitongService
     private string? _credId;
     private readonly HashSet<string> _knownIds = [];
 
-    public XuexitongService(HomeworkHub hub, ActivityStore store)
+    public XuexitongService(HomeworkHub hub, ActivityStore store) : this(hub, store, Path.Combine(App.DataDir, "xuexitong.bin")) { }
+
+    internal XuexitongService(HomeworkHub hub, ActivityStore store, string credPath)
     {
         _hub = hub; _store = store;
+        _credPath = credPath;
+        _login = new LoginFile(credPath);
         _sync = hub.Sync();
         // 退出标记读不到（被占用）：状态未知，文件都留着、先不登录，稍后再判断
         if (LoadSaved() == CredentialCheck.Unknown)
@@ -68,7 +73,7 @@ public sealed partial class XuexitongService
     /// <summary>读本机保存的登录凭据。已退出（id 在退出标记里）就清理掉；标记读不到返回 Unknown，什么都不删。</summary>
     private CredentialCheck LoadSaved()
     {
-        if (Dpapi.Load(CredPath) is not { } json) return CredentialCheck.Ok;
+        if (Dpapi.Load(_credPath) is not { } json) return CredentialCheck.Ok;
         try
         {
             var doc = JsonDocument.Parse(json).RootElement;
@@ -107,15 +112,27 @@ public sealed partial class XuexitongService
     private static HttpClient NewHttp(CookieContainer jar) =>
         new(new HttpClientHandler { CookieContainer = jar, UseCookies = true, AllowAutoRedirect = true }) { Timeout = TimeSpan.FromSeconds(25), DefaultRequestHeaders = { { "User-Agent", UA } } };
 
-    private void Persist()
+    private bool TryPersistCredential(CookieContainer jar, string? name, string? credId, out DateTime? expires)
     {
-        if (_jar == null) return;
-        var list = _jar.GetAllCookies().Where(c => c.Domain.Contains("chaoxing") || c.Domain.Contains("cldisk"))
+        var list = jar.GetAllCookies().Where(c => c.Domain.Contains("chaoxing") || c.Domain.Contains("cldisk"))
             .Select(c => new Ck(c.Name, c.Value, c.Domain, c.Path, c.Expires > DateTime.Now ? new DateTimeOffset(c.Expires.ToUniversalTime()).ToUnixTimeSeconds() : 0)).ToList();
         var auth = list.Where(c => c.E > 0 && AuthCookies.Contains(c.N)).Select(c => DateTimeOffset.FromUnixTimeSeconds(c.E).LocalDateTime).ToList();
-        ExpiresAt = auth.Count > 0 ? auth.Min() : null;
-        Dpapi.Save(CredPath, JsonSerializer.Serialize(new { name = UserName ?? "", cid = _credId ?? "", cookies = list }));
+        expires = auth.Count > 0 ? auth.Min() : null;
+        if (!Dpapi.TrySave(_credPath, JsonSerializer.Serialize(new { name = name ?? "", cid = credId ?? "", cookies = list }), out var error))
+        {
+            App.Log("学习通: 保存登录状态失败 " + error);
+            return false;
+        }
         _login.Saved();
+        return true;
+    }
+
+    /// <summary>调用方持有 _state：服务器续期 Cookie 先落盘，成功后才更新内存里的过期时间。</summary>
+    private bool PersistLocked(CookieContainer jar)
+    {
+        if (!TryPersistCredential(jar, UserName, _credId, out var expires)) return false;
+        ExpiresAt = expires;
+        return true;
     }
 
     // ───────────── 扫码登录 ─────────────
@@ -161,22 +178,7 @@ public sealed partial class XuexitongService
                 }
                 var name = o.TryGetProperty("nickname", out var nn) ? nn.GetString() : null;
                 try { name ??= await FetchName(h); } catch { }
-                var account = AccountId.Xuexitong(Uid(qr.Jar), name);
-                // 新登录生效：换代（在途拉取作废）；换了账号就撤掉旧账号的作业、重写缓存，提醒随列表一起撤
-                var switched = _sync.SwitchAccount(Platform, account);
-                if (account.Length == 0) App.Log("学习通: 登录 Cookie 里没有 UID，账号身份未知：不沿用任何作业缓存");
-                _account = account;
-                _credId = LoginFile.NewId();   // 新登录：新的凭据 id
-                _knownIds.Add(_credId);
-                _jar = qr.Jar;
-                Expired = false;
-                UserName = name;
-                Persist();
-                if (switched) { App.Log("学习通: 换了账号，已撤下旧账号的作业"); _hub.Refreshed(); }
-                App.Log($"学习通: 已登录 {UserName}");
-                _next = DateTime.Now;
-                Changed?.Invoke();
-                return true;
+                return TryApplyLogin(qr.Jar, name, status);
             }
             var type = o.TryGetProperty("type", out var t) ? t.ToString() : "";
             if (type == "4") status($"已扫码{(o.TryGetProperty("nickname", out var n4) ? "（" + n4.GetString() + "）" : "")}，请在手机上确认");
@@ -186,6 +188,45 @@ public sealed partial class XuexitongService
         }
         return false;
     }
+
+    /// <summary>扫码确认后的登录切换。抽出来供集成测试模拟同一段流程。</summary>
+    internal bool TryApplyLogin(CookieContainer jar, string? name, Action<string>? status)
+    {
+        var account = AccountId.Xuexitong(Uid(jar), name);
+        var newCredId = LoginFile.NewId();
+        var switched = false;
+        var saved = false;
+        lock (_state)
+        {
+            DateTime? expires = null;
+            saved = _sync.TrySwitchAccount(Platform, account,
+                () => TryPersistCredential(jar, name, newCredId, out expires),
+                () =>
+                {
+                    _account = account;
+                    _credId = newCredId;
+                    _knownIds.Add(newCredId);
+                    _jar = jar;
+                    Expired = false;
+                    UserName = name;
+                    ExpiresAt = expires;
+                    _next = DateTime.Now;
+                }, out switched);
+        }
+        if (!saved)
+        {
+            App.Log("学习通: 新登录没有写进磁盘，保留原来的账号");
+            status?.Invoke("登录未保存，请重试");
+            return false;
+        }
+        if (account.Length == 0) App.Log("学习通: 登录 Cookie 里没有 UID，账号身份未知：不沿用任何作业缓存");
+        if (switched) { App.Log("学习通: 换了账号，已撤下旧账号的作业"); _hub.Refreshed(); }
+        App.Log($"学习通: 已登录 {UserName}");
+        Changed?.Invoke();
+        return true;
+    }
+
+    internal string? UidForTests => _jar == null ? null : Uid(_jar);
 
     private static async Task<string?> FetchName(HttpClient h)
     {
@@ -200,8 +241,11 @@ public sealed partial class XuexitongService
     {
         // 先换代（在途的拉取回来后什么都不能改），再删凭据、清作业缓存（排在正在进行的提交之后）
         var outcome = LogoutOutcome.Removed;
-        _sync.Logout(Platform, () => outcome = _login.Logout(_knownIds.ToList()));
-        _jar = null; UserName = null; Expired = false; ExpiresAt = null; _account = ""; _credId = null;
+        lock (_state)
+        {
+            _sync.Logout(Platform, () => outcome = _login.Logout(_knownIds.ToList()));
+            _jar = null; UserName = null; Expired = false; ExpiresAt = null; _account = ""; _credId = null;
+        }
         _hub.Refreshed();
         _store.Remove("xxt:expired");
         LogoutCleanup.Start("学习通", _login, outcome, _hub.FlushCache, () => _jar == null, _store, "xxt:logout-failed");
@@ -224,15 +268,23 @@ public sealed partial class XuexitongService
     {
         _busy = true;
         _next = DateTime.Now.AddMinutes(30);
-        var ticket = _sync.Begin();
-        var jar = _jar!;
+        long ticket;
+        CookieContainer jar;
+        lock (_state)
+        {
+            if (_jar == null) { _busy = false; return; }
+            ticket = _sync.Begin();
+            jar = _jar;
+        }
         try
         {
             var items = await Task.Run(() => Fetch(jar, ticket));
             if (items == null) return;
             // 会话没变才提交：存 Cookie（服务器可能续期了）、更新作业列表、写缓存；退出 / 换号后的旧结果直接丢掉
-            if (!_sync.Commit(ticket, Platform, items, Persist)) { App.Log("学习通: 会话已切换，丢弃这次拉取的结果"); return; }
-            LastOk = DateTime.Now;
+            bool committed;
+            lock (_state) committed = _sync.Commit(ticket, Platform, items, () => PersistLocked(jar));
+            if (!committed) { App.Log("学习通: 会话已切换或凭据没保存，丢弃这次拉取的结果"); return; }
+            lock (_state) LastOk = DateTime.Now;
             _hub.Refreshed();
             App.Log($"学习通: {items.Count} 项未交");
         }

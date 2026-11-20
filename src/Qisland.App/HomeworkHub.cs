@@ -11,18 +11,23 @@ namespace Qisland.App;
 public sealed class HomeworkHub
 {
     public const string Source = "homework";
-    private static string CachePath => Path.Combine(App.DataDir, "homework-cache.json");
     private readonly ActivityStore _store;
+    private readonly string _cachePath;
+    private readonly string _alertsPath;
     private HomeworkBook _book = new();
     private readonly HashSet<string> _live = [];
     public event Action? Changed;
 
-    public HomeworkHub(ActivityStore store, bool load = true)
+    public HomeworkHub(ActivityStore store, bool load = true) : this(store, load, App.DataDir) { }
+
+    internal HomeworkHub(ActivityStore store, bool load, string dataDir)
     {
         _store = store;
+        _cachePath = Path.Combine(dataDir, "homework-cache.json");
+        _alertsPath = Path.Combine(dataDir, "homework-alerts.json");
         if (load) try
         {
-            if (File.Exists(CachePath)) _book = HomeworkBook.FromJson(File.ReadAllText(CachePath));
+            if (File.Exists(_cachePath)) _book = HomeworkBook.FromJson(File.ReadAllText(_cachePath));
         }
         catch { }
     }
@@ -54,7 +59,7 @@ public sealed class HomeworkHub
     }
 
     /// <summary>某个平台自己的提交流程（带会话代数，见 <see cref="HomeworkSync"/>）：共用这里的列表和缓存文件。</summary>
-    public HomeworkSync Sync() => new(_book, j => WriteCache(j));
+    public HomeworkSync Sync() => new(_book, j => { WriteCache(j); });
 
     /// <summary>列表变了（提交 / 退出登录之后）：重算提醒、通知界面。</summary>
     public void Refreshed()
@@ -63,9 +68,9 @@ public sealed class HomeworkHub
         Changed?.Invoke();
     }
 
-    private static bool WriteCache(string json)
+    private bool WriteCache(string json)
     {
-        if (AtomicFile.TryWrite(CachePath, new System.Text.UTF8Encoding(false).GetBytes(json), out var err)) return true;
+        if (AtomicFile.TryWrite(_cachePath, new System.Text.UTF8Encoding(false).GetBytes(json), out var err)) return true;
         App.Log("作业缓存写入失败: " + err);
         return false;
     }
@@ -99,7 +104,6 @@ public sealed class HomeworkHub
     }
 
     // 每项作业已经提醒到哪一档（24 / 3 / 1 小时），存盘，重启后不重复弹
-    private static string AlertsPath => Path.Combine(App.DataDir, "homework-alerts.json");
     private Dictionary<string, int>? _alerted;
     private string? _alertKey;
     private Dictionary<string, int> Alerted
@@ -107,7 +111,7 @@ public sealed class HomeworkHub
         get
         {
             if (_alerted != null) return _alerted;
-            try { _alerted = File.Exists(AlertsPath) ? JsonSerializer.Deserialize<Dictionary<string, int>>(File.ReadAllText(AlertsPath)) : null; } catch { }
+            try { _alerted = File.Exists(_alertsPath) ? JsonSerializer.Deserialize<Dictionary<string, int>>(File.ReadAllText(_alertsPath)) : null; } catch { }
             return _alerted ??= [];
         }
     }
@@ -131,13 +135,13 @@ public sealed class HomeworkHub
         // 分档提醒：找最急的一条还没在这一档提醒过的
         var alerted = Alerted;
         // 记账用 AlertKey（作业链接 / 平台+课程+标题，不含截止时间）：学习通反推的截止时间每次差一两分钟，不能当键
-        if (HomeworkAlerts.Prune(alerted, pending)) try { File.WriteAllText(AlertsPath, JsonSerializer.Serialize(alerted)); } catch { }
+        if (HomeworkAlerts.Prune(alerted, pending)) try { File.WriteAllText(_alertsPath, JsonSerializer.Serialize(alerted)); } catch { }
         if (HomeworkAlerts.Next(pending, alerted, now) is { } due)
         {
             var hw = due.item;
             HomeworkAlerts.Mark(alerted, hw, due.tier);
             _alertKey = hw.AlertKey;
-            try { File.WriteAllText(AlertsPath, JsonSerializer.Serialize(alerted)); } catch { }
+            try { File.WriteAllText(_alertsPath, JsonSerializer.Serialize(alerted)); } catch { }
             var head = due.tier switch { 1 => "作业 1 小时内截止", 3 => "作业 3 小时内截止", _ => "作业明天前截止" };
             _store.Upsert(new IslandActivity("hw:alert", Source, $"{head} · {hw.Title}", $"{hw.Course} · {hw.Deadline:M/d HH:mm} · 还剩 {hw.Left(now)}",
                 due.tier == 1 ? ActivityKind.Error : ActivityKind.Warning, 88, DurationSeconds: due.tier == 24 ? 12 : 30, ResetTtl: true, OpenUri: IslandActivity.SafeUri(hw.Url), Replace: true));

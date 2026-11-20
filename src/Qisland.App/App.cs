@@ -429,8 +429,9 @@ public sealed partial class App : Application
             return;
         }
         var ykt = _ykt;
-        var w = new QrLoginWindow("雨课堂扫码登录", "用微信扫一扫，登录后只读取各课程的作业和截止时间。", "请用微信扫码，并在手机上确认",
-            async () => { var qr = await YuketangService.RequestQr(); return (QrLoginWindow.Render(qr.Content), ct => ykt.WaitLogin(qr, ct)); });
+        QrLoginWindow? w = null;
+        w = new QrLoginWindow("雨课堂扫码登录", "用微信扫一扫，登录后只读取各课程的作业和截止时间。", "请用微信扫码，并在手机上确认",
+            async () => { var qr = await YuketangService.RequestQr(); return (QrLoginWindow.Render(qr.Content), ct => ykt.WaitLogin(qr, ct, w!.SetStatus)); });
         w.Closed += (_, _) =>
         {
             if (!w.Success) return;

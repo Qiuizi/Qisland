@@ -66,7 +66,23 @@ public sealed class SessionJar
     /// <summary>换成新登录的 Cookie（扫码登录 / 换账号 / 读盘），开启新的一代。返回新代数。</summary>
     public long Replace(CookieSet next)
     {
-        lock (_lock) { _cookies = Copy(next); return ++_gen; }
+        lock (_disk)
+            lock (_lock) { _cookies = Copy(next); return ++_gen; }
+    }
+
+    /// <summary>
+    /// 先原子写一份候选登录，写成功后才换成它并开启新的一代。
+    /// 写盘和换代都在磁盘锁里完成：旧的保存只能排在新登录之前，换号之后不可能再把旧凭据写回去。
+    /// </summary>
+    public bool TryReplace(long expectedGen, CookieSet next, Func<CookieSet, bool> write)
+    {
+        lock (_disk)
+        {
+            lock (_lock) if (expectedGen != _gen) return false;
+            if (!write(Copy(next))) return false;
+            lock (_lock) { _cookies = Copy(next); ++_gen; }
+            return true;
+        }
     }
 
     /// <summary>退出登录：先换代（在途请求立刻作废），再在写盘锁里执行 wipe（删凭据文件），排在正在进行的保存之后。</summary>

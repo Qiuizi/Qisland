@@ -80,6 +80,26 @@ public sealed class HomeworkSync(HomeworkBook book, Action<string> writeCache)
         return changed;
     }
 
+    /// <summary>
+    /// 扫码换号：先在磁盘锁里保存新凭据；保存成功才换代、发布新会话、撤掉旧账号作业。
+    /// 保存失败时不动会话、列表和缓存，旧账号仍完整可用。
+    /// </summary>
+    public bool TrySwitchAccount(string platform, string account, Func<bool> persist, Action publish, out bool changed)
+    {
+        var applied = false;
+        var adopted = false;
+        _epoch.TryCommit(_epoch.Current, () =>
+        {
+            if (!persist()) return;
+            _epoch.Bump();
+            publish();
+            adopted = Adopt(platform, account);
+            applied = true;
+        });
+        changed = adopted;
+        return applied;
+    }
+
     /// <summary>启动时认领缓存：缓存里这个平台的作业不属于 account（或没登录）就撤掉并重写缓存。</summary>
     public bool Adopt(string platform, string account)
     {
@@ -90,12 +110,21 @@ public sealed class HomeworkSync(HomeworkBook book, Action<string> writeCache)
 
     /// <summary>刷新拿到了结果：会话没变才更新列表、写缓存、存 Cookie。返回是否采用。</summary>
     public bool Commit(long ticket, string platform, IReadOnlyList<HomeworkItem> items, Action? persist = null) =>
+        Commit(ticket, platform, items, persist == null ? null : () => { persist(); return true; });
+
+    /// <summary>刷新拿到了结果：凭据保存成功才更新列表和缓存；保存失败时继续保留旧列表。</summary>
+    public bool Commit(long ticket, string platform, IReadOnlyList<HomeworkItem> items, Func<bool>? persist)
+    {
+        var committed = false;
         _epoch.TryCommit(ticket, () =>
         {
-            persist?.Invoke();
+            if (persist != null && !persist()) return;
             book.Update(platform, items);
             writeCache(book.ToJson());
+            committed = true;
         });
+        return committed;
+    }
 
     /// <summary>退出登录：先换代，再（排在正在进行的提交之后）删凭据、清掉这个平台的作业并写缓存。</summary>
     public void Logout(string platform, Action? wipe = null) =>

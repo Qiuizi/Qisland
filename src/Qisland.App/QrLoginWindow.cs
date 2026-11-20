@@ -20,9 +20,14 @@ public sealed class QrLoginWindow : Window
     private readonly TextBlock _status;
     private readonly Border _qrBox;
     private CancellationTokenSource? _cts;
+    private string _lastStatus = "";
     public bool Success { get; private set; }
     private readonly string _scanHint;
-    public void SetStatus(string text) => Dispatcher.BeginInvoke(() => _status.Text = text);
+    public void SetStatus(string text)
+    {
+        _lastStatus = text;
+        Dispatcher.BeginInvoke(() => _status.Text = text);
+    }
 
     public QrLoginWindow(string title, string hint, string scanHint, Func<Task<(ImageSource, Func<CancellationToken, Task<bool>>)>> issue)
     {
@@ -47,7 +52,7 @@ public sealed class QrLoginWindow : Window
         sp.Children.Add(new TextBlock { Text = hint, FontFamily = Theme.Text, FontSize = 12.5, Foreground = sub, Margin = new Thickness(0, 4, 0, 16), TextWrapping = TextWrapping.Wrap, MaxWidth = 232 });
 
         _qrBox = new Border { Background = Brushes.White, CornerRadius = new CornerRadius(14), Padding = new Thickness(10), HorizontalAlignment = HorizontalAlignment.Center, Child = _img, Cursor = Cursors.Hand };
-        _qrBox.MouseLeftButtonUp += (_, _) => { if (_status!.Text.Contains("刷新")) _ = Start(); };
+        _qrBox.MouseLeftButtonUp += (_, _) => { if (_status!.Text.Contains("刷新") || _status.Text.Contains("登录未保存")) _ = Start(); };
         sp.Children.Add(_qrBox);
         _status = new TextBlock { Text = "正在获取二维码…", FontFamily = Theme.Text, FontSize = 12.5, Foreground = sub, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 14, 0, 0) };
         sp.Children.Add(_status);
@@ -71,6 +76,7 @@ public sealed class QrLoginWindow : Window
         _cts?.Cancel();
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
+        _lastStatus = "";
         _img.Opacity = 1;
         _status.Text = "正在获取二维码…";
         try
@@ -86,6 +92,11 @@ public sealed class QrLoginWindow : Window
                 _status.Text = "登录成功";
                 await Task.Delay(600);
                 Close();
+            }
+            else if (_lastStatus.Contains("登录未保存"))
+            {
+                _img.Opacity = 0.25;
+                _status.Text = _lastStatus;
             }
             else { _img.Opacity = 0.25; _status.Text = "二维码过期了，点二维码刷新"; }
         }

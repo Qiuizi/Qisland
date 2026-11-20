@@ -41,15 +41,16 @@ public sealed class YuketangService
         catch { }
         return "www.yuketang.cn";
     }
-    private static string CredPath => Path.Combine(App.DataDir, "yuketang.bin");
+    private readonly string _credPath;
     // 凭据文件 + 退出标记：删不掉时重启也不会恢复已退出的登录
-    private readonly LoginFile _login = new(CredPath);
+    private readonly LoginFile _login;
     private static string DebugDir => Path.Combine(App.DataDir, "debug");
     private const string UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
     private const string ConfirmPath = "/v2/api/web/userinfo";
 
     private readonly HomeworkHub _hub;
     private readonly ActivityStore _store;
+    private readonly object _state = new();
     // Cookie + 会话代数：退出登录 / 换账号换一代，旧一代的请求回来什么都不能改（Cookie、登录状态、作业、DPAPI 文件）
     private readonly SessionJar _jar = new();
     private readonly SessionHealth _health = new();
@@ -72,9 +73,13 @@ public sealed class YuketangService
     private string? _credId;
     private readonly HashSet<string> _knownIds = [];
 
-    public YuketangService(HomeworkHub hub, ActivityStore store)
+    public YuketangService(HomeworkHub hub, ActivityStore store) : this(hub, store, Path.Combine(App.DataDir, "yuketang.bin")) { }
+
+    internal YuketangService(HomeworkHub hub, ActivityStore store, string credPath)
     {
         _hub = hub; _store = store;
+        _credPath = credPath;
+        _login = new LoginFile(credPath);
         // 退出标记读不到（被占用）：状态未知，文件都留着、先不登录，稍后再判断
         if (LoadSaved() == CredentialCheck.Unknown)
             LogoutCleanup.DeferLoad("雨课堂", () =>
@@ -92,7 +97,7 @@ public sealed class YuketangService
     /// <summary>读本机保存的登录凭据。已退出（id 在退出标记里）就清理掉；标记读不到返回 Unknown，什么都不删。</summary>
     private CredentialCheck LoadSaved()
     {
-        if (Dpapi.Load(CredPath) is not { } json) return CredentialCheck.Ok;
+        if (Dpapi.Load(_credPath) is not { } json) return CredentialCheck.Ok;
         {
             try
             {
@@ -127,31 +132,43 @@ public sealed class YuketangService
         }
     }
 
-    /// <summary>加密存登录状态；gen 已经不是当前会话（期间退出 / 换号）就不写。</summary>
-    private void Save(long gen)
+    /// <summary>加密存登录状态；gen 已经不是当前会话（期间退出 / 换号）就不写。返回是否写成功。</summary>
+    private bool Save(long gen)
     {
-        try
+        lock (_state)
         {
-            if (!_jar.TryPersist(gen, c => Write(c))) App.Log("雨课堂: 会话已切换，丢弃旧会话的保存");
+            try
+            {
+                var saved = _jar.TryPersist(gen, c => WriteCredential(c, Host, UserName ?? "", _account, _credId));
+                if (!saved) App.Log("雨课堂: 会话已切换，丢弃旧会话的保存");
+                return saved;
+            }
+            catch (Exception ex)
+            {
+                App.Log("雨课堂: 保存登录状态失败 " + ex.Message);
+                return false;
+            }
         }
-        catch (Exception ex) { App.Log("雨课堂: 保存登录状态失败 " + ex.Message); }
     }
 
-    private void Write(CookieSet c)
+    private bool WriteCredential(CookieSet c, string host, string name, string account, string? credId)
     {
+        var arr = new JsonArray();
+        foreach (var (n, e) in c.All)
+            arr.Add(new JsonObject { ["n"] = n, ["v"] = e.Value, ["e"] = e.Expires is { } x ? x.ToUnixTimeSeconds() : 0 });
+        var o = new JsonObject
         {
-            var arr = new JsonArray();
-            foreach (var (n, e) in c.All)
-                arr.Add(new JsonObject { ["n"] = n, ["v"] = e.Value, ["e"] = e.Expires is { } x ? x.ToUnixTimeSeconds() : 0 });
-            var o = new JsonObject
-            {
-                ["host"] = Host, ["name"] = UserName ?? "", ["account"] = _account, ["cid"] = _credId ?? "", ["cookies"] = arr,
-                // 旧版本回退时还能读
-                ["sessionid"] = c["sessionid"] ?? "", ["expires"] = c.ExpiresOf("sessionid") is { } se ? se.ToUnixTimeSeconds() : 0,
-            };
-            Dpapi.Save(CredPath, o.ToJsonString());
-            _login.Saved();
+            ["host"] = host, ["name"] = name, ["account"] = account, ["cid"] = credId ?? "", ["cookies"] = arr,
+            // 旧版本回退时还能读
+            ["sessionid"] = c["sessionid"] ?? "", ["expires"] = c.ExpiresOf("sessionid") is { } se ? se.ToUnixTimeSeconds() : 0,
+        };
+        if (!Dpapi.TrySave(_credPath, o.ToJsonString(), out var error))
+        {
+            App.Log("雨课堂: 保存登录状态失败 " + error);
+            return false;
         }
+        _login.Saved();
+        return true;
     }
 
     private static HttpClient NewHttp(CookieContainer? jar = null)
@@ -176,7 +193,7 @@ public sealed class YuketangService
     }
 
     /// <summary>长轮询等扫码确认；成功返回 true。约 4.5 分钟后二维码失效返回 false。</summary>
-    public async Task<bool> WaitLogin(Qr qr, CancellationToken ct)
+    public async Task<bool> WaitLogin(Qr qr, CancellationToken ct, Action<string>? status = null)
     {
         var jar = new CookieContainer();
         using var h = NewHttp(jar);
@@ -199,23 +216,8 @@ public sealed class YuketangService
                         if (!ck.Expired && ck.Value.Length > 0)
                             set.Set(ck.Name, ck.Value, ck.Expires > DateTime.Now ? new DateTimeOffset(ck.Expires.ToUniversalTime(), TimeSpan.Zero) : null);
                     if (string.IsNullOrEmpty(set["sessionid"])) throw new IOException("登录成功但没拿到会话");
-                    var gen = _jar.Replace(set);   // 新登录 / 换账号：开新的一代，之前在途的请求全部作废
-                    _credId = LoginFile.NewId();   // 新登录：新的凭据 id
-                    _knownIds.Add(_credId);
-                    ExpiresAt = set.ExpiresOf("sessionid")?.LocalDateTime;
-                    UserName = d["Name"]?.ToString() ?? "";
                     var uid = (d["UserID"] ?? d["user_id"] ?? d["UserId"] ?? d["uid"])?.ToString();
-                    _account = AccountId.Yuketang(Host, uid, UserName);
-                    // 换了账号：撤掉旧账号的作业、重写缓存，提醒随列表一起撤
-                    if (_hub.Adopt(Platform, _account)) App.Log("雨课堂: 换了账号（或身份未知），已撤下旧账号的作业");
-                    if (_account.Length == 0) App.Log("雨课堂: 登录结果里没有用户 id，账号身份未知：不沿用任何作业缓存");
-                    Expired = false;
-                    _health.Reset(); _okButFailing = 0;
-                    Save(gen);
-                    App.Log($"雨课堂: 已登录 {UserName}（Cookie：{string.Join(", ", set.All.Keys)}；sessionid 到 {ExpiresAt:MM-dd HH:mm}）");
-                    _next = DateTime.Now;
-                    Changed?.Invoke();
-                    return true;
+                    return TryApplyLogin(set, d["Name"]?.ToString() ?? "", uid, status);
                 }
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
@@ -223,6 +225,47 @@ public sealed class YuketangService
         }
         return false;
     }
+
+    /// <summary>扫码确认后的登录切换。抽出来供集成测试模拟同一段流程。</summary>
+    internal bool TryApplyLogin(CookieSet set, string userName, string? uid, Action<string>? status)
+    {
+        var newCredId = LoginFile.NewId();
+        var account = AccountId.Yuketang(Host, uid, userName);
+        lock (_state)
+        {
+            var expected = _jar.Generation;
+            bool saved;
+            try { saved = _jar.TryReplace(expected, set, c => WriteCredential(c, Host, userName, account, newCredId)); }
+            catch (Exception ex)
+            {
+                App.Log("雨课堂: 新登录保存失败 " + ex.Message);
+                saved = false;
+            }
+            if (!saved)
+            {
+                App.Log("雨课堂: 新登录没有写进磁盘，保留原来的账号");
+                status?.Invoke("登录未保存，请重试");
+                return false;
+            }
+
+            _credId = newCredId;
+            _knownIds.Add(newCredId);
+            ExpiresAt = set.ExpiresOf("sessionid")?.LocalDateTime;
+            UserName = userName;
+            _account = account;
+            // 新凭据已经落盘，才撤掉旧账号的作业、重写缓存
+            if (_hub.Adopt(Platform, _account)) App.Log("雨课堂: 换了账号（或身份未知），已撤下旧账号的作业");
+            if (_account.Length == 0) App.Log("雨课堂: 登录结果里没有用户 id，账号身份未知：不沿用任何作业缓存");
+            Expired = false;
+            _health.Reset(); _okButFailing = 0;
+            _next = DateTime.Now;
+            App.Log($"雨课堂: 已登录 {UserName}（Cookie：{string.Join(", ", set.All.Keys)}；sessionid 到 {ExpiresAt:MM-dd HH:mm}）");
+        }
+        Changed?.Invoke();
+        return true;
+    }
+
+    internal string? SessionIdForTests => _jar["sessionid"];
 
     /// <summary>退出登录。返回凭据的处理结果：Removed 删掉了；Pending 删不掉但写了退出标记（后台重试）；Failed 两样都没做成。</summary>
     public LogoutOutcome Logout()
