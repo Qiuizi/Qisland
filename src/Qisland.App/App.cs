@@ -402,7 +402,9 @@ public sealed partial class App : Application
             var u = url;
             item.Click += (_, _) => Dispatcher.BeginInvoke(() =>
             {
-                if (System.Windows.MessageBox.Show($"删除日历订阅 {CalendarWatcher.Host(u)}？", "Qisland", MessageBoxButton.OKCancel) == MessageBoxResult.OK) _cal.Remove(u);
+                if (System.Windows.MessageBox.Show($"删除日历订阅 {CalendarWatcher.Host(u)}？", "Qisland", MessageBoxButton.OKCancel) == MessageBoxResult.OK
+                    && !_cal.Remove(u))
+                    System.Windows.MessageBox.Show("订阅保存失败，请关闭占用日历文件的程序后重试", "Qisland", MessageBoxButton.OK, MessageBoxImage.Warning);
             });
             m.DropDownItems.Add(item);
         }
