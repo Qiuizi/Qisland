@@ -2,31 +2,6 @@
 
 namespace Qisland.App;
 
-/// <summary>岛上正在显示的一条活动。</summary>
-public sealed class LiveActivity
-{
-    public required string Id { get; init; }
-    public string Source { get; set; } = "push";
-    public string Title { get; set; } = "";
-    public string Body { get; set; } = "";
-    public ActivityKind Kind { get; set; }
-    public int Priority { get; set; }
-    public double? Progress { get; set; }
-    public DateTime Updated { get; set; } = DateTime.Now;
-    public DateTime? Expires { get; set; }
-    /// <summary>由轮询型提供方维护（天气、信息站等），不靠过期时间消失。</summary>
-    public bool Sticky { get; set; }
-    /// <summary>点这一条时优先打开的链接（Codex 会话、作业网页…）。</summary>
-    public string? OpenUri { get; set; }
-    /// <summary>点击跳转的线索（AUMID / cwd:目录），见 <see cref="IslandActivity.AppId"/>。</summary>
-    public string? AppId { get; set; }
-    /// <summary>
-    /// 安静的：只在展开后的列表里出现，不占收起的胶囊（不顶掉时间）、也不弹出来偷看。
-    /// 给「几天后的截止」「登录快过期」「有新版本」这类不急、但会一直挂着的提示用。
-    /// </summary>
-    public bool Quiet { get; set; }
-}
-
 /// <summary>
 /// 活动的唯一真相源。只在 UI 线程改动；外部线程通过 Dispatcher 投递。
 /// 每次变化发一次 Changed，界面据此重排，不做增量动画簿记。
@@ -52,32 +27,14 @@ public sealed class ActivityStore
             kind = ActivityKind.Running;
         var prio = d.Priority switch { "high" => 90, "low" => 20, _ => 50 };
         Upsert(new IslandActivity(d.Id, d.Source, d.Title, d.Body, kind, prio, d.Icon, d.Subtitle,
-            d.DurationSeconds, d.ResetTtl, IslandActivity.SafeUri(d.OpenUri), d.AppId), progress: progress);
+            d.DurationSeconds, d.ResetTtl, IslandActivity.SafeUri(d.OpenUri), d.AppId, ExactDuration: d.DurationExplicit), progress: progress);
     }
 
     public void Upsert(IslandActivity a, bool sticky = false, double? progress = null, bool quiet = false)
     {
         var isNew = !_items.TryGetValue(a.Id, out var live);
         live ??= new LiveActivity { Id = a.Id };
-        var changed = isNew || live.Title != a.Title || live.Body != (a.Body.Length > 0 ? a.Body : a.Subtitle)
-                      || live.Kind != a.Kind || live.Progress != progress;
-        live.Source = string.IsNullOrEmpty(a.Source) ? "push" : a.Source;
-        live.Title = a.Title;
-        live.Body = a.Body.Length > 0 ? a.Body : a.Subtitle;
-        live.Kind = a.Kind;
-        live.Priority = a.Priority;
-        live.Progress = progress;
-        live.Sticky = sticky;
-        if (live.Quiet != quiet) { live.Quiet = quiet; changed = true; }
-        if (a.OpenUri != null || isNew) live.OpenUri = a.OpenUri;
-        if (a.AppId != null || isNew) live.AppId = a.AppId;
-        if (changed) live.Updated = DateTime.Now;
-        // 运行中的会话没有自然终点：给长一点的寿命，靠后续事件刷新。
-        if (!sticky && (isNew || a.ResetTtl || changed))
-        {
-            var secs = a.Kind == ActivityKind.Running ? Math.Max(a.DurationSeconds, 600) : Math.Max(a.DurationSeconds, 4);
-            live.Expires = DateTime.Now.AddSeconds(secs);
-        }
+        var changed = ActivityMerge.Apply(live, a, isNew, sticky, progress, quiet, DateTime.Now);
         _items[a.Id] = live;
         if (changed) Changed?.Invoke();
     }
@@ -93,7 +50,7 @@ public sealed class ActivityStore
             keep.Add(a.Id);
             var had = _items.TryGetValue(a.Id, out var old);
             var sig = had ? old!.Title + "\u0001" + old.Body + "\u0001" + old.Kind : null;
-            UpsertQuiet(a, sticky, quiet);
+            UpsertQuiet(a with { Replace = true }, sticky, quiet);   // 快照就是完整状态：没给链接就是没有链接
             var now = _items[a.Id];
             if (!had || sig != now.Title + "\u0001" + now.Body + "\u0001" + now.Kind) dirty = true;
         }

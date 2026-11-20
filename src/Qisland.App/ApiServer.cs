@@ -205,6 +205,8 @@ public sealed class ApiServer : IDisposable
                 Priority = S("priority").ToLowerInvariant(),
                 Source = S("source").Length > 0 ? S("source") : "push",
                 DurationSeconds = I("duration_seconds") ?? I("duration") ?? I("durationSeconds") ?? 12,
+                // 调用方明确给了时长：进度卡也按它来，不再抬到 600 秒
+                DurationExplicit = (I("duration_seconds") ?? I("duration") ?? I("durationSeconds")) != null,
                 ResetTtl = true,
                 OpenUri = S("open_uri").Length > 0 ? S("open_uri") : S("url"),
             };

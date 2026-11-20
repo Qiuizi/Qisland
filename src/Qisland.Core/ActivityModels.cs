@@ -24,8 +24,14 @@ public sealed record IslandActivity(
     int DurationSeconds = 20,
     bool ResetTtl = false,
     string? OpenUri = null,
-    string? AppId = null)
+    string? AppId = null,
+    bool Replace = false,
+    bool ExactDuration = false)
 {
+    // Replace：这次更新是这一条的完整状态——OpenUri / AppId 为 null 就是「清掉」，不沿用上一条的链接。
+    //   快照型来源（日程、课表…）和复用同一 id 的提醒都该用它；Agent 会话这类逐步补全信息的事件不用。
+    // ExactDuration：调用方明确给了时长（Island API 的 duration_seconds），运行中的卡片也按它过期，不再至少挂 10 分钟。
+
     // AppId：点这一条时用来找软件的线索——系统通知的 AppUserModelId，或「cwd:目录」（命令行 Agent 跑在哪个终端 / 编辑器里）。只在内存里，不落盘、不写日志。
 
     /// <summary>点这一条时优先打开的链接（http(s) / codex:// 等）；只接受白名单里的协议。</summary>
@@ -76,6 +82,8 @@ public sealed class PushDraft
     public int DurationSeconds { get; set; } = 20;
     /// <summary>为 true 时同 id 更新要重算过期时间（完成/出错这种短卡片）。</summary>
     public bool ResetTtl { get; set; }
+    /// <summary>调用方明确给了 duration_seconds（见 <see cref="IslandActivity.ExactDuration"/>）。</summary>
+    public bool DurationExplicit { get; set; }
     public string Source { get; set; } = "";
     public string? OpenUri { get; set; }
     public string? AppId { get; set; }
