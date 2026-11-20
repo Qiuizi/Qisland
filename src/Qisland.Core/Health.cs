@@ -19,6 +19,44 @@ public sealed record HealthSettings(
         if (t.Hour < StartHour || t.Hour >= EndHour) return false;
         return !(LunchQuiet && m >= LunchStartMin && m < LunchEndMin);
     }
+
+    /// <summary>把用户输入夹到合理范围（设置窗里填错了也不会坏）。</summary>
+    public HealthSettings Clamp()
+    {
+        var start = Math.Clamp(StartHour, 0, 23);
+        var end = Math.Clamp(EndHour, start + 1, 24);
+        var ls = Math.Clamp(LunchStartMin, 0, 24 * 60 - 1);
+        return this with
+        {
+            WaterMinutes = Math.Clamp(WaterMinutes, 10, 240), ServingMl = Math.Clamp(ServingMl, 50, 1000), GoalMl = Math.Clamp(GoalMl, 500, 6000),
+            StartHour = start, EndHour = end, SitMinutes = Math.Clamp(SitMinutes, 15, 240),
+            LunchStartMin = ls, LunchEndMin = Math.Clamp(LunchEndMin, ls + 1, 24 * 60), BreakMinutes = Math.Clamp(BreakMinutes, 1, 30),
+        };
+    }
+
+    /// <summary>health.txt：key=value 一行一项。</summary>
+    public string Serialize() => string.Create(CultureInfo.InvariantCulture,
+        $"water_minutes={WaterMinutes}\nserving_ml={ServingMl}\ngoal_ml={GoalMl}\nstart_hour={StartHour}\nend_hour={EndHour}\nsit_minutes={SitMinutes}\nlunch_quiet={(LunchQuiet ? 1 : 0)}\nlunch_start={LunchStartMin}\nlunch_end={LunchEndMin}\n");
+
+    public static HealthSettings Parse(string? text)
+    {
+        var s = new HealthSettings();
+        foreach (var raw in (text ?? "").Split('\n'))
+        {
+            var l = raw.Trim(); var eq = l.IndexOf('=');
+            if (eq <= 0) continue;
+            var k = l[..eq].Trim(); var v = l[(eq + 1)..].Trim();
+            if (k == "lunch_quiet") { s = s with { LunchQuiet = v is "1" or "true" }; continue; }
+            if (!int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)) continue;
+            s = k switch
+            {
+                "water_minutes" => s with { WaterMinutes = n }, "serving_ml" => s with { ServingMl = n }, "goal_ml" => s with { GoalMl = n },
+                "start_hour" => s with { StartHour = n }, "end_hour" => s with { EndHour = n }, "sit_minutes" => s with { SitMinutes = n },
+                "lunch_start" => s with { LunchStartMin = n }, "lunch_end" => s with { LunchEndMin = n }, _ => s,
+            };
+        }
+        return s.Clamp();
+    }
 }
 
 /// <summary>今天的喝水记录：总量、每小时分量（给柱状图）、上一杯的时间。跨天自动清零。</summary>
