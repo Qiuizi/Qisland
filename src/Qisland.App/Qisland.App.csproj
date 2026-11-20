@@ -13,9 +13,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>..\WinIslands\Assets\winislands.ico</ApplicationIcon>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <Version>4.0.3</Version>
-    <FileVersion>4.0.3.0</FileVersion>
-    <InformationalVersion>4.0.3</InformationalVersion>
+    <Version>4.0.4</Version>
+    <FileVersion>4.0.4.0</FileVersion>
+    <InformationalVersion>4.0.4</InformationalVersion>
     <Product>Qisland</Product>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
     <ServerGarbageCollection>false</ServerGarbageCollection>
