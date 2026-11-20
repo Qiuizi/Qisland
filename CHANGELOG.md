@@ -2,6 +2,15 @@
 
 每个版本的完整说明见 `docs/release-notes-*.md` 和 [Releases](https://github.com/Qiuizi/Qisland/releases)。
 
+## v4.0.7（未发布）
+
+本轮代码审查修复。每个问题都先在旧代码上跑出失败用例，再修到通过。
+
+- 推送：消息可以用顶层 `$type` 明确声明 `push` / `ingest` / `hook`；旧消息由收件箱和 HTTP 共用同一套判定。收件箱、两个 HTTP 入口对文档里的每个样例生成完全一致的卡片，构建卡保持 42% / 8 秒；PowerShell 和 WSL 推送脚本只补类别、不再自己选入口。
+- 自动更新：不再生成 UTF-8 无 BOM 的 `.bat` 交给代码页 936 的 `cmd.exe`，改用 PowerShell `-EncodedCommand`。中文安装目录下可正常备份、覆盖、失败回滚，并以 `--updated` / `--update-failed` 重启。
+- 扫码换号：雨课堂、学习通都先原子写盘，写成功后才发布会话、切换作业归属和通知界面。凭据文件被占用时保留原账号和原作业，提示「登录未保存，请重试」；保存不再吞异常。
+- 打包：旧版 WinIslands 的程序名改为 `WinIslands.Legacy.exe`，发布脚本改名为 `publish-legacy-winislands.ps1`；`release.ps1` 打包前先跑全部测试，打包后校验产物的版本与 `Qisland.App` 入口。
+
 ## v4.0.5（未发布）
 
 第五轮代码审查修复。每条修之前先在测试里复现了旧逻辑的错误行为，再修到测试通过。
