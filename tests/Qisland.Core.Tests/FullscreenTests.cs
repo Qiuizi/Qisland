@@ -26,7 +26,7 @@ public class FullscreenTests
     [Fact] public void Desktop() => Assert.False(Fs(new(0, 0, 3120, 2080), zoomed: false, cap: false, cls: "WorkerW"));
 
     // —— 该藏 ——
-    // 任务栏自动隐藏时最大化窗口盖满整块屏：棋的要求是这也算全屏，岛让开（顶边仍能呼出）
+    // 任务栏自动隐藏时最大化窗口盖满整块屏：用户的要求是这也算全屏，岛让开（顶边仍能呼出）
     [Fact] public void MaximizedChromeCoveringScreen() => Assert.True(Fs(new(-13, -13, 3133, 2093), zoomed: true, cap: true, new(0, 0, 3120, 2080)));
     [Fact] public void MaximizedExplorerCoveringScreen() => Assert.True(Fs(new(-13, -13, 3133, 2093), zoomed: true, cap: true, new(0, 0, 3120, 2080), "CabinetWClass"));
     [Fact] public void MaximizedWinFormsCoveringScreen() => Assert.True(Fs(new(-16, -16, 3136, 2096), zoomed: true, cap: true, new(0, 0, 3120, 2080), "WindowsForms10"));

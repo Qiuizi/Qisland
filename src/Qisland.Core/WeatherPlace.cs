@@ -6,7 +6,7 @@ namespace Qisland.Core;
 /// 天气地点，来自 %APPDATA%\Qisland\weather.txt 的第一行有效内容（# 开头是注释）：
 /// · 空 / 没有文件：交给 wttr.in 按出口 IP 自动定位，显示名用它返回的地名；
 /// · 一个词：既是显示名也是查询词，例如 <c>Shanghai</c>；
-/// · 两段：<c>显示名 查询</c>，查询可以是城市英文名或 <c>纬度,经度</c>，例如 <c>上海 31.23,121.47</c>。
+/// · 两段：<c>显示名 查询</c>，查询可以是城市英文名或 <c>纬度,经度</c>，例如 <c>北京 39.90,116.40</c>。
 /// </summary>
 public sealed record WeatherPlace(string Display, string Query)
 {

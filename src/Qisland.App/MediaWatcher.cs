@@ -207,7 +207,7 @@ public sealed class MediaWatcher
     [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 
     // 网易云不接受发给它窗口的 WM_APPCOMMAND（实测主窗口、渲染窗口都没反应），也不注册系统媒体会话。
-    // 经棋同意（2026-11-16），改为按一下系统媒体键：和用户自己按键盘上的媒体键效果一样。
+    // 经用户同意（2026-11-16），改为按一下系统媒体键：和用户自己按键盘上的媒体键效果一样。
     private static void NcmCommand(int cmd)
     {
         byte vk = cmd switch { 11 => 0xB0, 12 => 0xB1, _ => 0xB3 }; // 下一首 / 上一首 / 播放暂停

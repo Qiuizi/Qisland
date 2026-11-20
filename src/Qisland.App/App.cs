@@ -543,7 +543,7 @@ public sealed partial class App : Application
                 File.WriteAllText(WeatherFile,
                     "# 天气地点。留空 = 按网络位置自动判断。\n" +
                     "# 写法：显示名 查询词，查询词可以是城市英文名或 纬度,经度。例如：\n" +
-                    "# 上海 Shanghai\n# 杭州 30.27,120.15\n");
+                    "# 北京 Beijing\n# 示例 39.90,116.40\n");
             return WeatherPlace.Parse(File.ReadAllText(WeatherFile));
         }
         catch { return WeatherPlace.Auto; }

@@ -119,7 +119,7 @@ public sealed class WeatherCitiesWindow : Window
         {
             var found = await App.SearchCities(q, ct);
             if (ct.IsCancellationRequested) return;
-            _status.Text = found.Count == 0 ? "没找到，换个写法试试（如「杭州」「Hangzhou」）" : "点一个添加：";
+            _status.Text = found.Count == 0 ? "没找到，换个写法试试（如「北京」「Beijing」）" : "点一个添加：";
             foreach (var c in found.Take(8))
             {
                 var city = c;

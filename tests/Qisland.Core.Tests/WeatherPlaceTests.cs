@@ -22,8 +22,8 @@ public class WeatherPlaceTests
 
     [Fact] public void LabelAndCoordinates()
     {
-        var p = WeatherPlace.Parse("杭州  30.27,120.15");
-        Assert.Equal("杭州", p.Display);
+        var p = WeatherPlace.Parse("示例  30.27,120.15");
+        Assert.Equal("示例", p.Display);
         Assert.Equal("https://wttr.in/30.27,120.15?format=j1&lang=zh", p.WttrUrl);
         Assert.Equal((30.27, 120.15), p.Coordinates);
         Assert.StartsWith("https://api.open-meteo.com/v1/forecast?latitude=30.27&longitude=120.15&", WeatherPlace.OpenMeteoUrl(30.27, 120.15));
