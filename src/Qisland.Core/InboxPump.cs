@@ -5,6 +5,7 @@ namespace Qisland.Core;
 /// 不一次性卡住界面，也不会因为启动时积压太多、后面的文件没有新的 Created 事件而一直留在那里。
 /// 取不走的文件（还没写完 / 被占用）按 1s、2s、5s、10s、30s（封顶）延时重试，不用等新的文件事件；
 /// 等待中的文件不占批次名额，不会挡住后面的文件；连续失败 maxAttempts 次就放弃（交给 giveUp：移走 / 记日志）。
+/// 处理单个文件时抛异常（内容不合要求等）不中断这一批：交给 invalid（移到 failed / 记日志），接着处理后面的，照常排下一批。
 /// 所有状态只在 schedule 的线程上动（later 到点后也是经 schedule 回来）。
 /// </summary>
 public sealed class InboxPump(
@@ -15,7 +16,8 @@ public sealed class InboxPump(
     Action<TimeSpan, Action>? later = null,
     Func<DateTime>? clock = null,
     int maxAttempts = 8,
-    Action<string, int>? giveUp = null)
+    Action<string, int>? giveUp = null,
+    Action<string, Exception>? invalid = null)
 {
     public static readonly TimeSpan[] Backoff = [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30)];
 
@@ -53,7 +55,15 @@ public sealed class InboxPump(
             if (waiting && w.Due > now) continue;                 // 还没到重试时间，不占名额
             if (tried == batch) { more = true; break; }
             tried++;
-            if (handle(f)) { _wait.Remove(f); continue; }
+            bool ok;
+            try { ok = handle(f); }
+            catch (Exception ex)
+            {
+                _wait.Remove(f);
+                try { if (invalid != null) invalid(f, ex); else giveUp?.Invoke(f, 0); } catch { }
+                continue;
+            }
+            if (ok) { _wait.Remove(f); continue; }
             var fails = (waiting ? w.Fails : 0) + 1;
             if (fails >= maxAttempts) { _wait.Remove(f); giveUp?.Invoke(f, fails); continue; }
             _wait[f] = (fails, now + Delay(fails));

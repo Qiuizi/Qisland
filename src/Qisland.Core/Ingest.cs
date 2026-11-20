@@ -8,22 +8,35 @@ namespace Qisland.Core;
 /// </summary>
 public static class QislandIngest
 {
-    public static IReadOnlyList<PushDraft> Parse(string json, DateOnly? today = null)
+    /// <summary>
+    /// 解析；不是合法 JSON 或字段类型不对（比如 deadlines 给了字符串）返回 false 和原因，不抛异常。
+    /// 空串 / 不是对象算合法但没有内容（和以前一样）。
+    /// </summary>
+    public static bool TryParse(string json, out IReadOnlyList<PushDraft> drafts, out string? error, DateOnly? today = null)
     {
-        if (string.IsNullOrWhiteSpace(json)) return Array.Empty<PushDraft>();
+        drafts = Array.Empty<PushDraft>();
+        error = null;
+        if (string.IsNullOrWhiteSpace(json)) return true;
         try
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object) return Array.Empty<PushDraft>();
+            if (root.ValueKind != JsonValueKind.Object) return true;
             var activities = ReadActivities(root, today ?? DateOnly.FromDateTime(DateTime.Now));
-            return activities.Select(PushMapping.From).ToList();
+            drafts = activities.Select(PushMapping.From).ToList();
+            return true;
         }
-        catch (JsonException)
+        catch (JsonException) { error = InboxDecoded.NotJsonError; }
+        catch (Exception ex) when (ex is InvalidOperationException or FormatException or OverflowException or KeyNotFoundException or ArgumentException or IndexOutOfRangeException)
         {
-            return Array.Empty<PushDraft>();
+            error = "字段类型不对：" + ex.Message;
         }
+        return false;
     }
+
+    /// <summary>同 <see cref="TryParse"/>，不合要求时返回空列表（不抛异常）。</summary>
+    public static IReadOnlyList<PushDraft> Parse(string json, DateOnly? today = null) =>
+        TryParse(json, out var drafts, out _, today) ? drafts : Array.Empty<PushDraft>();
 
     private static IReadOnlyList<IslandActivity> ReadActivities(JsonElement root, DateOnly today)
     {

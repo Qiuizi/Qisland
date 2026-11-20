@@ -514,13 +514,15 @@ public sealed partial class App : Application
 
     // ───────────── 收件箱：给 WSL NAT 模式等连不上 localhost 的场景 ─────────────
     // 一批最多 50 个，剩下的排到下一批（后台优先级），积压再多也会处理完、不卡界面；
-    // 取不走的按 1s/2s/5s/10s/30s 退避重试，连续 8 次失败移到 inbox\failed\ 并记日志，不挡别的文件
+    // 取不走的按 1s/2s/5s/10s/30s 退避重试，连续 8 次失败移到 inbox\failed\ 并记日志，不挡别的文件；
+    // 先完整解析再删：字段不合要求的直接移到 failed\，一条出错不中断这一批
     private InboxPump? _inbox;
 
     private void SetupInbox()
     {
         _inbox = new InboxPump(() => Directory.EnumerateFiles(InboxDir, "*.json"), TakeInboxFile,
-            run => Dispatcher.BeginInvoke(run, DispatcherPriority.Background), giveUp: GiveUpInboxFile);
+            run => Dispatcher.BeginInvoke(run, DispatcherPriority.Background), giveUp: GiveUpInboxFile,
+            invalid: (f, ex) => MoveInboxToFailed(f, $"处理时出错（{ex.GetType().Name}）"));
         _inboxWatcher = new FileSystemWatcher(InboxDir, "*.json") { NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite, EnableRaisingEvents = true };
         _inboxWatcher.Created += (_, _) => Dispatcher.BeginInvoke(() => _inbox.Request(), DispatcherPriority.Background);
         _inboxWatcher.Renamed += (_, _) => Dispatcher.BeginInvoke(() => _inbox.Request(), DispatcherPriority.Background);
@@ -528,30 +530,39 @@ public sealed partial class App : Application
     }
 
     /// <summary>一直取不走的收件箱文件：移到 inbox\failed\（移不动就留着，等下次重新计数），记日志。</summary>
-    private static void GiveUpInboxFile(string f, int attempts)
+    private static void GiveUpInboxFile(string f, int attempts) => MoveInboxToFailed(f, $"连续 {attempts} 次读取 / 解析失败");
+
+    /// <summary>移到 inbox\failed\ 并记日志（只记文件名和原因，不记内容）；移不动返回 false。</summary>
+    private static bool MoveInboxToFailed(string f, string why)
     {
         var name = Path.GetFileName(f);
         try
         {
             var dir = Directory.CreateDirectory(Path.Combine(InboxDir, "failed")).FullName;
             File.Move(f, Path.Combine(dir, $"{DateTime.Now:yyyyMMdd-HHmmss}-{name}"), overwrite: true);
-            Log($"收件箱: {name} 连续 {attempts} 次读取失败，已移到 inbox\\failed");
+            Log($"收件箱: {name} {why}，已移到 inbox\\failed");
+            return true;
         }
-        catch (Exception ex) { Log($"收件箱: {name} 连续 {attempts} 次读取失败，移到 failed 也失败（{ex.GetType().Name}），先跳过"); }
+        catch (Exception ex) { Log($"收件箱: {name} {why}，移到 failed 也失败（{ex.GetType().Name}），稍后再试"); return false; }
     }
 
-    /// <summary>取走一个收件箱文件；还没写完 / 被占用返回 false（按退避稍后重试）。</summary>
+    /// <summary>
+    /// 取走一个收件箱文件：先读、完整解析校验，再删、再上岛。
+    /// 还没写完 / 被占用 / 不是完整 JSON 返回 false（按退避稍后重试）；字段不合要求的移到 failed\。
+    /// </summary>
     private bool TakeInboxFile(string f)
     {
         string text;
-        try { text = File.ReadAllText(f); File.Delete(f); }
+        try { text = File.ReadAllText(f); }
         catch (IOException) { return false; } // 还没写完，下次再取
         catch (UnauthorizedAccessException) { return false; }
-        var trimmed = text.TrimStart();
-        if (trimmed.Contains("\"activities\"") || trimmed.Contains("\"kind\"") || trimmed.StartsWith('['))
-            foreach (var d in QislandIngest.Parse(text)) _store.Upsert(d);
-        else if (ApiServer.ParsePush(text, out var p) is { } d)
-            _store.Upsert(d, p);
+        var r = InboxDecoder.Decode(text);
+        if (r.NotJson) return false;          // 可能还没写完：退避重试，一直这样 8 次后移到 failed
+        if (!r.Ok) return MoveInboxToFailed(f, "格式不对：" + r.Error);
+        try { File.Delete(f); }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+        foreach (var (d, p) in r.Cards) _store.Upsert(d, p);
         return true;
     }
 

@@ -63,7 +63,7 @@ public sealed class ApiServer : IDisposable
                 var clean = path.Split('?')[0].TrimEnd('/');
                 var (code, json) = method == "POST" && clean.StartsWith("/v1/approval/", StringComparison.Ordinal) && Approval != null
                     ? (200, $"{{\"decision\":{JsonSerializer.Serialize(await Approval(clean["/v1/approval/".Length..], body))}}}")
-                    : Route(method, path, body);
+                    : SafeRoute(method, path, body);
                 var payload = Encoding.UTF8.GetBytes(json);
                 var head = $"HTTP/1.1 {code} {(code == 200 ? "OK" : "Error")}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {payload.Length}\r\nConnection: close\r\n\r\n";
                 await stream.WriteAsync(Encoding.ASCII.GetBytes(head));
@@ -112,6 +112,16 @@ public sealed class ApiServer : IDisposable
         return i;
     }
 
+    /// <summary>请求内容不合要求时回 400，不让异常把连接直接断掉。</summary>
+    private (int, string) SafeRoute(string method, string path, string body)
+    {
+        try { return Route(method, path, body); }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException or OverflowException or KeyNotFoundException or ArgumentException)
+        {
+            return (400, $"{{\"ok\":false,\"error\":{JsonSerializer.Serialize("请求内容不合要求：" + ex.GetType().Name)}}}");
+        }
+    }
+
     private (int, string) Route(string method, string path, string body)
     {
         path = path.Split('?')[0].TrimEnd('/');
@@ -120,7 +130,8 @@ public sealed class ApiServer : IDisposable
 
         if (method == "POST" && path == "/v1/qisland/ingest")
         {
-            var drafts = QislandIngest.Parse(body);
+            if (!QislandIngest.TryParse(body, out var drafts, out var bad))
+                return (400, $"{{\"ok\":false,\"error\":{JsonSerializer.Serialize(bad)}}}");
             _post(() => { foreach (var d in drafts) _store.Upsert(d); });
             return (200, $"{{\"ok\":true,\"accepted\":{drafts.Count}}}");
         }
@@ -155,8 +166,8 @@ public sealed class ApiServer : IDisposable
 
         if (method == "POST" && (path is "/v1/island/push" or "/v3/island/push" or "/push"))
         {
-            var d = ParsePush(body, out var progress);
-            if (d is null) return (400, "{\"ok\":false,\"error\":\"需要 title\"}");
+            if (!PushParser.TryParse(body, out var d, out var progress, out var bad) || d is null)
+                return (400, $"{{\"ok\":false,\"error\":{JsonSerializer.Serialize(bad ?? "需要 title")}}}");
             _post(() => _store.Upsert(d, progress));
             return (200, $"{{\"ok\":true,\"id\":{JsonSerializer.Serialize(d.Id)}}}");
         }
@@ -175,43 +186,6 @@ public sealed class ApiServer : IDisposable
             return (200, "{\"ok\":true}");
         }
         return (404, "{\"ok\":false,\"error\":\"not found\"}");
-    }
-
-    internal static PushDraft? ParsePush(string body, out double? progress)
-    {
-        progress = null;
-        try
-        {
-            using var doc = JsonDocument.Parse(body);
-            var r = doc.RootElement;
-            string S(string n) => r.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
-            int? I(string n) => r.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : null;
-            var title = S("title");
-            if (title.Length == 0) return null;
-            if (r.TryGetProperty("progress", out var p) && p.ValueKind == JsonValueKind.Number)
-            {
-                var v = p.GetDouble();
-                progress = Math.Clamp(v > 1 ? v / 100 : v, 0, 1);
-            }
-            var id = S("id");
-            return new PushDraft
-            {
-                Id = id.Length > 0 ? id : "push:" + Guid.NewGuid().ToString("N")[..8],
-                Title = title,
-                Body = S("body"),
-                Subtitle = S("subtitle"),
-                Icon = S("icon"),
-                Type = S("type").ToLowerInvariant(),
-                Priority = S("priority").ToLowerInvariant(),
-                Source = S("source").Length > 0 ? S("source") : "push",
-                DurationSeconds = I("duration_seconds") ?? I("duration") ?? I("durationSeconds") ?? 12,
-                // 调用方明确给了时长：进度卡也按它来，不再抬到 600 秒
-                DurationExplicit = (I("duration_seconds") ?? I("duration") ?? I("durationSeconds")) != null,
-                ResetTtl = true,
-                OpenUri = S("open_uri").Length > 0 ? S("open_uri") : S("url"),
-            };
-        }
-        catch (JsonException) { return null; }
     }
 
     public void Dispose()
