@@ -53,7 +53,10 @@ function Invoke-Robocopy([string]$source, [string]$destination, [string[]]$optio
 
 try {
     $old = [Diagnostics.Process]::GetProcessById($pidToWait)
-    $null = $old.WaitForExit(60000)
+    if (-not $old.WaitForExit(60000)) {
+        Write-Result 'backup-failed old-process'
+        exit 1
+    }
 } catch { }
 
 try {
