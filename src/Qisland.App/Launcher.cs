@@ -2,6 +2,7 @@
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using Qisland.Core;
 
 namespace Qisland.App;
 
@@ -51,6 +52,7 @@ public static class Launcher
         "info-station" or "info-deadline" => new(["info-station"], [Path.Combine(Local, "信息监控站", "info-station.exe")], "信息监控站"),
         "coursedesk" or "course" => new(["CourseDesk"], [], "CourseDesk"),
         "jarvis" => new(["CourseWorkspace"], [], "Course Workspace"),
+        "cursor" => new(["Cursor"], [Path.Combine(Local, "Programs", "cursor", "Cursor.exe")], "Cursor"),
         "codex" => new(["ChatGPT", "Codex"], [], "Codex", @"shell:AppsFolder\OpenAI.Codex_2p2nqsd0c76g0!App"),
         "music" => new(["cloudmusic"], [@"D:\Program Files\NetEase\CloudMusic\cloudmusic.exe"], "网易云音乐"),
         "qqmusic" => new(["QQMusic"], [@"C:\Program Files (x86)\Tencent\QQMusic\QQMusic.exe", @"D:\Program Files (x86)\Tencent\QQMusic\QQMusic.exe"], "QQ音乐"),
@@ -70,6 +72,9 @@ public static class Launcher
     };
 
     public static bool CanOpen(string source) => For(source) != null;
+
+    /// <summary>调试用：只解析跳转目标、写日志，不切前台、不启动、不按快捷键。</summary>
+    [ThreadStatic] public static bool DryRun;
 
     /// <summary>这个来源对应软件的 exe：优先取正在运行的进程，其次登记的安装路径，最后开始菜单快捷方式指向的目标。</summary>
     public static string? ExePath(string source)
@@ -91,9 +96,46 @@ public static class Launcher
     /// </summary>
     public static bool Open(LiveActivity a)
     {
-        if (a.OpenUri is { } uri && OpenUri(uri, a.Source)) return true;
-        if (a.Source == "wechat") return OpenWeChat();
-        return Open(a.Source);
+        var plan = JumpPlan.For(a.Source, a.OpenUri, a.AppId, CanOpen(a.Source));
+        App.Log($"跳转 {a.Id}: 计划 {string.Join(" → ", plan)}");
+        foreach (var step in plan)
+        {
+            var ok = step switch
+            {
+                JumpStep.Uri => OpenUri(a.OpenUri!, a.Source),
+                JumpStep.WeChat => OpenWeChat(),
+                JumpStep.App => Open(a.Source),
+                JumpStep.Aumid => AppJump.Aumid(a.AppId!, a.Source),
+                JumpStep.Terminal => AppJump.Terminal(a.AppId, a.Source),
+                JumpStep.Calendar => OpenCalendarApp(),
+                _ => false,
+            };
+            if (ok) return true;
+        }
+        if (plan.Count > 0) App.Log($"跳转 {a.Id}: 都没成功");
+        return false;
+    }
+
+    /// <summary>这一条点了能跳到某个软件 / 页面。</summary>
+    public static bool CanJump(LiveActivity a) => JumpPlan.For(a.Source, a.OpenUri, a.AppId, CanOpen(a.Source)).Count > 0;
+
+    /// <summary>正在放的歌 / 视频：浏览器先找标题含这个视频名的窗口，再按会话的 AUMID 找播放器窗口，最后按来源切 / 启动。</summary>
+    public static bool OpenMedia(MediaState m)
+    {
+        App.Log($"跳转 媒体 {m.AppSource}");
+        if (m.AppSource is "chrome" or "edge" or "firefox" or "browser" or "bilibili" && For(m.AppSource) is { } b && AppJump.Titled(b.Processes, m.Title, m.AppSource)) return true;
+        if (Focus(For(m.AppSource) ?? new Target([], []), m.AppSource)) { App.Log($"跳转 {m.AppSource}: 切到播放器窗口"); return true; }
+        if (m.Aumid.Length > 0 && AppJump.Aumid(m.Aumid, m.AppSource)) return true;
+        return Open(m.AppSource);
+    }
+
+    /// <summary>日程没有会议链接：打开系统日历（Outlook 日历 / 日历应用）。</summary>
+    private static bool OpenCalendarApp()
+    {
+        foreach (var scheme in new[] { "outlookcal", "ms-outlook" })
+            if (ProtocolRegistered(scheme) && OpenUri(scheme + ":", "calendar")) return true;
+        App.Log("跳转 calendar: 没有日历应用");
+        return false;
     }
 
     /// <summary>打开一个链接，不弹系统的「找不到应用」对话框。协议没注册（比如没装 Codex）返回 false，交给按来源打开。</summary>
@@ -120,6 +162,7 @@ public static class Launcher
 
     private static bool ShellOpen(string file)
     {
+        if (DryRun) { App.Log($"  （只解析）会打开 {Redact(file)}"); return true; }
         var i = new SHELLEXECUTEINFO { cbSize = Marshal.SizeOf<SHELLEXECUTEINFO>(), fMask = 0x400 /*SEE_MASK_FLAG_NO_UI*/, lpVerb = "open", lpFile = file, nShow = 1 };
         return ShellExecuteEx(ref i);
     }
@@ -146,6 +189,7 @@ public static class Launcher
         {
             UnlockForeground();
             if (Focus(t, "wechat")) { App.Log("打开 wechat: 切到已有窗口"); return true; }
+            if (DryRun) { App.Log("  （只解析）微信没有可切的窗口，会走 weixin:// / 快捷键"); return true; }
             if (!Running(t, out var pids)) return Open("wechat");
             if (ProtocolRegistered("weixin") && ShellOpen("weixin://"))
             {
@@ -178,6 +222,7 @@ public static class Launcher
         {
             UnlockForeground();
             if (Focus(t, source)) { App.Log($"打开 {source}: 切到已有窗口"); return true; }
+            if (DryRun) { App.Log($"  （只解析）{source} 没有可切的窗口，会{(t.Hotkey != 0 && Running(t, out _) ? "按快捷键唤出" : "启动它")}"); return true; }
             if (t.Hotkey != 0 && Running(t, out var pids))
             {
                 _ = Task.Run(() => Summon(source, t, pids));
@@ -211,6 +256,7 @@ public static class Launcher
     // 岛本身不抢焦点，系统会拦后台进程改前台：合成一次 Alt 让前台锁放开，再允许任何进程（包括刚启动的）拿前台
     public static void UnlockForeground()
     {
+        if (DryRun) return;
         keybd_event(0x12, 0, 0, UIntPtr.Zero);
         keybd_event(0x12, 0, 2, UIntPtr.Zero);
         AllowSetForegroundWindow(-1);
@@ -244,9 +290,20 @@ public static class Launcher
     /// <summary>把窗口切到前台：先走正常路径；被前台锁拦下时临时挂到前台线程的输入队列上再切一次。</summary>
     public static bool ForceForeground(IntPtr h)
     {
-        ShowWindow(h, IsIconic(h) ? 9 : 5);
+        if (DryRun)
+        {
+            GetWindowThreadProcessId(h, out var dp);
+            string name; try { using var p = Process.GetProcessById((int)dp); name = p.ProcessName; } catch { name = "?"; }
+            App.Log($"  （只解析）会切到 {name} 的窗口{(IsIconic(h) ? "（最小化，会先还原）" : "")}");
+            return true;
+        }
+        ShowWindow(h, IsIconic(h) ? 9 /*SW_RESTORE*/ : 5);
         AllowSetForegroundWindow(-1);
         BringWindowToTop(h);
+        SetForegroundWindow(h);
+        if (GetForegroundWindow() == h) return true;
+        // Win11 前台锁：再合成一次 Alt 解锁后重试
+        keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero);
         SetForegroundWindow(h);
         if (GetForegroundWindow() == h) return true;
         var fg = GetForegroundWindow();
@@ -257,8 +314,11 @@ public static class Launcher
             try { BringWindowToTop(h); SetForegroundWindow(h); }
             finally { AttachThreadInput(me, fgThread, false); }
         }
+        if (GetForegroundWindow() == h) return true;
+        SwitchToThisWindow(h, true); // 最后一招：和 Alt+Tab 同一条路径
         return GetForegroundWindow() == h;
     }
+    [DllImport("user32.dll")] private static extern void SwitchToThisWindow(IntPtr h, bool altTab);
 
     [DllImport("user32.dll")] private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string? cls, string? title);
 
@@ -273,6 +333,7 @@ public static class Launcher
     // 托盘里的微信/QQ：先按软件自己的快捷键让它把主窗口叫出来；快捷键被改掉了，就直接把它隐藏的主窗口显示出来
     private static void Summon(string source, Target t, HashSet<uint> pids)
     {
+        if (DryRun) return;
         keybd_event(0x11, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(t.Hotkey, 0, 0, UIntPtr.Zero);
         keybd_event(t.Hotkey, 0, 2, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero); keybd_event(0x11, 0, 2, UIntPtr.Zero);
         for (var i = 0; i < 8; i++)

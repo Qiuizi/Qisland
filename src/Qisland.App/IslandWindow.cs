@@ -38,6 +38,12 @@ public sealed partial class IslandWindow : Window
     private readonly Path _pill = new() { Fill = Theme.Pill };
     private readonly Path _rim = new() { StrokeThickness = 1, IsHitTestVisible = false };
     private readonly Path _sheen = new() { IsHitTestVisible = false };
+    // 液态玻璃：内圈斜面亮边 + 一团随弹簧晃的镜面高光（其它外观隐藏）
+    private readonly RectangleGeometry _innerRimGeo = new();
+    private readonly Path _innerRim = new() { StrokeThickness = 1.2, IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+    private readonly System.Windows.Shapes.Ellipse _spec = new() { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+    private readonly TranslateTransform _specShift = new();
+    private readonly Canvas _specHost = new() { IsHitTestVisible = false };
     private readonly List<Path> _shadowPaths = [];
     private readonly Canvas _content = new() { Width = WinW, Height = WinH };
     private readonly ScaleTransform _bubbleScale = new(1, 1);
@@ -210,6 +216,12 @@ public sealed partial class IslandWindow : Window
         _bubble.RenderTransform = new TransformGroup { Children = { _bubbleScale, _bubbleShift } };
         Canvas.SetTop(_bubble, TopGap);
         _root.Children.Add(_bubble);
+        _innerRim.Data = _innerRimGeo;
+        _root.Children.Add(_innerRim);
+        _spec.RenderTransform = _specShift;
+        _specHost.Clip = _pillGeo;
+        _specHost.Children.Add(_spec);
+        _root.Children.Insert(_root.Children.IndexOf(_sheen) + 1, _specHost);
         _rim.Data = _rimGeo;
         _root.Children.Add(_rim);
 
@@ -234,7 +246,7 @@ public sealed partial class IslandWindow : Window
         Grid.SetColumn(wx, 2);
         _idle.Children.Add(wx);
 
-        _pill.MouseLeftButtonUp += (_, e) => { _pinned = !_pinned; SetMode(_pinned ? Mode.Expanded : DesiredRestMode()); e.Handled = true; };
+        _pill.MouseLeftButtonUp += (_, e) => { if (PillJump()) { e.Handled = true; return; } _pinned = !_pinned; SetMode(_pinned ? Mode.Expanded : DesiredRestMode()); e.Handled = true; };
         _bubble.MouseLeftButtonUp += (_, e) => { _pinned = true; SetMode(Mode.Expanded); e.Handled = true; };
         _content.IsHitTestVisible = false;
     }
@@ -525,6 +537,17 @@ public sealed partial class IslandWindow : Window
         _dockShift.X = left - cl; _dockShift.Y = top - TopGap;
         _rimGeo.Rect = new Rect(left + 0.5, top + 0.5, w - 1, h - 1);
         _rimGeo.RadiusX = _rimGeo.RadiusY = Math.Max(0, r - 0.5);
+        if (_innerRim.Visibility == Visibility.Visible)
+        {
+            // 内圈亮边离外沿 2.5 DIP；高光在左上，形变时按弹簧离目标的偏差晃一下（停稳就回原位，不跑循环）
+            _innerRimGeo.Rect = new Rect(left + 2.5, top + 2.5, Math.Max(0, w - 5), Math.Max(0, h - 5));
+            _innerRimGeo.RadiusX = _innerRimGeo.RadiusY = Math.Max(0, r - 2.5);
+            var sw = Math.Min(w * 0.55, 220); var sh = Math.Min(h * 0.9, 90);
+            _spec.Width = sw; _spec.Height = sh;
+            Canvas.SetLeft(_spec, left + w * 0.06); Canvas.SetTop(_spec, top - sh * 0.38);
+            _specShift.X = Math.Clamp((_w.Value - _w.Target) * 0.35, -24, 24);
+            _specShift.Y = Math.Clamp((_h.Value - _h.Target) * 0.25, -14, 14);
+        }
 
         ApplyLayers(h);
         if (Perf.NoShadow) { var sv = _animating ? Visibility.Hidden : Visibility.Visible; foreach (var sp in _shadowPaths) if (sp.Visibility != sv) sp.Visibility = sv; }
@@ -557,6 +580,11 @@ public sealed partial class IslandWindow : Window
         _rim.Visibility = Theme.Rim == null ? Visibility.Collapsed : Visibility.Visible;
         _sheen.Fill = Theme.Sheen;
         _sheen.Visibility = Theme.Sheen == null ? Visibility.Collapsed : Visibility.Visible;
+        _innerRim.Stroke = Theme.InnerRim;
+        _innerRim.Visibility = Theme.InnerRim == null ? Visibility.Collapsed : Visibility.Visible;
+        _spec.Fill = Theme.Specular;
+        _spec.Visibility = Theme.Specular == null ? Visibility.Collapsed : Visibility.Visible;
+        _rim.StrokeThickness = Theme.IsLiquid ? 1.4 : 1;
         for (var i = 0; i < _shadowPaths.Count; i++)
         {
             var a = IslandShadow.Alpha(Theme.ShadowAlpha);
@@ -596,11 +624,12 @@ public sealed partial class IslandWindow : Window
         {
             _sys ??= new SystemGlass(_hwnd);
             if (!_sys.Create()) { want = SystemLook.TransparencyOn ? GlassRender.Capture : GlassRender.None; sys = false; }
-            else _sys.SetSolid(want == GlassRender.SystemSolid, !SystemLook.AppsLight);
+            else { _sys.SetSolid(want == GlassRender.SystemSolid, !SystemLook.AppsLight); _sys.SetLiquid(Theme.IsLiquid); }
         }
         if (!sys) _sys?.Show(false);
         _sysOn = sys;
         _glass.Enable(_hwnd, want == GlassRender.Capture);
+        _glass.Host.Opacity = Theme.IsLiquid ? 0.4 : 1; // 液态玻璃：截屏模糊只透出四成，中间更通透
         if (want != _glassRender) App.Log($"玻璃背景: {want}（设置 {GlassPref.Serialize(GlassModePref)}，系统 {Environment.OSVersion.Version.Build}，透明效果 {(SystemLook.TransparencyOn ? "开" : "关")}）");
         _glassRender = want;
     }
@@ -619,6 +648,7 @@ public sealed partial class IslandWindow : Window
     {
         SystemLook.Refresh();
         if (!Theme.IsGlass) return;
+        if (Theme.IsLiquid) { ApplyLook(Theme.Look.Liquid); return; } // 液态玻璃跟随系统深浅色
         SetGlass(true);
         ApplyFrame();
     }
@@ -1074,8 +1104,7 @@ public sealed partial class IslandWindow : Window
         Grid.SetColumn(right, 2);
         g.Children.Add(right);
 
-        var canOpen = a.Source == "otp" || a.OpenUri != null || Launcher.CanOpen(a.Source) || a.Source is "update" or "system" or "battery" or "device" or "copy" or "download"
-            || a.Id is "ykt:expired" or "ykt:expired-note" or "xxt:expired" or "xxt:expired-note"; // 登录过期：点一下弹扫码
+        var canOpen = CanOpenItem(a); // 登录过期：点一下弹扫码
         if (a.Source == "otp") right.Children.Add(Chip("复制", () => CopyOtp(a)));
         if (a.Source is "agenda" or "calendar" && a.OpenUri is { } join) right.Children.Add(Chip("加入", () => Launcher.OpenUri(join, a.Source), "打开会议链接"));
         // QQ 等发系统通知的软件：原通知还在时，给一个去通知中心的入口——点原通知，软件自己会跳到那个会话
@@ -1087,6 +1116,39 @@ public sealed partial class IslandWindow : Window
         {
             e.Handled = true;
             App.Log($"点击 {a.Id}");
+            ActivateItem(a, canOpen);
+        };
+        if (!a.Sticky)
+            g.MouseRightButtonUp += (_, e) => { _store.Remove(a.Id); e.Handled = true; };
+        return g;
+    }
+
+    private static bool CanOpenItem(LiveActivity a) => a.Source == "otp" || Launcher.CanJump(a) || a.Source is "update" or "system" or "battery" or "device" or "copy" or "download"
+        || a.Id is "ykt:expired" or "ykt:expired-note" or "xxt:expired" or "xxt:expired-note";
+
+    /// <summary>
+    /// 收起的胶囊被点：显示的是来自某个软件的条目（或正在放的歌）就直接跳过去；否则照旧展开 / 收回。
+    /// </summary>
+    private bool PillJump()
+    {
+        if (_mode != Mode.Compact || OsdActive) return false;
+        var ranked = _store.Pill();
+        if (ranked.Count > 0)
+        {
+            var a = ranked[0];
+            if (a.Source == "otp" || !CanOpenItem(a)) return false;
+            App.Log($"点击胶囊 {a.Id}");
+            ActivateItem(a, true);
+            return true;
+        }
+        if (MusicPlaying && Media?.Current is { } m) { App.Log("点击胶囊 媒体"); Launcher.OpenMedia(m); return true; }
+        return false;
+    }
+
+    /// <summary>点一条（列表行或收起的胶囊）：能跳就跳到来源软件，跳了算已读；跳不了就当「已读」。</summary>
+    private void ActivateItem(LiveActivity a, bool canOpen)
+    {
+        {
             if (a.Source == "otp") { CopyOtp(a); return; }
             if (!canOpen || OpenRequested?.Invoke(a) != true)
             {
@@ -1101,10 +1163,7 @@ public sealed partial class IslandWindow : Window
             _pinned = false;
             _peekUntil = DateTime.MinValue;
             SetMode(DesiredRestMode());
-        };
-        if (!a.Sticky)
-            g.MouseRightButtonUp += (_, e) => { _store.Remove(a.Id); e.Handled = true; };
-        return g;
+        }
     }
 
     // 主页上的待办：点圆圈直接完成，点文字或"还有 N 件"跳到待办页
@@ -1373,7 +1432,7 @@ public sealed partial class IslandWindow : Window
 
         g.Cursor = Cursors.Hand;
         AddHover(g);
-        g.MouseLeftButtonUp += (_, e) => { e.Handled = true; Launcher.Open(m.AppSource); };
+        g.MouseLeftButtonUp += (_, e) => { e.Handled = true; Launcher.OpenMedia(m); };
         UpdateMediaProgress();
         return g;
     }

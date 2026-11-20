@@ -95,7 +95,8 @@ public static class AgentEventParser
             DurationSeconds: seconds,
             ResetTtl: kind is ActivityKind.Done or ActivityKind.Error,
             OpenUri: IslandActivity.SafeUri(FirstString(root, "open_uri", "openUri", "url"))
-                     ?? (source == "codex" && Guid.TryParse(session, out _) ? "codex://threads/" + session : null));
+                     ?? (source == "codex" && Guid.TryParse(session, out _) ? "codex://threads/" + session : null),
+            AppId: string.IsNullOrWhiteSpace(cwd) ? null : "cwd:" + cwd.Trim());
     }
 
     public static string NormalizeSource(string? source)

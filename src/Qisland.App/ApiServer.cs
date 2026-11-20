@@ -15,6 +15,8 @@ public sealed class ApiServer : IDisposable
     private readonly TcpListener _listener;
     /// <summary>本机调试：连续展开收起几次，帧数据写进日志。</summary>
     public Action? Bench;
+    /// <summary>调试：按条目 id 走一遍点击跳转（dry=true 只解析目标、写日志，不切前台不启动）。只在本机回环上监听。</summary>
+    public Action<string, bool>? Jump;
     public Func<string>? PerfJson;
     public Action<double>? Peek;
     private readonly Action<Action> _post;
@@ -130,6 +132,15 @@ public sealed class ApiServer : IDisposable
         {
             var secs = double.TryParse(body.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? Math.Clamp(v, 1, 30) : 10;
             _post(() => Peek(secs));
+            return (200, "{\"ok\":true}");
+        }
+
+        if (method == "POST" && path == "/v1/debug/jump" && Jump != null)
+        {
+            using var jd = JsonDocument.Parse(body.Length == 0 ? "{}" : body);
+            var id = jd.RootElement.TryGetProperty("id", out var ie) ? ie.GetString() ?? "" : "";
+            var dry = !jd.RootElement.TryGetProperty("dry", out var de) || de.ValueKind != JsonValueKind.False;
+            _post(() => Jump(id, dry));
             return (200, "{\"ok\":true}");
         }
 

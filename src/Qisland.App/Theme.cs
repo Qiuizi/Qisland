@@ -10,9 +10,18 @@ internal static class Theme
     public static readonly FontFamily Display = new("Segoe UI Variable Display, Segoe UI, Microsoft YaHei UI");
     public static readonly FontFamily Icons = new("Segoe Fluent Icons, Segoe MDL2 Assets");
 
-    public enum Look { Dark, Light, Glass }
+    /// <summary>Glass = 磨砂玻璃（存档里沿用「Glass」）；Liquid = 液态玻璃（通透、少磨砂、边缘折射带 + 镜面高光）。</summary>
+    public enum Look { Dark, Light, Glass, Liquid }
     public static Look Current { get; private set; } = Look.Dark;
-    public static bool IsGlass => Current == Look.Glass;
+    /// <summary>背后要垫模糊底（系统合成或截屏）的外观。</summary>
+    public static bool IsGlass => Current is Look.Glass or Look.Liquid;
+    public static bool IsLiquid => Current == Look.Liquid;
+    /// <summary>液态玻璃跟随系统深浅色：深色时文字变亮、底色偏暗。</summary>
+    public static bool LiquidDark { get; private set; }
+    /// <summary>液态玻璃的内圈亮边（离外沿 2–3 DIP 的一圈斜面反光）。</summary>
+    public static Brush? InnerRim { get; private set; }
+    /// <summary>液态玻璃左上角的一团镜面高光（动画时随弹簧晃）。</summary>
+    public static Brush? Specular { get; private set; }
 
     public static Brush Primary { get; private set; } = null!;
     public static Brush Secondary { get; private set; } = null!;
@@ -46,7 +55,7 @@ internal static class Theme
     public static void Apply(Look look)
     {
         Current = look;
-        Rim = null; Sheen = null; CardRim = null;
+        Rim = null; Sheen = null; CardRim = null; InnerRim = null; Specular = null; LiquidDark = false;
         switch (look)
         {
             case Look.Light:
@@ -88,6 +97,9 @@ internal static class Theme
                 cr.GradientStops.Add(new GradientStop(Color.FromArgb(0x60, 0xFF, 0xFF, 0xFF), 1));
                 CardRim = Freeze(cr);
                 break;
+            case Look.Liquid:
+                ApplyLiquid(!SystemLook.AppsLight);
+                break;
             default:
                 Primary = S(0xFF, 0xF5, 0xF5, 0xF7);
                 Secondary = S(0x9E, 0xEB, 0xEB, 0xF5);
@@ -102,7 +114,70 @@ internal static class Theme
         }
     }
 
-    public static string LookName(Look l) => l switch { Look.Light => "白色", Look.Glass => "液态玻璃", _ => "深色" };
+    public static string LookName(Look l) => l switch { Look.Light => "白色", Look.Glass => "磨砂玻璃", Look.Liquid => "液态玻璃", _ => "深色" };
+
+    /// <summary>
+    /// 液态玻璃（参考 Apple iOS 26 Liquid Glass 的观感，和 vitrio / liquid-glass 等网页实现「合成器近似」那一档的做法）：
+    /// 胶囊几乎不盖色、中间只有一点点磨砂（底板模糊只给三成），模糊集中在边缘一圈「折射带」；
+    /// 外沿一道锐利的镜面描边（左上最亮、右下次亮，两端带一丝冷暖色差），内圈 2–3 DIP 一道斜面亮边，
+    /// 左上一团柔和高光随弹簧晃动。深浅色跟随系统：浅色压一层极淡的白、深色压一层极淡的黑。
+    /// </summary>
+    private static void ApplyLiquid(bool dark)
+    {
+        LiquidDark = dark;
+        if (dark)
+        {
+            Primary = S(0xFF, 0xF7, 0xF7, 0xFA);
+            Secondary = S(0xC0, 0xEE, 0xEE, 0xF4);
+            Tertiary = S(0x8C, 0xEE, 0xEE, 0xF4);
+            Fill = S(0x24, 0xFF, 0xFF, 0xFF);
+            Hover = S(0x1C, 0xFF, 0xFF, 0xFF);
+            Press = S(0x2A, 0xFF, 0xFF, 0xFF);
+            Pill = Freeze(new LinearGradientBrush(Color.FromArgb(0x52, 0x1A, 0x1C, 0x22), Color.FromArgb(0x6A, 0x0C, 0x0D, 0x10), 90));
+            Card = S(0x22, 0xFF, 0xFF, 0xFF); CardHover = S(0x34, 0xFF, 0xFF, 0xFF); SegOn = S(0x48, 0xFF, 0xFF, 0xFF);
+        }
+        else
+        {
+            Primary = S(0xFF, 0x0E, 0x0E, 0x10);
+            Secondary = S(0xC8, 0x22, 0x22, 0x28);
+            Tertiary = S(0x96, 0x22, 0x22, 0x28);
+            Fill = S(0x1A, 0x00, 0x00, 0x00);
+            Hover = S(0x30, 0xFF, 0xFF, 0xFF);
+            Press = S(0x14, 0x00, 0x00, 0x00);
+            Pill = Freeze(new LinearGradientBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF), Color.FromArgb(0x2C, 0xF4, 0xF6, 0xFA), 90));
+            Card = S(0x38, 0xFF, 0xFF, 0xFF); CardHover = S(0x5C, 0xFF, 0xFF, 0xFF); SegOn = S(0xD0, 0xFF, 0xFF, 0xFF);
+        }
+        // 外沿镜面描边：对角渐变，左上亮白 → 中段几乎透明 → 右下次亮；两端一丝冷 / 暖色差
+        var rim = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
+        rim.GradientStops.Add(new GradientStop(Color.FromArgb(0xFF, 0xF4, 0xFB, 0xFF), 0));
+        rim.GradientStops.Add(new GradientStop(Color.FromArgb(0xC0, 0xFF, 0xFF, 0xFF), 0.18));
+        rim.GradientStops.Add(new GradientStop(Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF), 0.5));
+        rim.GradientStops.Add(new GradientStop(Color.FromArgb(0x90, 0xFF, 0xFF, 0xFF), 0.85));
+        rim.GradientStops.Add(new GradientStop(Color.FromArgb(0xC8, 0xFF, 0xF2, 0xF8), 1));
+        Rim = Freeze(rim);
+        // 内圈斜面亮边：上沿和下沿亮（光从顶部进来、在底部内壁折回），侧面淡
+        var inner = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
+        inner.GradientStops.Add(new GradientStop(Color.FromArgb(dark ? (byte)0x60 : (byte)0x90, 0xFF, 0xFF, 0xFF), 0));
+        inner.GradientStops.Add(new GradientStop(Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF), 0.3));
+        inner.GradientStops.Add(new GradientStop(Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF), 0.7));
+        inner.GradientStops.Add(new GradientStop(Color.FromArgb(dark ? (byte)0x38 : (byte)0x60, 0xFF, 0xFF, 0xFF), 1));
+        InnerRim = Freeze(inner);
+        // 顶部一层很薄的反光（比磨砂玻璃的柔光短得多，只在最上沿）
+        var sheen = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
+        sheen.GradientStops.Add(new GradientStop(Color.FromArgb(dark ? (byte)0x22 : (byte)0x38, 0xFF, 0xFF, 0xFF), 0));
+        sheen.GradientStops.Add(new GradientStop(Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF), 0.22));
+        Sheen = Freeze(sheen);
+        var spec = new RadialGradientBrush { Center = new Point(0.5, 0.5), GradientOrigin = new Point(0.5, 0.5), RadiusX = 0.5, RadiusY = 0.5 };
+        spec.GradientStops.Add(new GradientStop(Color.FromArgb(dark ? (byte)0x40 : (byte)0x70, 0xFF, 0xFF, 0xFF), 0));
+        spec.GradientStops.Add(new GradientStop(Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF), 1));
+        Specular = Freeze(spec);
+        ShadowAlpha = 0x14;
+        var cr = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0.3, 1) };
+        cr.GradientStops.Add(new GradientStop(Color.FromArgb(0x90, 0xFF, 0xFF, 0xFF), 0));
+        cr.GradientStops.Add(new GradientStop(Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF), 0.5));
+        cr.GradientStops.Add(new GradientStop(Color.FromArgb(0x50, 0xFF, 0xFF, 0xFF), 1));
+        CardRim = Freeze(cr);
+    }
 
     public static T Freeze<T>(T b) where T : Freezable { b.Freeze(); return b; }
 

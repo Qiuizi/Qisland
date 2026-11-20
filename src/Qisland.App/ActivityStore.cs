@@ -18,6 +18,8 @@ public sealed class LiveActivity
     public bool Sticky { get; set; }
     /// <summary>点这一条时优先打开的链接（Codex 会话、作业网页…）。</summary>
     public string? OpenUri { get; set; }
+    /// <summary>点击跳转的线索（AUMID / cwd:目录），见 <see cref="IslandActivity.AppId"/>。</summary>
+    public string? AppId { get; set; }
     /// <summary>
     /// 安静的：只在展开后的列表里出现，不占收起的胶囊（不顶掉时间）、也不弹出来偷看。
     /// 给「几天后的截止」「登录快过期」「有新版本」这类不急、但会一直挂着的提示用。
@@ -50,7 +52,7 @@ public sealed class ActivityStore
             kind = ActivityKind.Running;
         var prio = d.Priority switch { "high" => 90, "low" => 20, _ => 50 };
         Upsert(new IslandActivity(d.Id, d.Source, d.Title, d.Body, kind, prio, d.Icon, d.Subtitle,
-            d.DurationSeconds, d.ResetTtl, IslandActivity.SafeUri(d.OpenUri)), progress: progress);
+            d.DurationSeconds, d.ResetTtl, IslandActivity.SafeUri(d.OpenUri), d.AppId), progress: progress);
     }
 
     public void Upsert(IslandActivity a, bool sticky = false, double? progress = null, bool quiet = false)
@@ -68,6 +70,7 @@ public sealed class ActivityStore
         live.Sticky = sticky;
         if (live.Quiet != quiet) { live.Quiet = quiet; changed = true; }
         if (a.OpenUri != null || isNew) live.OpenUri = a.OpenUri;
+        if (a.AppId != null || isNew) live.AppId = a.AppId;
         if (changed) live.Updated = DateTime.Now;
         // 运行中的会话没有自然终点：给长一点的寿命，靠后续事件刷新。
         if (!sticky && (isNew || a.ResetTtl || changed))

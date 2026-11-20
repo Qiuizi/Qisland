@@ -234,6 +234,14 @@ public sealed partial class App : Application
             if (_api != null) _api.Approval = _approvals.Request;
             if (_api != null) _api.AgentEvent = a => _window?.OnAgentEvent(a);
             if (_api != null) _api.Bench = () => _window?.RunBench();
+            if (_api != null) _api.Jump = (id, dry) =>
+            {
+                if (id == "media") { Launcher.DryRun = dry; try { if (_window?.Media?.Current is { } m) Launcher.OpenMedia(m); else Log("调试跳转: 没有媒体"); } finally { Launcher.DryRun = false; } return; }
+                if (_store.Get(id) is not { } a) { Log($"调试跳转: 没有 {id}"); return; }
+                Launcher.DryRun = dry;
+                try { Log($"调试跳转{(dry ? "（只解析）" : "")} {id}: {(_window?.OpenRequested?.Invoke(a) == true ? "成功" : "没跳")}"); }
+                finally { Launcher.DryRun = false; }
+            };
             if (_api != null) { _api.PerfJson = _perf.Json; _api.Peek = s => _window?.PeekFor(s); }
             PerfGuard.Changed += () => _window?.OnPerfChanged();
             PerfGuard.MemoryPressure += () => _window?.OnMemoryPressure();
@@ -606,7 +614,7 @@ public sealed partial class App : Application
         focus.DropDownItems.Add("取消计时", null, (_, _) => Dispatcher.BeginInvoke(() => _timer?.Cancel()));
         menu.Items.Add(focus);
         var look = new System.Windows.Forms.ToolStripMenuItem("外观");
-        foreach (var l in new[] { Theme.Look.Dark, Theme.Look.Light, Theme.Look.Glass })
+        foreach (var l in new[] { Theme.Look.Dark, Theme.Look.Light, Theme.Look.Glass, Theme.Look.Liquid })
         {
             var item = new System.Windows.Forms.ToolStripMenuItem(Theme.LookName(l));
             item.Click += (_, _) => Dispatcher.BeginInvoke(() => { _window?.ApplyLook(l); SaveLook(l); });

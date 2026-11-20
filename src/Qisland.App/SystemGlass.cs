@@ -39,6 +39,12 @@ internal sealed class SystemGlass : IDisposable
     private DesktopWindowTarget? _target;
     private ContainerVisual? _root;
     private SpriteVisual? _pill;
+    // 液态玻璃的边缘折射带：宿主背景模糊不能进遮罩画刷（系统报参数错误），所以用几圈「贴边的窄条」叠出来：
+    // 每圈四条（上下左右），宽度递增、各自半透明，越靠外沿叠得越厚 → 外沿磨砂、往里渐清，中间通透。窄条都套胶囊的圆角裁剪。
+    private static readonly (float px, float op)[] Rings = [(10, 0.45f), (20, 0.35f), (32, 0.25f)];
+    private readonly List<SpriteVisual> _bands = [];
+    private volatile bool _liquid;
+    private bool _edgeFailed;
     private CompositionRoundedRectangleGeometry? _geo;
     private bool _shown;
     private volatile bool _solid, _dark;
@@ -111,6 +117,20 @@ internal sealed class SystemGlass : IDisposable
         _geo = _comp.CreateRoundedRectangleGeometry();
         _pill.Clip = _comp.CreateGeometricClip(_geo);
         _root.Children.InsertAtTop(_pill);
+        try
+        {
+            foreach (var (_, op) in Rings)
+                for (var side = 0; side < 4; side++)
+                {
+                    var b = _comp.CreateSpriteVisual();
+                    b.Clip = _comp.CreateGeometricClip(_geo);
+                    b.Opacity = op;
+                    b.IsVisible = false;
+                    _root.Children.InsertAtTop(b);
+                    _bands.Add(b);
+                }
+        }
+        catch (Exception ex) { _bands.Clear(); _edgeFailed = true; App.Log("液态玻璃边缘带不可用: " + ex.Message); }
         _root.Opacity = 0;
         ApplyBrush();
     }
@@ -125,9 +145,45 @@ internal sealed class SystemGlass : IDisposable
 
     private bool _brushSet;
 
+    /// <summary>一条边缘窄条：精灵放在那块，胶囊圆角裁剪（几何在窗口坐标里）按反向偏移对齐。</summary>
+    private static void Place(SpriteVisual b, float x, float y, float w, float h)
+    {
+        b.Offset = new Vector3(x, y, 0);
+        b.Size = new Vector2(Math.Max(0, w), Math.Max(0, h));
+        if (b.Clip is CompositionGeometricClip c) c.Offset = new Vector2(-x, -y);
+    }
+
+    /// <summary>液态玻璃：中间只留三成磨砂，模糊集中在边缘一圈（折射带）；磨砂玻璃：整块模糊。</summary>
+    public void SetLiquid(bool liquid)
+    {
+        if (!Ok || liquid == _liquid) return;
+        _liquid = liquid;
+        _queue?.TryEnqueue(ApplyBrush);
+    }
+
     private void ApplyBrush()
     {
         if (_comp == null || _pill == null) return;
+        var liquid = _liquid && !_solid;
+        _pill.Opacity = liquid ? 0.3f : 1f;
+        if (_bands.Count > 0 && !_edgeFailed)
+        {
+            try
+            {
+                if (liquid && _bands[0].Brush == null)
+                {
+                    var blur = _comp.CreateHostBackdropBrush();
+                    foreach (var b in _bands) b.Brush = blur;
+                    _last = (-1, -1, -1, -1, -1, -1, -1, -1);
+                }
+                foreach (var b in _bands) b.IsVisible = liquid;
+            }
+            catch (Exception ex)
+            {
+                App.Log("液态玻璃边缘带不可用: " + ex.Message);
+                _edgeFailed = true; foreach (var b in _bands) b.IsVisible = false;
+            }
+        }
         _pill.Brush = _solid
             ? _comp.CreateColorBrush(_dark ? Windows.UI.Color.FromArgb(255, 0x2A, 0x2A, 0x2E) : Windows.UI.Color.FromArgb(255, 0xEE, 0xEF, 0xF3))
             : _comp.CreateHostBackdropBrush();
@@ -165,6 +221,16 @@ internal sealed class SystemGlass : IDisposable
         _geo.Size = new Vector2(k.Item3, k.Item4);
         _geo.CornerRadius = new Vector2(k.Item5, k.Item5);
         _pill.Size = new Vector2(k.Item1 + k.Item3 + 2, k.Item2 + k.Item4 + 2);
+        if (_liquid && _bands.Count == Rings.Length * 4)
+            for (var i = 0; i < Rings.Length; i++)
+            {
+                var t = Math.Min(Rings[i].px, Math.Min(k.Item3, k.Item4) / 2);
+                var (x, y, w, h) = (k.Item1, k.Item2, k.Item3, k.Item4);
+                Place(_bands[i * 4 + 0], x, y, w, t);             // 上
+                Place(_bands[i * 4 + 1], x, y + h - t, w, t);     // 下
+                Place(_bands[i * 4 + 2], x, y + t, t, h - 2 * t); // 左
+                Place(_bands[i * 4 + 3], x + w - t, y + t, t, h - 2 * t); // 右
+            }
         _root.Opacity = k.Item6;
         _root.Offset = new Vector3(k.Item7, k.Item8, 0);
     }
@@ -198,7 +264,7 @@ internal sealed class SystemGlass : IDisposable
         void Free()
         {
             try { if (_target != null) { _target.Root = null; _target.Dispose(); } } catch { }
-            _target = null; _pill = null; _geo = null; _root = null;
+            _target = null; _pill = null; _bands.Clear(); _geo = null; _root = null;
             try { _comp?.Dispose(); } catch { }
             _comp = null;
         }

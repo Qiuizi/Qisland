@@ -67,7 +67,7 @@ public sealed class ToastMirror
                 var body = texts.Count > 1 ? string.Join(" ", texts.Skip(1)) : "";
                 PushOtp(n.Id, appName, title + " " + body);
                 if (app is null) { _toastToActivity[n.Id] = ""; continue; }
-                _toastToActivity[n.Id] = Push(app.Value, title, body);
+                _toastToActivity[n.Id] = Push(app.Value, title, body, aumid);
             }
             // 通知中心里被清掉的通知：说明你已经看过，岛上同步移除
             foreach (var gone in _toastToActivity.Keys.Where(k => !alive.Contains(k)).ToList())
@@ -98,20 +98,22 @@ public sealed class ToastMirror
     public static string OtpOffFlag => Path.Combine(App.DataDir, "otp-off");
     public static bool OtpEnabled { get => !File.Exists(OtpOffFlag); set { try { if (value) File.Delete(OtpOffFlag); else File.WriteAllText(OtpOffFlag, ""); } catch { } } }
 
-    private string Push(ChatApp app, string title, string body)
+    // aumid：发通知的应用，点这一条时按它找窗口 / 激活应用（AppJump）
+    private string Push(ChatApp app, string title, string body, string aumid = "")
     {
+        var appId = string.IsNullOrWhiteSpace(aumid) ? null : aumid;
         if (app == ChatApp.DeepSeekHarness)
         {
             var a = DeepSeekHarnessSignals.FromToast(title, body);
             if (a is null) return "";
-            _store.Upsert(a);
+            _store.Upsert(a with { AppId = a.AppId ?? appId });
             return a.Id;
         }
         if (AgentToasts.Source(app) != null)
         {
             var g = AgentToasts.FromToast(app, title, body);
             if (g is null) return "";
-            _store.Upsert(g);
+            _store.Upsert(g with { AppId = g.AppId ?? appId });
             return g.Id;
         }
         var d = NotificationMirror.Present(app, title, body, new NotificationPolicy(true, true, true, false));
@@ -120,7 +122,7 @@ public sealed class ToastMirror
         var id = source + ":" + d.Title;
         var n = _counts[id] = _counts.GetValueOrDefault(id) + 1;
         _store.Upsert(new IslandActivity(id, source, d.Title, n > 1 ? $"[{n} 条] {d.Body}" : d.Body,
-            ActivityKind.Info, 75, DurationSeconds: 15 * 60, ResetTtl: true));
+            ActivityKind.Info, 75, DurationSeconds: 15 * 60, ResetTtl: true, AppId: appId));
         MessengerFlash.ClearFlash(source, _store); // 有正文的通知比“任务栏在闪”更具体
         return id;
     }

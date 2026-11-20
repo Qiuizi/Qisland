@@ -248,3 +248,58 @@ public class IslandShadowTests
     [Fact]
     public void AlphaSumsNearTheme() => Assert.InRange(IslandShadow.Alpha(0x22) * IslandShadow.Layers, 0x22, 0x30);
 }
+
+public class JumpPlanTests
+{
+    [Fact]
+    public void UriFirstThenApp() => Assert.Equal([JumpStep.Uri, JumpStep.App], JumpPlan.For("codex", "codex://threads/x", null, true));
+
+    [Fact]
+    public void WeChatSpecial() => Assert.Equal([JumpStep.WeChat], JumpPlan.For("wechat", null, "Tencent.WeChat", true));
+
+    [Fact]
+    public void ToastAumidAfterApp() => Assert.Equal([JumpStep.App, JumpStep.Aumid], JumpPlan.For("qq", null, "Tencent.QQNT", true));
+
+    [Fact]
+    public void CliGoesToTerminal() => Assert.Equal([JumpStep.Terminal], JumpPlan.For("claude-code", null, "cwd:D:\\work\\proj", false));
+
+    [Fact]
+    public void CalendarWithoutLink() => Assert.Equal([JumpStep.Calendar], JumpPlan.For("agenda", null, null, false));
+
+    [Fact]
+    public void NothingKnown() => Assert.Empty(JumpPlan.For("timer", null, null, false));
+
+    [Theory]
+    [InlineData("cwd:D:\\work\\proj", "proj")]
+    [InlineData("cwd:/home/u/app/", "app")]
+    [InlineData("Tencent.QQ", "")]
+    [InlineData(null, "")]
+    public void Folder(string? id, string want) => Assert.Equal(want, JumpPlan.Folder(id));
+
+    [Fact]
+    public void PickTerminalPrefersFolderTitle()
+    {
+        var w = new List<(string, string)> { ("other - Visual Studio Code", "Code"), ("pwsh", "WindowsTerminal"), ("proj - Cursor", "Cursor") };
+        Assert.Equal(2, JumpPlan.PickTerminal(w, "proj"));
+        Assert.Equal(1, JumpPlan.PickTerminal(w, "nothing"));      // 没有带目录名的：最上面的终端，不选不相干的编辑器
+        Assert.Equal(-1, JumpPlan.PickTerminal([("x - Visual Studio Code", "Code")], "proj"));
+    }
+}
+
+public class AppIdMappingTests
+{
+    [Fact]
+    public void PushKeepsAppId()
+    {
+        var a = new IslandActivity("x", "qq", "t", "b", ActivityKind.Info, 40, AppId: "Tencent.QQNT");
+        Assert.Equal("Tencent.QQNT", PushMapping.From(a).AppId);
+    }
+
+    [Fact]
+    public void AgentCwdBecomesAppId()
+    {
+        var a = AgentEventParser.Parse("{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"s1\",\"cwd\":\"D:\\\\work\\\\proj\",\"prompt\":\"hi\"}", "claude-code");
+        Assert.NotNull(a);
+        Assert.Equal("proj", JumpPlan.Folder(a!.AppId));
+    }
+}

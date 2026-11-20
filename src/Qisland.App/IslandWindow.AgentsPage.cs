@@ -101,7 +101,7 @@ public sealed partial class IslandWindow
         {
             e.Handled = true;
             var live = _store.Ranked().FirstOrDefault(x => x.Id == s.Key);
-            if (live != null) Launcher.Open(live); else Launcher.Open(s.Source);
+            if (live != null) Launcher.Open(live); else if (!Launcher.Open(s.Source) && Qisland.Core.JumpPlan.IsCli(s.Source)) AppJump.Terminal(null, s.Source);
         };
         return g;
     }

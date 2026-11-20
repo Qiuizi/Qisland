@@ -23,8 +23,11 @@ public sealed record IslandActivity(
     string Subtitle = "",
     int DurationSeconds = 20,
     bool ResetTtl = false,
-    string? OpenUri = null)
+    string? OpenUri = null,
+    string? AppId = null)
 {
+    // AppId：点这一条时用来找软件的线索——系统通知的 AppUserModelId，或「cwd:目录」（命令行 Agent 跑在哪个终端 / 编辑器里）。只在内存里，不落盘、不写日志。
+
     /// <summary>点这一条时优先打开的链接（http(s) / codex:// 等）；只接受白名单里的协议。</summary>
     public static string? SafeUri(string? uri)
     {
@@ -75,6 +78,7 @@ public sealed class PushDraft
     public bool ResetTtl { get; set; }
     public string Source { get; set; } = "";
     public string? OpenUri { get; set; }
+    public string? AppId { get; set; }
 }
 
 public static class PushMapping
@@ -105,6 +109,7 @@ public static class PushMapping
             ResetTtl = activity.ResetTtl || activity.Kind is ActivityKind.Done or ActivityKind.Error,
             Source = activity.Source,
             OpenUri = activity.OpenUri,
+            AppId = activity.AppId,
         };
     }
 
