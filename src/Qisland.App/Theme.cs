@@ -197,8 +197,9 @@ internal static class Theme
         ShadowAlpha = 0x14;
         // 里面的卡片 / 列表 / 按钮：同一套液态语言——几乎不盖色、上下沿一道淡淡的磨砂边（画在底色渐变里）、
         // 外沿对角镜面亮边（左上最亮）、内容层外沿一圈内斜面亮边。深色时底色压一点黑、提高文字对比
-        var cardTop = dark ? (byte)0x26 : (byte)0x5A; var cardMid = dark ? (byte)0x10 : (byte)0x22; var cardBot = dark ? (byte)0x1E : (byte)0x44;
-        var cardRgb = dark ? (byte)0x30 : (byte)0xFF;
+        // 中间留一层很薄的衬底（亮 23% / 暗 16%），岛压在杂乱背景上字也读得清；上下沿更亮一点就是那道磨砂边
+        var cardTop = dark ? (byte)0x3A : (byte)0x74; var cardMid = dark ? (byte)0x28 : (byte)0x3A; var cardBot = dark ? (byte)0x30 : (byte)0x5C;
+        var cardRgb = dark ? (byte)0x1C : (byte)0xFF;
         var card = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
         card.GradientStops.Add(new GradientStop(Color.FromArgb(cardTop, cardRgb, cardRgb, cardRgb), 0));
         card.GradientStops.Add(new GradientStop(Color.FromArgb(cardMid, cardRgb, cardRgb, cardRgb), 0.12));
