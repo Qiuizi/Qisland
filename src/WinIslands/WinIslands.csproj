@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>Qisland</AssemblyName>
+    <AssemblyName>WinIslands.Legacy</AssemblyName>
     <RootNamespace>WinIslands</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\winislands.ico</ApplicationIcon>
@@ -17,8 +17,9 @@
     <InformationalVersion>0.1.0+winislands-3.1.2</InformationalVersion>
     <FileVersion>0.1.0.0</FileVersion>
     <Authors>Qiuizi</Authors>
-    <Product>Qisland</Product>
-    <Description>Qisland：基于 WinIslands 的个人 Windows 灵动岛。</Description>
+    <Product>WinIslands.Legacy</Product>
+    <Company>WinIslands.Legacy</Company>
+    <Description>WinIslands 旧版，仅用于回归测试，不再发布为 Qisland。</Description>
     <!-- 仅保留中英两种语言资源，减小体积 -->
     <SatelliteResourceLanguages>en;zh-Hans</SatelliteResourceLanguages>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
