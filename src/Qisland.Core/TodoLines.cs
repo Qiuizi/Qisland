@@ -1,13 +1,20 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace Qisland.Core;
 
-/// <summary>todo.md 里的一条（Line = 读出来时的行号，只当线索用，写回前要重新定位）。</summary>
-public sealed record TodoFileItem(int Line, string Text, bool Done);
+/// <summary>
+/// todo.md 里的一条。身份 = 文字 + 状态 + 所在标题路径（Section）+ 该段内同样一条里的第几个（Occurrence）；
+/// Line 是读出来时的行号，Fingerprint 是读出来（打开编辑）时整个文件的指纹。
+/// </summary>
+public sealed record TodoFileItem(int Line, string Text, bool Done, string Section = "", int Occurrence = 0, string Fingerprint = "");
 
 public enum TodoEditResult { Ok, Conflict, WriteFailed }
 
 /// <summary>
-/// todo.md 的行级编辑。编辑窗口开着时文件可能被改（上面插了一行等），所以写回前按原文重新找到那一行：
-/// 原行号上还是它就用原行号；否则按文字找，正好一条就用它；找不到或有多条一样的算冲突，什么都不改。
+/// todo.md 的行级编辑。编辑窗口开着时文件可能被改（上面插了一行、加了一段等），所以写回前重新定位：
+/// 文件指纹没变就原地改（同一段里有重名也改的是打开的那条）；
+/// 变了只接受「同一标题路径 + 同文字 + 同状态」正好一条，找不到或有多条都算冲突，什么都不改。
 /// </summary>
 public static class TodoLines
 {
@@ -26,19 +33,62 @@ public static class TodoLines
     public static List<TodoFileItem> Items(IReadOnlyList<string> lines)
     {
         var list = new List<TodoFileItem>();
+        var fp = Fingerprint(lines);
+        var seen = new Dictionary<(string, string, bool), int>();
+        var sections = Sections(lines);
         for (var i = 0; i < lines.Count; i++)
-            if (Parse(lines[i]) is { ok: true } p) list.Add(new TodoFileItem(i, p.text, p.done));
+        {
+            if (Parse(lines[i]) is not { ok: true } p) continue;
+            var key = (sections[i], p.text, p.done);
+            var n = seen.GetValueOrDefault(key);
+            seen[key] = n + 1;
+            list.Add(new TodoFileItem(i, p.text, p.done, sections[i], n, fp));
+        }
         return list;
     }
 
-    /// <summary>重新定位这一条；找不到或不唯一返回 null。</summary>
+    /// <summary>整个文件内容的指纹（打开编辑时记下，写回前比对）。</summary>
+    public static string Fingerprint(IReadOnlyList<string> lines) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n", lines))));
+
+    /// <summary>每一行所在的标题路径（「# 待办」下「## 工作」= 待办/工作；标题之前为空）。</summary>
+    public static string[] Sections(IReadOnlyList<string> lines)
+    {
+        var stack = new List<(int level, string title)>();
+        var result = new string[lines.Count];
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (Heading(lines[i]) is { } h)
+            {
+                while (stack.Count > 0 && stack[^1].level >= h.level) stack.RemoveAt(stack.Count - 1);
+                stack.Add(h);
+            }
+            result[i] = string.Join("/", stack.Select(s => s.title));
+        }
+        return result;
+    }
+
+    private static (int level, string title)? Heading(string raw)
+    {
+        var l = raw.Trim();
+        var n = 0;
+        while (n < l.Length && l[n] == '#') n++;
+        if (n == 0 || n > 6 || (n < l.Length && l[n] != ' ')) return null;
+        return (n, l[n..].Trim());
+    }
+
+    /// <summary>重新定位这一条；找不到或不唯一（文件变过时）返回 null。</summary>
     public static int? Locate(IReadOnlyList<string> lines, TodoFileItem it)
     {
         bool Match(int i) => Parse(lines[i]) is { ok: true } p && p.text == it.Text && p.done == it.Done;
-        if (it.Line >= 0 && it.Line < lines.Count && Match(it.Line)) return it.Line;
+        // 文件没变：就是打开时那一行
+        if (it.Fingerprint.Length > 0 && it.Fingerprint == Fingerprint(lines))
+            return it.Line >= 0 && it.Line < lines.Count && Match(it.Line) ? it.Line : null;
+        // 变了：只认同一段里同文字同状态的唯一一条
+        var sections = Sections(lines);
         int? found = null;
         for (var i = 0; i < lines.Count; i++)
-            if (Match(i)) { if (found != null) return null; found = i; }
+            if (sections[i] == it.Section && Match(i)) { if (found != null) return null; found = i; }
         return found;
     }
 
