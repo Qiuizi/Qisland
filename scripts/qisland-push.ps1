@@ -1,4 +1,4 @@
-# 把标准输入或 -Body 送到 Qisland。失败时写入 %APPDATA%\Qisland\inbox。
+﻿# 把标准输入或 -Body 送到 Qisland。失败时写入 %APPDATA%\Qisland\inbox。
 # 只投一个入口；消息带上 $type，由 Qisland 按类别解析，脚本不再自己挑接口。
 param(
     [string]$Body = "",
@@ -15,7 +15,10 @@ if ([string]::IsNullOrWhiteSpace($Body) -and $args.Count -gt 0) {
 }
 $Body = $Body.Trim()
 if ($Body.Length -eq 0) { exit 0 }
-if ($Body.StartsWith("{") -and $Body -notmatch '"$type"\s*:') {
+if ($Body -match '^\{\s*\}$') {
+    $Body = '{"$type":"' + $Type + '"}'
+}
+elseif ($Body.StartsWith("{") -and $Body -notmatch '"\$type"\s*:') {
     $Body = '{"$type":"' + $Type + '",' + $Body.Substring(1)
 }
 if ($Port -le 0) {

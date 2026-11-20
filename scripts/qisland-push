@@ -23,7 +23,9 @@ if [ -z "$BODY" ]; then
   exit 0
 fi
 BODY="$(printf '%s' "$BODY" | sed -e 's/^[[:space:]]*//')"
-if [ "${BODY#\{}" != "$BODY" ] && ! printf '%s' "$BODY" | grep -q '"\$type"[[:space:]]*:'; then
+if [ "$BODY" = "{}" ]; then
+  BODY="{\"\$type\":\"${TYPE}\"}"
+elif [ "${BODY#\{}" != "$BODY" ] && ! printf '%s' "$BODY" | grep -q '"\$type"[[:space:]]*:'; then
   BODY="{\"\$type\":\"${TYPE}\",${BODY:1}"
 fi
 

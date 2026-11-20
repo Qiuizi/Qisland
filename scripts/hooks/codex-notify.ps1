@@ -1,4 +1,4 @@
-# Codex 的 notify：JSON 在最后一个参数，有时在标准输入。
+﻿# Codex 的 notify：JSON 在最后一个参数，有时在标准输入。
 $ErrorActionPreference = "Stop"
 $push = Join-Path $PSScriptRoot "..\qisland-push.ps1"
 $raw = ""

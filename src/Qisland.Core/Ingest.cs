@@ -156,6 +156,10 @@ public static class QislandIngest
         if (root.TryGetProperty("hook_event_name", out _) || root.TryGetProperty("hookEventName", out _)) return Shape.Hook;
         if (root.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String
             && AgentEventParser.Parse(root.GetRawText()) is not null) return Shape.AgentType;
+        if (Text(root, "title").Length > 0
+            && (root.TryGetProperty("progress", out _) || root.TryGetProperty("duration_seconds", out _)
+                || root.TryGetProperty("duration", out _) || root.TryGetProperty("durationSeconds", out _)))
+            return Shape.PlainTitle;
         var source = AgentEventParser.NormalizeSource(Text(root, "source"));
         if (source is "claude-code" or "codex" or "deepseek-harness" or "doubao" or "trae" or "workbuddy") return Shape.AgentSource;
         if (root.TryGetProperty("yuketang", out _) || root.TryGetProperty("chaoxing", out _)) return Shape.CourseSnapshot;
