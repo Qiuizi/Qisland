@@ -127,7 +127,7 @@ public static class PushMapping
         "info-station" => "\uE8A5",
         "coursedesk" => "\uE7BE",
         "jarvis" => "\uE8F1",
-        "weather" => "\uE706",
+        "weather" or "weather-alert" => "\uE706",
         "timer" => "\uE823",
         "todo" => "\uE73E",
         "media" => "\uE8D6",

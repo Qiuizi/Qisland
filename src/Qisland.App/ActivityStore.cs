@@ -85,14 +85,8 @@ public sealed class ActivityStore
         Changed?.Invoke();
     }
 
-    /// <summary>排序：等待确认 &gt; 出错 &gt; 优先级 &gt; 最近更新。环境信息（天气）不进主队列。</summary>
-    public IReadOnlyList<LiveActivity> Ranked() => _items.Values
-        .Where(x => x.Source != "weather")
-        .OrderByDescending(x => x.Kind == ActivityKind.WaitingApproval)
-        .ThenByDescending(x => x.Kind == ActivityKind.Error)
-        .ThenByDescending(x => x.Priority)
-        .ThenByDescending(x => x.Updated)
-        .ToList();
+    /// <summary>排序：等待确认 &gt; 出错 &gt; 优先级 &gt; 最近更新。环境信息（天气数据）不进主队列，天气提醒（weather-alert）照常进。</summary>
+    public IReadOnlyList<LiveActivity> Ranked() => ActivityRanking.Rank(_items.Values);
 
     /// <summary>能上收起胶囊的活动（去掉安静的）：没有它们时，收起的岛显示时间。</summary>
     /// <summary>专注中（见 <see cref="FocusMode"/>）只放行关键的几类，其余也只进列表。</summary>

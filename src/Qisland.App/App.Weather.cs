@@ -81,8 +81,8 @@ public sealed partial class App
         foreach (var a in d.Alerts)
         {
             if (!_alerted.Add(a.Key)) continue;
-            _store.Upsert(new IslandActivity("wx:alert:" + a.Key.Split(':')[0], "weather", a.Title, a.Body,
-                ActivityKind.Warning, a.Severe ? 58 : 44, DurationSeconds: a.Severe ? 14 : 9, ResetTtl: true));
+            // 单独的 source（weather-alert）：按普通通知排序上列表和胶囊；普通天气数据仍不进主队列
+            _store.Upsert(WeatherAlertCards.ToActivity(a));
             Log($"天气提醒: {a.Title}");
         }
         if (_alerted.Count > 200) _alerted.Clear();
