@@ -16,6 +16,7 @@
     <Version>4.0.7</Version>
     <FileVersion>4.0.7.0</FileVersion>
     <InformationalVersion>4.0.7</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>Qisland</Product>
     <Company>Qisland.App</Company>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
