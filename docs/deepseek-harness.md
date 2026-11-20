@@ -1,8 +1,8 @@
 # DeepSeek Harness
 
-这台机器上的 DeepSeek Harness 是杭州深度求索的 Electron 桌面应用，版本 0.2.2-rc.1，不是命令行。
+DeepSeek Harness 是深度求索的 Electron 桌面应用（测试时版本 0.2.2-rc.1），不是命令行。
 
-- 程序：`D:\Program Files (x86)\DSH\DeepSeek Harness.exe`
+- 程序：`<安装目录>\DeepSeek Harness.exe`
 - 用户数据：`%APPDATA%\@deepseek-ai\dsh-desktop`
 - 里面有 Chromium 配置、IndexedDB、Local Storage、`logs\`、`desktop\settings.json`
 - `plugin-operations\operations.jsonl` 只是插件安装日志（例如 `@deepseek-ai/dsh-experimental-auto-review` 被 enable），不是会话事件

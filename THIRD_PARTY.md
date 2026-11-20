@@ -61,6 +61,6 @@ WinIslands 应用本体为 **MIT License**（见 [LICENSE](LICENSE)）。
 | wttr.in | 自动定位时的地名、坐标与月相（Open-Meteo 不可用时兜底） | 公开免费服务 |
 | 岛仔 Daozai（Renly1994/xiaotang-daozai） | 思路参考：Open-Meteo 7 天预报与 15 分钟刷新、多城市（最多 5 个 + 自动定位）与岛上切换、中文城市名搜索规则（去「市/县/区/省」、省份查省会、两字名补「市」、跳过机场车站等地物、按精确匹配和人口排序、0.05° 去重）、天气图标动效（太阳转、雨雪落、闪电闪，进页面 / 悬停时短暂播放后静止）、数据过旧提示；健康页的喝水（250 ml 一杯、2000 ml 目标、45 分钟、9–22 点、午休静默、按小时柱状）与久坐提醒（连续 60 分钟）；剪贴板置顶；OLED 像素位移。全部 C# / WPF 自行实现，未复制代码。省会对照表为自行整理；天气提醒规则（快下雨 / 雷阵雨 / 下雪 / 大风 / 高温 / 严寒 / 大降温）为 Qisland 自有 | MIT |
 | 岛仔 Daozai（Renly1994/xiaotang-daozai） | 思路参考（v4 第四阶段）：待办提醒与每周重复、本地日历编辑器、统一设置窗、左右侧边停靠（竖向收起胶囊、面板从边缘滑出）与极简小条。C# / WPF 自行实现，未复制代码；待办提醒以 ⏰ / 🔁 写在 todo.md 行内为 Qisland 自有格式 | MIT |
-| 岛仔 Daozai（Renly1994/xiaotang-daozai） | 思路参考：液态玻璃的系统合成模糊底板（单独的无重定向位图置顶窗口 + Windows.UI.Composition 宿主背景画刷，按岛的圆角裁剪、紧贴在岛下面；见其 composition.rs）。C# 自行实现，未复制代码 | MIT |
+| 岛仔 Daozai（Renly1994/xiaotang-daozai） | 思路参考：磨砂玻璃（v3 时叫液态玻璃）的系统合成模糊底板（单独的无重定向位图置顶窗口 + Windows.UI.Composition 宿主背景画刷，按岛的圆角裁剪、紧贴在岛下面；见其 composition.rs）。C# 自行实现，未复制代码 | MIT |
 | vitrio（eamonliu/vitrio）、liquid-glass（archisvaze/liquid-glass）、OpenGlass | 思路参考：液态玻璃皮肤的观感拆解（中间通透、边缘折射带、外沿镜面描边 + 内圈斜面亮边、光源方向的高光）。用 Windows 合成视觉和 WPF 画刷自行近似，未复制代码 | MIT |
 

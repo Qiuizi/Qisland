@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Qisland 3.0 · 该知道的，抬眼就知道。</title>
+<title>Qisland 4.0 · 该知道的，抬眼就知道。</title>
 <meta name="description" content="该知道的，抬眼就知道。给 Windows 做的灵动岛：课业雷达、Agent 审批、麦克风摄像头提示、日历、通话、专注，平时只显示时间。">
-<meta property="og:title" content="Qisland 3.0 · Windows 灵动岛">
+<meta property="og:title" content="Qisland 4.0 · Windows 灵动岛">
 <meta property="og:description" content="该知道的，抬眼就知道。给 Windows 做的灵动岛。">
 <meta property="og:image" content="media/qisland-v3-poster.png">
 <meta name="theme-color" content="#06070c">
@@ -280,12 +280,29 @@ footer a{color:var(--mute)}footer a:hover{color:var(--fg)}
 
 <main>
 <section class="slide" id="hero" data-label="首页" data-island="idle" data-hover="home" data-bg="#2846c8,#7b3fd1">
-  <div class="eyebrow rv" style="--i:0">Qisland 3.0 · Windows 灵动岛</div>
+  <div class="eyebrow rv" style="--i:0">Qisland 4.0 · Windows 灵动岛</div>
   <h1 class="rv" style="--i:1">该知道的，<br><span class="grad">抬眼就知道。</span></h1>
   <p class="lead rv" style="--i:2">下节课在哪、作业几点截止、哪条命令在等你批准、谁在用麦克风——只在需要时出现在屏幕顶上，其余时间它只是一个时钟。</p>
-  <div class="cta rv" style="--i:3"><a class="btn" href="https://github.com/Qiuizi/Qisland/releases/latest">下载 3.0</a><a class="btn ghost" href="#film">看宣传片</a></div>
+  <div class="cta rv" style="--i:3"><a class="btn" href="https://github.com/Qiuizi/Qisland/releases/latest">下载 4.0</a><a class="btn ghost" href="#film">看宣传片</a></div>
   <p class="hint rv" style="--i:4">把鼠标放到顶上的岛上试试 · 滚轮、方向键或右侧圆点翻页</p>
   <span class="chev"></span>
+</section>
+
+<section class="slide" id="v4" data-label="4.0 新变化" data-island="idle" data-hover="home" data-bg="#1b6fd8,#5a3fc4">
+  <div class="eyebrow rv" style="--i:0">4.0 新变化</div>
+  <h2 class="rv" style="--i:1">更像系统自带的那颗岛。</h2>
+  <div class="grid">
+    <div class="fcard rv" style="--i:2"><div class="ic" style="background:#64d2ff">◐</div><h4>两套玻璃</h4><p>「磨砂玻璃」用系统合成的背景模糊；新皮肤「液态玻璃」中间几乎透明，左上镜面亮边，里面的卡片和按钮也是同一套样式。</p></div>
+    <div class="fcard rv" style="--i:2"><div class="ic" style="background:#0071e3">➚</div><h4>点一下直达</h4><p>系统通知、微信 / QQ、终端里的 AI 会话、音乐，点一下就回到来源软件。</p></div>
+    <div class="fcard rv" style="--i:3"><div class="ic" style="background:#ff375f">∿</div><h4>弹簧动效</h4><p>展开带一点回弹、收起干脆，阴影四周均匀；玻璃合成在独立线程，动画时 UI 每帧约 1 ms。</p></div>
+    <div class="fcard rv" style="--i:3"><div class="ic" style="background:#30d158">⇆</div><h4>停靠与极简</h4><p>停在顶部、左侧或右侧；极简模式收起只剩一小段线。</p></div>
+    <div class="fcard rv" style="--i:4"><div class="ic" style="background:#ff9f0a">☀</div><h4>天气与健康</h4><p>7 天预报、最多 5 个城市、下雨大风提醒；喝水和久坐提醒。</p></div>
+    <div class="fcard rv" style="--i:4"><div class="ic" style="background:#bf5af2">⚙</div><h4>一个设置窗</h4><p>外观、停靠、提示、日历待办、翻译与 AI，一处改完；托盘照旧可用。</p></div>
+  </div>
+  <div class="rv" style="--i:5;display:flex;gap:18px;justify-content:center;align-items:flex-start;margin-top:22px">
+    <img src="assets/shots/03-home.png" alt="展开后的主页（演示数据）" loading="lazy" style="height:auto;max-height:min(24vh,230px);max-width:46%;width:auto">
+    <img src="assets/shots/04-widgets.png" alt="组件页（演示数据）" loading="lazy" style="height:auto;max-height:min(24vh,230px);max-width:46%;width:auto">
+  </div>
 </section>
 
 <section class="slide" id="music" data-pad="music" data-label="正在播放" data-island="music" data-hover="musicE" data-bg="#c2408a,#ff7a3d">
@@ -349,9 +366,9 @@ footer a{color:var(--mute)}footer a:hover{color:var(--fg)}
     <div class="fcard rv" style="--i:2"><div class="ic" style="background:#30b0c7">⌁</div><h4>网络与校园网认证</h4><p>断网、恢复、换 Wi-Fi；需要网页认证时点一下打开登录页，开着代理也认得出真实网络。</p></div>
     <div class="fcard rv" style="--i:3"><div class="ic" style="background:#8e8e93">⇪</div><h4>大写锁定提示</h4><p>按下 Caps Lock 或 Num Lock，岛上告诉你现在的状态。</p></div>
     <div class="fcard rv" style="--i:3"><div class="ic" style="background:#5e5ce6">#</div><h4>验证码一键复制</h4><p>通知里的验证码单独弹出，点一下复制。只在内存里，不写日志。</p></div>
-    <div class="fcard rv" style="--i:4"><div class="ic" style="background:#0071e3">➚</div><h4>点哪跳哪</h4><p>点一条活动，切到对应的软件、终端会话或作业网页。</p></div>
+    <div class="fcard rv" style="--i:4"><div class="ic" style="background:#0071e3">➚</div><h4>点哪跳哪</h4><p>点一条活动（收起的胶囊也行），直接切到发消息的软件、终端会话、播放器或作业网页。</p></div>
     <div class="fcard rv" style="--i:4"><div class="ic" style="background:#bf5af2">↺</div><h4>改动账本</h4><p>对其他软件改过的每一处都记下来，托盘里一键还原，只删自己加的。</p></div>
-    <div class="fcard rv" style="--i:5"><div class="ic" style="background:#ff9f0a">▦</div><h4>小组件</h4><p>天气、日历、倒数日、系统状态，展开后左右翻页。</p></div>
+    <div class="fcard rv" style="--i:5"><div class="ic" style="background:#ff9f0a">▦</div><h4>小组件</h4><p>7 天天气和多城市、喝水与久坐、日历、待办提醒、剪贴板置顶，展开后左右翻页。</p></div>
     <div class="fcard rv" style="--i:5"><div class="ic" style="background:#30d158">⌘</div><h4>Island API</h4><p>本机 <code>127.0.0.1:9840</code>，脚本、CI、别的工具都能往岛上推卡片。</p></div>
   </div>
 </section>
@@ -394,8 +411,8 @@ footer a{color:var(--mute)}footer a:hover{color:var(--fg)}
   <div class="eyebrow rv" style="--i:0">三十秒开始</div>
   <h1 class="rv" style="--i:1">该知道的，<br><span class="grad">抬眼就知道。</span></h1>
   <p class="lead rv" style="--i:2">需要 Windows 10 或 11 和 .NET 8 桌面运行时。下载、解压、运行 <code>Qisland.exe</code>。开源免费。</p>
-  <div class="cta rv" style="--i:3"><a class="btn" href="https://github.com/Qiuizi/Qisland/releases/latest">下载 3.0</a><a class="btn ghost" href="https://github.com/Qiuizi/Qisland#readme">GitHub 与文档</a></div>
-  <footer>Qisland 3.0 · MIT 许可 · 基于 <a href="https://github.com/JudeKwong/WinIslands">WinIslands</a> 起步</footer>
+  <div class="cta rv" style="--i:3"><a class="btn" href="https://github.com/Qiuizi/Qisland/releases/latest">下载 4.0</a><a class="btn ghost" href="https://github.com/Qiuizi/Qisland#readme">GitHub 与文档</a></div>
+  <footer>Qisland 4.0 · MIT 许可 · 基于 <a href="https://github.com/JudeKwong/WinIslands">WinIslands</a> 起步 · 动效与组件思路致谢 <a href="https://github.com/Renly1994/xiaotang-daozai">岛仔</a></footer>
 </section>
 </main>
 

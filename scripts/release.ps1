@@ -38,10 +38,10 @@ $x = $x -replace '<InformationalVersion>[^<]*</InformationalVersion>', "<Informa
 [IO.File]::WriteAllText((Resolve-Path $csproj), $x, (New-Object Text.UTF8Encoding $false))
 Write-Host "版本号 → $Version" -ForegroundColor Cyan
 
-# 2. 发布（依赖框架，体积小；用户需要 .NET 8 桌面运行时）
+# 2. 发布（依赖框架，体积小；用户需要 .NET 8 桌面运行时）。ContinuousIntegrationBuild：dll / pdb 里的源码路径记成 /_/，不带本机目录
 $out = "publish\Qisland"
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
-dotnet publish $csproj -c Release -r win-x64 --self-contained false -p:PublishReadyToRun=true -o $out --nologo -v q
+dotnet publish $csproj -c Release -r win-x64 --self-contained false -p:PublishReadyToRun=true -p:ContinuousIntegrationBuild=true -o $out --nologo -v q
 if ($LASTEXITCODE -ne 0) { throw "发布失败" }
 
 # 3. 打包
