@@ -421,7 +421,9 @@ public sealed partial class App : Application
         if (_ykt == null) return;
         if (_ykt.LoggedIn && !_ykt.Expired)
         {
-            if (System.Windows.MessageBox.Show($"退出雨课堂账号 {_ykt.UserName}？本机保存的登录状态会被删除。", "Qisland", MessageBoxButton.OKCancel) == MessageBoxResult.OK) _ykt.Logout();
+            if (System.Windows.MessageBox.Show($"退出雨课堂账号 {_ykt.UserName}？本机保存的登录状态会被删除。", "Qisland", MessageBoxButton.OKCancel) == MessageBoxResult.OK
+                && LogoutCleanup.Message("雨课堂", _ykt.Logout()) is { } yktErr)
+                System.Windows.MessageBox.Show(yktErr, "Qisland", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         var ykt = _ykt;
@@ -442,7 +444,9 @@ public sealed partial class App : Application
         if (_xxt == null) return;
         if (_xxt.LoggedIn && !_xxt.Expired)
         {
-            if (System.Windows.MessageBox.Show($"退出学习通账号 {_xxt.UserName}？本机保存的登录状态会被删除。", "Qisland", MessageBoxButton.OKCancel) == MessageBoxResult.OK) _xxt.Logout();
+            if (System.Windows.MessageBox.Show($"退出学习通账号 {_xxt.UserName}？本机保存的登录状态会被删除。", "Qisland", MessageBoxButton.OKCancel) == MessageBoxResult.OK
+                && LogoutCleanup.Message("学习通", _xxt.Logout()) is { } xxtErr)
+                System.Windows.MessageBox.Show(xxtErr, "Qisland", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         var xxt = _xxt;

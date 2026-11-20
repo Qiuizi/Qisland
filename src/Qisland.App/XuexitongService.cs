@@ -17,6 +17,8 @@ public sealed partial class XuexitongService
 {
     public const string Platform = "学习通";
     private static string CredPath => Path.Combine(App.DataDir, "xuexitong.bin");
+    // 凭据文件 + 退出标记：删不掉时重启也不会恢复已退出的登录
+    private readonly LoginFile _login = new(CredPath);
     private static string DebugDir => Path.Combine(App.DataDir, "debug");
     private const string UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
     private static readonly Uri Root = new("https://chaoxing.com/");
@@ -51,6 +53,13 @@ public sealed partial class XuexitongService
             try
             {
                 var doc = JsonDocument.Parse(json).RootElement;
+                var saved = doc.TryGetProperty("saved", out var sv) && sv.TryGetInt64(out var ms) ? ms : 0;
+                if (_login.Revoked(saved))
+                {
+                    App.Log("学习通: 上次已经退出登录（当时凭据文件没删掉），不恢复登录");
+                    _login.Cleanup();
+                    throw new OperationCanceledException();
+                }
                 UserName = doc.GetProperty("name").GetString();
                 _jar = new CookieContainer();
                 _account = doc.TryGetProperty("acct", out var ac) && ac.GetString() is { Length: > 0 } a ? a : "";
@@ -60,7 +69,7 @@ public sealed partial class XuexitongService
                     if (c.E > 0 && AuthCookies.Contains(c.N) && DateTimeOffset.FromUnixTimeSeconds(c.E).LocalDateTime is var t && (ExpiresAt == null || t < ExpiresAt)) ExpiresAt = t;
                 }
             }
-            catch { _jar = null; }
+            catch { _jar = null; UserName = null; }
             if (_jar != null && _account.Length == 0) _account = AccountId.Of(Platform, Uid(_jar) ?? UserName);   // 4.0.3 及以前的凭据没存账号标记
         }
         if (_jar == null) _account = "";
@@ -83,7 +92,8 @@ public sealed partial class XuexitongService
             .Select(c => new Ck(c.Name, c.Value, c.Domain, c.Path, c.Expires > DateTime.Now ? new DateTimeOffset(c.Expires.ToUniversalTime()).ToUnixTimeSeconds() : 0)).ToList();
         var auth = list.Where(c => c.E > 0 && AuthCookies.Contains(c.N)).Select(c => DateTimeOffset.FromUnixTimeSeconds(c.E).LocalDateTime).ToList();
         ExpiresAt = auth.Count > 0 ? auth.Min() : null;
-        Dpapi.Save(CredPath, JsonSerializer.Serialize(new { name = UserName ?? "", acct = _account, cookies = list }));
+        Dpapi.Save(CredPath, JsonSerializer.Serialize(new { name = UserName ?? "", acct = _account, saved = _login.NowMs, cookies = list }));
+        _login.Saved();
     }
 
     // ───────────── 扫码登录 ─────────────
@@ -160,14 +170,18 @@ public sealed partial class XuexitongService
         return m.Success ? WebUtility.HtmlDecode(m.Groups[1].Value.Trim()) : null;
     }
 
-    public void Logout()
+    /// <summary>退出登录。返回凭据的处理结果：Removed 删掉了；Pending 删不掉但写了退出标记（后台重试）；Failed 两样都没做成。</summary>
+    public LogoutOutcome Logout()
     {
         // 先换代（在途的拉取回来后什么都不能改），再删凭据、清作业缓存（排在正在进行的提交之后）
-        _sync.Logout(Platform, () => { try { File.Delete(CredPath); } catch { } });
+        var outcome = LogoutOutcome.Removed;
+        _sync.Logout(Platform, () => outcome = _login.Logout());
         _jar = null; UserName = null; Expired = false; ExpiresAt = null; _account = "";
         _hub.Refreshed();
         _store.Remove("xxt:expired");
+        LogoutCleanup.Start("学习通", _login, outcome, _hub.FlushCache, () => _jar == null, _store, "xxt:logout-failed");
         Changed?.Invoke();
+        return outcome;
     }
 
     // ───────────── 拉作业 ─────────────

@@ -54,7 +54,7 @@ public sealed class HomeworkHub
     }
 
     /// <summary>某个平台自己的提交流程（带会话代数，见 <see cref="HomeworkSync"/>）：共用这里的列表和缓存文件。</summary>
-    public HomeworkSync Sync() => new(_book, WriteCache);
+    public HomeworkSync Sync() => new(_book, j => WriteCache(j));
 
     /// <summary>列表变了（提交 / 退出登录之后）：重算提醒、通知界面。</summary>
     public void Refreshed()
@@ -63,10 +63,15 @@ public sealed class HomeworkHub
         Changed?.Invoke();
     }
 
-    private static void WriteCache(string json)
+    private static bool WriteCache(string json)
     {
-        if (!AtomicFile.TryWrite(CachePath, new System.Text.UTF8Encoding(false).GetBytes(json), out var err)) App.Log("作业缓存写入失败: " + err);
+        if (AtomicFile.TryWrite(CachePath, new System.Text.UTF8Encoding(false).GetBytes(json), out var err)) return true;
+        App.Log("作业缓存写入失败: " + err);
+        return false;
     }
+
+    /// <summary>把当前列表重新写一遍缓存（退出登录清理重试用）。返回是否写进去了。</summary>
+    public bool FlushCache() => WriteCache(_book.ToJson());
 
     /// <summary>截图演示用：不写缓存、不上岛。</summary>
     public static HomeworkHub Demo(ActivityStore store)

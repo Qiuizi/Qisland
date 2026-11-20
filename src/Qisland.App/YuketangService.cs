@@ -42,6 +42,8 @@ public sealed class YuketangService
         return "www.yuketang.cn";
     }
     private static string CredPath => Path.Combine(App.DataDir, "yuketang.bin");
+    // 凭据文件 + 退出标记：删不掉时重启也不会恢复已退出的登录
+    private readonly LoginFile _login = new(CredPath);
     private static string DebugDir => Path.Combine(App.DataDir, "debug");
     private const string UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
     private const string ConfirmPath = "/v2/api/web/userinfo";
@@ -74,6 +76,12 @@ public sealed class YuketangService
             try
             {
                 var o = JsonNode.Parse(json)!;
+                if (_login.Revoked(o["saved"]?.GetValue<long>() ?? 0))
+                {
+                    App.Log("雨课堂: 上次已经退出登录（当时凭据文件没删掉），不恢复登录");
+                    _login.Cleanup();
+                    throw new OperationCanceledException();
+                }
                 UserName = o["name"]?.GetValue<string>();
                 Host = o["host"]?.GetValue<string>() ?? Host;
                 var set = new CookieSet();
@@ -87,7 +95,7 @@ public sealed class YuketangService
                 ExpiresAt = set.ExpiresOf("sessionid")?.LocalDateTime;
                 _account = o["acct"]?.GetValue<string>() is { Length: > 0 } a ? a : AccountId.Of(Platform, Host + "|" + UserName);   // 旧凭据没存账号标记
             }
-            catch { }
+            catch { if (!LoggedIn) UserName = null; }
         }
         if (!LoggedIn) _account = "";
         // 磁盘上的作业缓存不属于这个账号（换过号、没登录、旧格式）就不用
@@ -113,11 +121,12 @@ public sealed class YuketangService
                 arr.Add(new JsonObject { ["n"] = n, ["v"] = e.Value, ["e"] = e.Expires is { } x ? x.ToUnixTimeSeconds() : 0 });
             var o = new JsonObject
             {
-                ["host"] = Host, ["name"] = UserName ?? "", ["acct"] = _account, ["cookies"] = arr,
+                ["host"] = Host, ["name"] = UserName ?? "", ["acct"] = _account, ["saved"] = _login.NowMs, ["cookies"] = arr,
                 // 旧版本回退时还能读
                 ["sessionid"] = c["sessionid"] ?? "", ["expires"] = c.ExpiresOf("sessionid") is { } se ? se.ToUnixTimeSeconds() : 0,
             };
             Dpapi.Save(CredPath, o.ToJsonString());
+            _login.Saved();
         }
     }
 
@@ -188,14 +197,18 @@ public sealed class YuketangService
         return false;
     }
 
-    public void Logout()
+    /// <summary>退出登录。返回凭据的处理结果：Removed 删掉了；Pending 删不掉但写了退出标记（后台重试）；Failed 两样都没做成。</summary>
+    public LogoutOutcome Logout()
     {
         // 先换代（在途请求回来后不能再合并 Cookie / 写盘），再删凭据文件（排在正在进行的保存之后）
-        _jar.Clear(() => { try { File.Delete(CredPath); } catch { } });
+        var outcome = LogoutOutcome.Removed;
+        _jar.Clear(() => outcome = _login.Logout());
         UserName = null; Expired = false; ExpiresAt = null; _health.Reset(); _okButFailing = 0; _account = "";
         _hub.Clear(Platform);
         _store.Remove("ykt:expired");
+        LogoutCleanup.Start("雨课堂", _login, outcome, _hub.FlushCache, () => !LoggedIn, _store, "ykt:logout-failed");
         Changed?.Invoke();
+        return outcome;
     }
 
     // ───────────── 拉作业 ─────────────
