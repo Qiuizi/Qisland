@@ -20,7 +20,18 @@ public static class QislandIngest
         try
         {
             using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
+            return TryParse(doc.RootElement, out drafts, out error, today);
+        }
+        catch (JsonException) { error = InboxDecoded.NotJsonError; return false; }
+    }
+
+    /// <summary>已经解析好的 JSON（<see cref="IslandPayload"/> 只解析一次）。</summary>
+    public static bool TryParse(JsonElement root, out IReadOnlyList<PushDraft> drafts, out string? error, DateOnly? today = null)
+    {
+        drafts = Array.Empty<PushDraft>();
+        error = null;
+        try
+        {
             if (root.ValueKind != JsonValueKind.Object) return true;
             var activities = ReadActivities(root, today ?? DateOnly.FromDateTime(DateTime.Now));
             drafts = activities.Select(PushMapping.From).ToList();

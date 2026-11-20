@@ -16,7 +16,17 @@ public static class PushParser
         try
         {
             using var doc = JsonDocument.Parse(body);
-            var r = doc.RootElement;
+            return TryParse(doc.RootElement, out draft, out progress, out error);
+        }
+        catch (JsonException) { error = InboxDecoded.NotJsonError; return false; }
+    }
+
+    /// <summary>已经解析好的 JSON（<see cref="IslandPayload"/> 只解析一次）。</summary>
+    public static bool TryParse(JsonElement r, out PushDraft? draft, out double? progress, out string? error)
+    {
+        draft = null; progress = null; error = null;
+        try
+        {
             if (r.ValueKind != JsonValueKind.Object) { error = "需要 JSON 对象"; return false; }
             string S(string n) => r.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
             var title = S("title");
@@ -91,16 +101,47 @@ public sealed record InboxDecoded(bool Ok, IReadOnlyList<(PushDraft Draft, doubl
 
 public static class InboxDecoder
 {
-    /// <summary>先完整解析、校验，不抛异常；调用方据此决定删除文件还是移到 failed。</summary>
-    public static InboxDecoded Decode(string text)
+    /// <summary>收件箱：自动判定格式（同 <see cref="IslandPayload.Decode"/> 的 Auto）。</summary>
+    public static InboxDecoded Decode(string text) => IslandPayload.Decode(text, PayloadRoute.Auto);
+}
+
+/// <summary>消息从哪条路进来：收件箱自动判定；HTTP 的 /v1/island/push 和 /v1/qisland/ingest 各自指定。</summary>
+public enum PayloadRoute { Auto, Push, Ingest }
+
+/// <summary>
+/// 收件箱和 HTTP 接口共用的唯一入口：JSON 只解析一次，按顶层字段选解析器，结果格式相同，两条路不会走岔。
+/// 自动判定：顶层是数组，或顶层对象有 kind / activities 属性 → 接入格式（QislandIngest）；否则 → 普通推送。
+/// 只看顶层属性名，不看正文：标题、正文里出现 "kind" 不影响。
+/// </summary>
+public static class IslandPayload
+{
+    public static InboxDecoded Decode(string text, PayloadRoute route)
     {
-        var trimmed = text.TrimStart();
-        if (trimmed.Contains("\"activities\"") || trimmed.Contains("\"kind\"") || trimmed.StartsWith('['))
-            return QislandIngest.TryParse(text, out var drafts, out var err)
-                ? new(true, drafts.Select(d => (d, (double?)null)).ToList(), null)
-                : new(false, [], err);
-        return PushParser.TryParse(text, out var d1, out var p, out var e)
-            ? new(true, [(d1!, p)], null)
-            : new(false, [], e);
+        if (route == PayloadRoute.Ingest && string.IsNullOrWhiteSpace(text)) return new(true, [], null);
+        JsonDocument doc;
+        try { doc = JsonDocument.Parse(text); }
+        catch (JsonException) { return new(false, [], InboxDecoded.NotJsonError); }
+        using (doc)
+        {
+            var root = doc.RootElement;
+            var ingest = route switch
+            {
+                PayloadRoute.Ingest => true,
+                PayloadRoute.Push => false,
+                _ => IsIngest(root),
+            };
+            if (ingest)
+                return QislandIngest.TryParse(root, out var drafts, out var err)
+                    ? new(true, drafts.Select(d => (d, (double?)null)).ToList(), null)
+                    : new(false, [], err);
+            return PushParser.TryParse(root, out var d1, out var p, out var e)
+                ? new(true, [(d1!, p)], null)
+                : new(false, [], e);
+        }
     }
+
+    /// <summary>按顶层结构判定是不是接入格式。</summary>
+    public static bool IsIngest(JsonElement root) =>
+        root.ValueKind == JsonValueKind.Array
+        || (root.ValueKind == JsonValueKind.Object && (root.TryGetProperty("kind", out _) || root.TryGetProperty("activities", out _)));
 }
