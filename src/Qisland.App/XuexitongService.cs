@@ -30,6 +30,8 @@ public sealed partial class XuexitongService
     private bool _busy;
     private readonly Dictionary<string, DateTime?> _deadlineCache = [];
     public string? UserName { get; private set; }
+    /// <summary>当前账号身份（uid 的哈希，见 <see cref="AccountId"/>）；没登录是空串。作业缓存按它认领。</summary>
+    private string _account = "";
     public bool LoggedIn => _jar != null;
     public bool Expired { get; private set; }
     public DateTime? LastOk { get; private set; }
@@ -51,6 +53,7 @@ public sealed partial class XuexitongService
                 var doc = JsonDocument.Parse(json).RootElement;
                 UserName = doc.GetProperty("name").GetString();
                 _jar = new CookieContainer();
+                _account = doc.TryGetProperty("acct", out var ac) && ac.GetString() is { Length: > 0 } a ? a : "";
                 foreach (var c in doc.GetProperty("cookies").Deserialize<List<Ck>>() ?? [])
                 {
                     _jar.Add(new Cookie(c.N, c.V, c.P, c.D));
@@ -58,9 +61,17 @@ public sealed partial class XuexitongService
                 }
             }
             catch { _jar = null; }
+            if (_jar != null && _account.Length == 0) _account = AccountId.Of(Platform, Uid(_jar) ?? UserName);   // 4.0.3 及以前的凭据没存账号标记
         }
+        if (_jar == null) _account = "";
+        // 磁盘上的作业缓存不属于这个账号（换过号、没登录、旧格式）就不用
+        _sync.Adopt(Platform, _account);
         _next = DateTime.Now.AddSeconds(45);
     }
+
+    /// <summary>超星账号 uid（登录 Cookie 里的 _uid / UID），只拿来算账号哈希，不记日志。</summary>
+    private static string? Uid(CookieContainer jar) =>
+        jar.GetAllCookies().FirstOrDefault(c => c.Name is "_uid" or "UID" && c.Value.Length > 0)?.Value;
 
     private static HttpClient NewHttp(CookieContainer jar) =>
         new(new HttpClientHandler { CookieContainer = jar, UseCookies = true, AllowAutoRedirect = true }) { Timeout = TimeSpan.FromSeconds(25), DefaultRequestHeaders = { { "User-Agent", UA } } };
@@ -72,7 +83,7 @@ public sealed partial class XuexitongService
             .Select(c => new Ck(c.Name, c.Value, c.Domain, c.Path, c.Expires > DateTime.Now ? new DateTimeOffset(c.Expires.ToUniversalTime()).ToUnixTimeSeconds() : 0)).ToList();
         var auth = list.Where(c => c.E > 0 && AuthCookies.Contains(c.N)).Select(c => DateTimeOffset.FromUnixTimeSeconds(c.E).LocalDateTime).ToList();
         ExpiresAt = auth.Count > 0 ? auth.Min() : null;
-        Dpapi.Save(CredPath, JsonSerializer.Serialize(new { name = UserName ?? "", cookies = list }));
+        Dpapi.Save(CredPath, JsonSerializer.Serialize(new { name = UserName ?? "", acct = _account, cookies = list }));
     }
 
     // ───────────── 扫码登录 ─────────────
@@ -116,12 +127,17 @@ public sealed partial class XuexitongService
                     status("这个账号开了二次验证，Qisland 暂不支持");
                     return false;
                 }
-                _sync.NewSession();   // 新登录 / 换号：之前在途的拉取全部作废
+                var name = o.TryGetProperty("nickname", out var nn) ? nn.GetString() : null;
+                try { name ??= await FetchName(h); } catch { }
+                var account = AccountId.Of(Platform, Uid(qr.Jar) ?? name);
+                // 新登录生效：换代（在途拉取作废）；换了账号就撤掉旧账号的作业、重写缓存，提醒随列表一起撤
+                var switched = _sync.SwitchAccount(Platform, account);
+                _account = account;
                 _jar = qr.Jar;
                 Expired = false;
-                UserName = o.TryGetProperty("nickname", out var nn) ? nn.GetString() : null;
-                try { UserName ??= await FetchName(h); } catch { }
+                UserName = name;
                 Persist();
+                if (switched) { App.Log("学习通: 换了账号，已撤下旧账号的作业"); _hub.Refreshed(); }
                 App.Log($"学习通: 已登录 {UserName}");
                 _next = DateTime.Now;
                 Changed?.Invoke();
@@ -148,7 +164,7 @@ public sealed partial class XuexitongService
     {
         // 先换代（在途的拉取回来后什么都不能改），再删凭据、清作业缓存（排在正在进行的提交之后）
         _sync.Logout(Platform, () => { try { File.Delete(CredPath); } catch { } });
-        _jar = null; UserName = null; Expired = false; ExpiresAt = null;
+        _jar = null; UserName = null; Expired = false; ExpiresAt = null; _account = "";
         _hub.Refreshed();
         _store.Remove("xxt:expired");
         Changed?.Invoke();

@@ -57,6 +57,8 @@ public sealed class YuketangService
     private bool _loggedCookieNames;
     private int _okButFailing;
     public string? UserName { get; private set; }
+    /// <summary>当前账号身份（学校域名 + 用户 id 的哈希，见 <see cref="AccountId"/>）；没登录是空串。作业缓存按它认领。</summary>
+    private string _account = "";
     public bool LoggedIn => _jar["sessionid"] != null;
     public bool Expired { get; private set; }
     public DateTime? LastOk { get; private set; }
@@ -83,9 +85,13 @@ public sealed class YuketangService
                     set.Set("sessionid", sid, o["expires"]?.GetValue<long>() is { } ex and > 0 ? DateTimeOffset.FromUnixTimeSeconds(ex) : null);
                 _jar.Replace(set);
                 ExpiresAt = set.ExpiresOf("sessionid")?.LocalDateTime;
+                _account = o["acct"]?.GetValue<string>() is { Length: > 0 } a ? a : AccountId.Of(Platform, Host + "|" + UserName);   // 旧凭据没存账号标记
             }
             catch { }
         }
+        if (!LoggedIn) _account = "";
+        // 磁盘上的作业缓存不属于这个账号（换过号、没登录、旧格式）就不用
+        _hub.Adopt(Platform, _account);
         _next = DateTime.Now.AddSeconds(20);
     }
 
@@ -107,7 +113,7 @@ public sealed class YuketangService
                 arr.Add(new JsonObject { ["n"] = n, ["v"] = e.Value, ["e"] = e.Expires is { } x ? x.ToUnixTimeSeconds() : 0 });
             var o = new JsonObject
             {
-                ["host"] = Host, ["name"] = UserName ?? "", ["cookies"] = arr,
+                ["host"] = Host, ["name"] = UserName ?? "", ["acct"] = _account, ["cookies"] = arr,
                 // 旧版本回退时还能读
                 ["sessionid"] = c["sessionid"] ?? "", ["expires"] = c.ExpiresOf("sessionid") is { } se ? se.ToUnixTimeSeconds() : 0,
             };
@@ -163,6 +169,10 @@ public sealed class YuketangService
                     var gen = _jar.Replace(set);   // 新登录 / 换账号：开新的一代，之前在途的请求全部作废
                     ExpiresAt = set.ExpiresOf("sessionid")?.LocalDateTime;
                     UserName = d["Name"]?.ToString() ?? "";
+                    var uid = (d["UserID"] ?? d["user_id"] ?? d["UserId"] ?? d["uid"])?.ToString();
+                    _account = AccountId.Of(Platform, Host + "|" + (string.IsNullOrEmpty(uid) ? UserName : uid));
+                    // 换了账号：撤掉旧账号的作业、重写缓存，提醒随列表一起撤
+                    if (_hub.Adopt(Platform, _account)) App.Log("雨课堂: 换了账号，已撤下旧账号的作业");
                     Expired = false;
                     _health.Reset(); _okButFailing = 0;
                     Save(gen);
@@ -182,7 +192,7 @@ public sealed class YuketangService
     {
         // 先换代（在途请求回来后不能再合并 Cookie / 写盘），再删凭据文件（排在正在进行的保存之后）
         _jar.Clear(() => { try { File.Delete(CredPath); } catch { } });
-        UserName = null; Expired = false; ExpiresAt = null; _health.Reset(); _okButFailing = 0;
+        UserName = null; Expired = false; ExpiresAt = null; _health.Reset(); _okButFailing = 0; _account = "";
         _hub.Clear(Platform);
         _store.Remove("ykt:expired");
         Changed?.Invoke();

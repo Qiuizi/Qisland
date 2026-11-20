@@ -44,6 +44,15 @@ public sealed class HomeworkHub
         Refreshed();
     }
 
+    /// <summary>平台的账号是 account（启动读凭据 / 新账号登录生效）：别的账号或没有标记的作业撤掉，重写缓存，撤提醒。</summary>
+    public bool Adopt(string platform, string account)
+    {
+        if (!_book.Adopt(platform, account)) return false;
+        WriteCache(_book.ToJson());
+        Refreshed();
+        return true;
+    }
+
     /// <summary>某个平台自己的提交流程（带会话代数，见 <see cref="HomeworkSync"/>）：共用这里的列表和缓存文件。</summary>
     public HomeworkSync Sync() => new(_book, WriteCache);
 
