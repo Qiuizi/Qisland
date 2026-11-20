@@ -365,9 +365,6 @@ public sealed class FocusTimer
     }
 }
 
-/// <summary>待办：%APPDATA%\Qisland\todo.md，一行一条 “- [ ] 事项”，勾成 “- [x]” 就算完成。用记事本就能改。</summary>
-public sealed record TodoItem(int Line, string Text, bool Done);
-
 /// <summary>
 /// 待办存在 %APPDATA%\Qisland\todo.md（标准 Markdown 任务列表，可以用任何编辑器改）。
 /// 岛上添加 / 勾选 / 删除都直接改这个文件，外部改动也会实时同步回岛上。
@@ -378,7 +375,7 @@ public sealed class TodoFile : IDisposable
     private readonly FileSystemWatcher _watcher;
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(400) };
     public static string PathName => System.IO.Path.Combine(App.DataDir, "todo.md");
-    private const string Sample = "在这里写下第一件事";
+    private const string Sample = TodoLines.Sample;
     public IReadOnlyList<TodoItem> Items { get; private set; } = [];
     /// <summary>未完成的标题（去掉 ⏰ / 🔁 标记），给首页和组件显示。</summary>
     public IReadOnlyList<string> Open => Items.Where(i => !i.Done).Select(i => TodoMeta.Parse(i.Text).Title).ToList();
@@ -399,53 +396,47 @@ public sealed class TodoFile : IDisposable
 
     private void Kick() { _debounce.Stop(); _debounce.Start(); }
 
-    private static (bool ok, bool done, string text) Parse(string raw)
-    {
-        var l = raw.Trim();
-        if (l.Length < 5 || (l[0] != '-' && l[0] != '*') || l[1] != ' ' || l[2] != '[' || l[4] != ']') return (false, false, "");
-        var done = l[3] is 'x' or 'X';
-        if (!done && l[3] != ' ') return (false, false, "");
-        var text = l[5..].Trim();
-        return (text.Length > 0 && text != Sample, done, text);
-    }
+    private static (bool ok, bool done, string text) Parse(string raw) => TodoLines.Parse(raw);
 
     private void Load()
     {
         try
         {
-            var lines = File.ReadAllLines(PathName);
-            var list = new List<TodoItem>();
-            for (var i = 0; i < lines.Length; i++)
-            {
-                var (ok, done, text) = Parse(lines[i]);
-                if (ok) list.Add(new TodoItem(i, text, done));
-            }
-            Items = list;
+            Items = TodoLines.Items(File.ReadAllLines(PathName));
             Changed?.Invoke();
         }
         catch (IOException) { Kick(); }
     }
 
-    private void Edit(Action<List<string>> change)
+    /// <summary>
+    /// 读文件 → 改 → 原子写回。change 返回 Conflict（要改的那条找不到 / 不唯一）时不写；
+    /// 写不进去返回 WriteFailed。每次都重新读文件，按原文定位那一行（编辑窗口开着时文件可能被改过）。
+    /// </summary>
+    private TodoEditResult Edit(Func<List<string>, TodoEditResult> change)
     {
+        TodoEditResult r;
         try
         {
             var lines = File.ReadAllLines(PathName).ToList();
-            change(lines);
-            File.WriteAllLines(PathName, lines);
+            r = change(lines);
+            if (r == TodoEditResult.Ok)
+            {
+                var text = string.Concat(lines.Select(l => l + Environment.NewLine));
+                if (!AtomicFile.TryWrite(PathName, new System.Text.UTF8Encoding(false).GetBytes(text), out var err)) { App.Log("待办写入: " + err); r = TodoEditResult.WriteFailed; }
+            }
+            else App.Log("待办写入: 文件已被改动，找不到要改的那一条");
         }
-        catch (Exception ex) { App.Log("待办写入: " + ex.Message); }
+        catch (Exception ex) { App.Log("待办写入: " + ex.Message); r = TodoEditResult.WriteFailed; }
         Load();
+        return r;
     }
 
-    private static bool Same(List<string> lines, TodoItem it) => it.Line < lines.Count && Parse(lines[it.Line]) is var p && p.ok && p.text == it.Text;
-
     /// <summary>新待办插在未完成列表的最后、已完成的前面。</summary>
-    public void Add(string text)
+    public TodoEditResult Add(string text)
     {
-        text = text.Replace("\r", " ").Replace("\n", " ").Trim();
-        if (text.Length == 0) return;
-        Edit(lines =>
+        text = TodoLines.Clean(text);
+        if (text.Length == 0) return TodoEditResult.Conflict;
+        return Edit(lines =>
         {
             lines.RemoveAll(l => l.Contains("[ ] " + Sample));
             var at = lines.Count;
@@ -453,36 +444,18 @@ public sealed class TodoFile : IDisposable
                 if (Parse(lines[i]) is { ok: true, done: false }) { at = i + 1; break; }
                 else if (Parse(lines[i]) is { ok: true, done: true }) at = i;
             lines.Insert(at, "- [ ] " + text);
+            return TodoEditResult.Ok;
         });
     }
 
-    /// <summary>改一条的文字（提醒时间 / 重复写在文字里）。</summary>
-    public void SetText(TodoItem it, string text)
-    {
-        text = text.Replace("\r", " ").Replace("\n", " ").Trim();
-        if (text.Length == 0) return;
-        Edit(lines => { if (Same(lines, it)) lines[it.Line] = (it.Done ? "- [x] " : "- [ ] ") + text; });
-    }
+    /// <summary>改一条的文字（提醒时间 / 重复写在文字里）。返回 Ok / Conflict（那一条找不到或不唯一）/ WriteFailed。</summary>
+    public TodoEditResult SetText(TodoItem it, string text) => Edit(lines => TodoLines.SetText(lines, it, text));
 
-    public void SetDone(TodoItem it, bool done) => Edit(lines =>
-    {
-        if (!Same(lines, it)) return;
-        // 每周重复的：勾掉 = 这次做完，⏰ 挪到下一次，仍然留在未完成里
-        if (done && TodoMeta.Parse(it.Text).Complete(DateTime.Now) is { } next) { lines[it.Line] = "- [ ] " + next.ToText(); return; }
-        lines.RemoveAt(it.Line);
-        // 勾掉的挪到文件末尾（最近完成的在最后），取消勾选的放回未完成末尾
-        if (done) lines.Add("- [x] " + it.Text);
-        else
-        {
-            var at = lines.Count;
-            for (var i = 0; i < lines.Count; i++) if (Parse(lines[i]) is { ok: true, done: true }) { at = i; break; }
-            lines.Insert(at, "- [ ] " + it.Text);
-        }
-    });
+    public TodoEditResult SetDone(TodoItem it, bool done) => Edit(lines => TodoLines.SetDone(lines, it, done, DateTime.Now));
 
-    public void Delete(TodoItem it) => Edit(lines => { if (Same(lines, it)) lines.RemoveAt(it.Line); });
+    public TodoEditResult Delete(TodoItem it) => Edit(lines => TodoLines.Delete(lines, it));
 
-    public void ClearDone() => Edit(lines => lines.RemoveAll(l => Parse(l) is { ok: true, done: true }));
+    public void ClearDone() => Edit(lines => { lines.RemoveAll(l => Parse(l) is { ok: true, done: true }); return TodoEditResult.Ok; });
 
     public void Dispose() => _watcher.Dispose();
 }

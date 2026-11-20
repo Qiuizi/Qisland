@@ -36,9 +36,21 @@ public sealed class TodoReminderWindow : Window
         var err = DialogKit.Text("", 12, FontWeights.SemiBold, DialogKit.Danger);
         sp.Children.Add(err);
 
+        // 没写进去时窗口留着、输入不动，告诉用户为什么
+        bool Saved(TodoEditResult r)
+        {
+            err.Text = r switch
+            {
+                TodoEditResult.Conflict => "todo.md 刚被改过，找不到这一条（或有两条一样的），没有保存。可以关掉窗口重新打开再设。",
+                TodoEditResult.WriteFailed => "写入 todo.md 失败（文件可能被占用），再点一次保存试试。",
+                _ => "",
+            };
+            return r == TodoEditResult.Ok;
+        }
+
         var btns = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
         if (meta.Due != null || meta.Repeats)
-            btns.Children.Add(DialogKit.Button("清除提醒", () => { todo.SetText(item, (meta with { Due = null, Repeat = [] }).ToText()); Close(); }, danger: true));
+            btns.Children.Add(DialogKit.Button("清除提醒", () => { if (Saved(todo.SetText(item, (meta with { Due = null, Repeat = [] }).ToText()))) Close(); }, danger: true));
         btns.Children.Add(DialogKit.Button("取消", Close));
         btns.Children.Add(DialogKit.Button("保存", () =>
         {
@@ -48,8 +60,7 @@ public sealed class TodoReminderWindow : Window
             var rep = days.OrderBy(x => x == DayOfWeek.Sunday ? 7 : (int)x).ToList();
             // 选了星期但日期不在其中：挪到这一天起最近的那次
             if (rep.Count > 0 && !rep.Contains(at.DayOfWeek)) at = TodoMeta.NextWeekly(at.AddSeconds(-1), rep, t);
-            todo.SetText(item, (meta with { Due = at, Repeat = rep }).ToText());
-            Close();
+            if (Saved(todo.SetText(item, (meta with { Due = at, Repeat = rep }).ToText()))) Close();
         }, primary: true));
         sp.Children.Add(btns);
         DialogKit.Shell(this, "待办提醒", sp, 330);
