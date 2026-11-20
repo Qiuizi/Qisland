@@ -100,23 +100,22 @@ public sealed class HomeworkHub
         // 旧版本挂上去的常驻活动（以及已经交了的那条的提醒）一律撤掉
         foreach (var gone in _live.ToList()) _store.Remove(gone);
         _live.Clear();
-        if (_alertKey != null && !pending.Any(p => p.Key == _alertKey)) { _store.Remove("hw:alert"); _alertKey = null; }
+        if (_alertKey != null && !pending.Any(p => p.AlertKey == _alertKey)) { _store.Remove("hw:alert"); _alertKey = null; }
 
         // 分档提醒：找最急的一条还没在这一档提醒过的
         var alerted = Alerted;
-        var stale = alerted.Keys.Where(k => !pending.Any(p => p.Key == k)).ToList();
-        foreach (var k in stale) alerted.Remove(k);
-        if (stale.Count > 0) try { File.WriteAllText(AlertsPath, JsonSerializer.Serialize(alerted)); } catch { }
-        var due = pending.Select(i => (i, t: i.Tier(now))).Where(x => x.t > 0 && (!alerted.TryGetValue(x.i.Key, out var had) || x.t < had)).OrderBy(x => x.t).FirstOrDefault();
-        if (due.i is { } hw)
+        // 记账用 AlertKey（作业链接 / 平台+课程+标题，不含截止时间）：学习通反推的截止时间每次差一两分钟，不能当键
+        if (HomeworkAlerts.Prune(alerted, pending)) try { File.WriteAllText(AlertsPath, JsonSerializer.Serialize(alerted)); } catch { }
+        if (HomeworkAlerts.Next(pending, alerted, now) is { } due)
         {
-            alerted[hw.Key] = due.t;
-            _alertKey = hw.Key;
+            var hw = due.item;
+            HomeworkAlerts.Mark(alerted, hw, due.tier);
+            _alertKey = hw.AlertKey;
             try { File.WriteAllText(AlertsPath, JsonSerializer.Serialize(alerted)); } catch { }
-            var head = due.t switch { 1 => "作业 1 小时内截止", 3 => "作业 3 小时内截止", _ => "作业明天前截止" };
+            var head = due.tier switch { 1 => "作业 1 小时内截止", 3 => "作业 3 小时内截止", _ => "作业明天前截止" };
             _store.Upsert(new IslandActivity("hw:alert", Source, $"{head} · {hw.Title}", $"{hw.Course} · {hw.Deadline:M/d HH:mm} · 还剩 {hw.Left(now)}",
-                due.t == 1 ? ActivityKind.Error : ActivityKind.Warning, 88, DurationSeconds: due.t == 24 ? 12 : 30, ResetTtl: true, OpenUri: IslandActivity.SafeUri(hw.Url)));
-            App.Log($"作业提醒: {due.t} 小时档");
+                due.tier == 1 ? ActivityKind.Error : ActivityKind.Warning, 88, DurationSeconds: due.tier == 24 ? 12 : 30, ResetTtl: true, OpenUri: IslandActivity.SafeUri(hw.Url), Replace: true));
+            App.Log($"作业提醒: {due.tier} 小时档");
         }
     }
 
