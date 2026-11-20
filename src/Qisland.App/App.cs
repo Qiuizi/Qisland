@@ -652,6 +652,7 @@ public sealed partial class App : Application
             (Features.WeatherAlerts, "天气提醒", "按预报推算：快下雨、雷阵雨、下雪、大风、高温、严寒、明天大降温，同一件事一天只提醒一次"),
             (Features.Water, "喝水提醒（默认关）", "9:00–22:00 间隔 45 分钟没记喝水就提醒一次，午休 12:00–13:30 不打扰；点提醒记一杯"),
             (Features.Sit, "久坐提醒（默认关）", "连续用电脑 60 分钟提醒起来活动；离开 5 分钟算休息过"),
+            (Features.Clock12, "12 小时制时钟（默认关）", "收起时的时钟显示成 3:05 而不是 15:05"),
             (Features.OledShift, "OLED 防烧屏（默认关）", "收起时岛每隔几分钟左右挪 1–3 像素，避免 OLED 屏留下残影"),
         })
         {

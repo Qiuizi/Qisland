@@ -300,7 +300,7 @@ public sealed partial class IslandWindow : Window
     private void OnSecond()
     {
         var now = DateTime.Now;
-        var text = now.ToString("HH:mm", CultureInfo.InvariantCulture);
+        var text = now.ToString(Features.On(Features.Clock12) ? "h:mm" : "HH:mm", CultureInfo.InvariantCulture);
         if (text != _clockText) { _clockText = text; _idleClock.Text = text; _expDirty = true; }
         if (_expDirty && !_animating) RebuildExpanded();
         UpdateMediaProgress();

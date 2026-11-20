@@ -11,10 +11,10 @@ public static class Features
 {
     public const string Privacy = "privacy", Calendar = "calendar", Calls = "calls", Focus = "focus",
         Bluetooth = "bluetooth", Network = "network", LockKeys = "lockkeys",
-        WeatherAlerts = "weather-alerts", Water = "water", Sit = "sit", OledShift = "oled-shift";
+        WeatherAlerts = "weather-alerts", Water = "water", Sit = "sit", OledShift = "oled-shift", Clock12 = "clock-12h";
 
     /// <summary>默认关、要自己打开的（文件是 &lt;键&gt;.on）：喝水 / 久坐提醒会主动打扰，OLED 防烧屏会挪动岛。</summary>
-    private static readonly HashSet<string> OptIn = [Water, Sit, OledShift];
+    private static readonly HashSet<string> OptIn = [Water, Sit, OledShift, Clock12];
 
     private static readonly ConcurrentDictionary<string, bool> Cache = new();
     private static string Dir => Path.Combine(App.DataDir, "features");

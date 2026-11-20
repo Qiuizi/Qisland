@@ -52,3 +52,12 @@ WinIslands 应用本体为 **MIT License**（见 [LICENSE](LICENSE)）。
 | 岛仔 Daozai（Renly1994/xiaotang-daozai） | 思路参考：豆包网页额度接口与字段含义（window_limit_groups、window_type、used_percent、end_time、710012001 登录失效）、Cookie 中 sessionid 的校验规则；酷狗 KRC 缓存目录（KuGou.ini 的 LyricPath）与文件名格式；汽水音乐 LunaCacheV2（LMDB + MessagePack）里歌词字段的位置。C# 自行实现，未复制代码 | MIT |
 | KRC 格式公开资料（krc1 头 + 16 字节异或表 + zlib） | 解码酷狗本机歌词缓存 | 公开格式说明，自行实现 |
 | Gemini CLI / Qwen Code / Cursor / OpenCode 的 hooks / 插件文档 | 接入格式（只在你逐个同意后写入） | 各自文档 |
+
+## 天气、组件与健康（v4 第三阶段）
+
+| 项目 / 服务 | 用途 | 许可证 / 说明 |
+| --- | --- | --- |
+| Open-Meteo（api.open-meteo.com / geocoding-api.open-meteo.com） | 天气主数据源：实况、48 小时逐时、7 天逐日（降水概率、紫外线、日出日落、风向、气压、能见度），城市搜索；15 分钟刷新一次 | 免费非商业 API，数据 CC BY 4.0，卡片上标注「Open-Meteo」 |
+| wttr.in | 自动定位时的地名、坐标与月相（Open-Meteo 不可用时兜底） | 公开免费服务 |
+| 岛仔 Daozai（Renly1994/xiaotang-daozai） | 思路参考：Open-Meteo 7 天预报与 15 分钟刷新、多城市（最多 5 个 + 自动定位）与岛上切换、中文城市名搜索规则（去「市/县/区/省」、省份查省会、两字名补「市」、跳过机场车站等地物、按精确匹配和人口排序、0.05° 去重）、天气图标动效（太阳转、雨雪落、闪电闪，进页面 / 悬停时短暂播放后静止）、数据过旧提示；健康页的喝水（250 ml 一杯、2000 ml 目标、45 分钟、9–22 点、午休静默、按小时柱状）与久坐提醒（连续 60 分钟）；剪贴板置顶；OLED 像素位移。全部 C# / WPF 自行实现，未复制代码。省会对照表为自行整理；天气提醒规则（快下雨 / 雷阵雨 / 下雪 / 大风 / 高温 / 严寒 / 大降温）为 Qisland 自有 | MIT |
+
