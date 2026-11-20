@@ -1,44 +1,92 @@
+using System.Text.Json;
+
 namespace Qisland.Core;
 
 /// <summary>退出登录的结果：凭据删掉了 / 删不掉但写好了退出标记（会继续重试删除）/ 两样都没做成（重启后可能恢复登录）。</summary>
 public enum LogoutOutcome { Removed, Pending, Failed }
 
+/// <summary>读凭据前的判定：可以用 / 已退出 / 现在判断不了（退出标记读不到）。</summary>
+public enum CredentialCheck { Ok, Revoked, Unknown }
+
 /// <summary>
 /// 保存登录凭据的文件（学习通 xuexitong.bin、雨课堂 yuketang.bin）的退出登录处理。
-/// 凭据文件被别的程序占用时删不掉、也不能被替换，所以退出时在旁边写一个退出标记（.loggedout，内容是退出时间）：
-/// 读凭据前先看标记，凭据的保存时间不晚于退出时间就不恢复登录。之后按退避重试删除，删掉了连标记一起清掉。
-/// 新登录保存的凭据带着更晚的保存时间，即使旧标记还没删掉也照常生效。
+/// 每次扫码登录生成一个随机的凭据 id，写在加密的凭据里；退出时凭据文件被占用删不掉，就在旁边写退出标记
+/// （.loggedout，内容是被撤销的凭据 id 列表），读凭据前看它的 id 在不在列表里——不比时间，系统时间被调过也不受影响。
+/// 标记读不到（被占用）时判定为「未知」：不删任何文件、先不登录，稍后再判。
+/// 4.0.4 写的标记只有时间，按「撤销所有没有 id 的旧凭据」处理。
 /// </summary>
-public sealed class LoginFile(string path, Func<string, bool>? tryDelete = null, Func<string, string, bool>? tryWrite = null, Func<DateTimeOffset>? clock = null)
+public sealed class LoginFile(string path, Func<string, bool>? tryDelete = null, Func<string, string, bool>? tryWrite = null, Func<DateTimeOffset>? clock = null, Func<string, string>? read = null)
 {
     public string Path => path;
     public string TombPath => path + ".loggedout";
 
+    /// <summary>旧版本存的凭据没有凭据 id，按这个 id 记。</summary>
+    public const string LegacyId = "legacy";
+
+    /// <summary>新登录用的凭据 id。</summary>
+    public static string NewId() => Guid.NewGuid().ToString("N");
+
     public long NowMs => (clock?.Invoke() ?? DateTimeOffset.UtcNow).ToUnixTimeMilliseconds();
 
-    /// <summary>退出登录：删凭据；删不掉就写退出标记。</summary>
-    public LogoutOutcome Logout()
+    private sealed record Marker(int V, List<string>? Revoked);
+    private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true };
+
+    /// <summary>退出登录：删凭据；删不掉就把这些凭据 id 追加进退出标记。</summary>
+    public LogoutOutcome Logout(IEnumerable<string> credentialIds)
     {
         if (Delete(path)) { Delete(TombPath); return LogoutOutcome.Removed; }
-        return Write(TombPath, NowMs.ToString()) ? LogoutOutcome.Pending : LogoutOutcome.Failed;
+        var ids = new List<string>();
+        var state = ReadMarker(out var old);
+        if (state == MarkerState.Ids) ids.AddRange(old!);
+        else if (state == MarkerState.Legacy) ids.Add(LegacyId);          // 4.0.4 的标记撤销的是没有 id 的旧凭据，保留这层意思
+        foreach (var id in credentialIds) if (!string.IsNullOrEmpty(id) && !ids.Contains(id)) ids.Add(id);
+        return Write(TombPath, JsonSerializer.Serialize(new Marker(2, ids), Json)) ? LogoutOutcome.Pending : LogoutOutcome.Failed;
     }
 
-    /// <summary>读凭据前：这份凭据（保存于 savedMs，旧版本没有保存时间传 0）是不是已经退出登录了。</summary>
-    public bool Revoked(long savedMs)
+    /// <summary>读凭据前：这份凭据（id 为 null 或空 = 旧版本凭据）能不能用。</summary>
+    public CredentialCheck Check(string? credentialId)
     {
+        var id = string.IsNullOrEmpty(credentialId) ? LegacyId : credentialId;
+        return ReadMarker(out var ids) switch
+        {
+            MarkerState.None => CredentialCheck.Ok,
+            MarkerState.Ids => ids!.Contains(id) ? CredentialCheck.Revoked : CredentialCheck.Ok,
+            MarkerState.Legacy => id == LegacyId ? CredentialCheck.Revoked : CredentialCheck.Ok,
+            _ => CredentialCheck.Unknown,
+        };
+    }
+
+    private enum MarkerState { None, Ids, Legacy, Unreadable }
+
+    private MarkerState ReadMarker(out List<string>? ids)
+    {
+        ids = null;
+        string text;
         try
         {
-            if (!File.Exists(TombPath)) return false;
-            return !long.TryParse(File.ReadAllText(TombPath).Trim(), out var at) || at >= savedMs;
+            if (!File.Exists(TombPath)) return MarkerState.None;
+            text = (read ?? File.ReadAllText)(TombPath).Trim();
         }
-        catch { return true; }   // 标记在但读不了：按已退出处理
+        catch (FileNotFoundException) { return MarkerState.None; }
+        catch { return MarkerState.Unreadable; }
+        if (long.TryParse(text, out _)) return MarkerState.Legacy;          // 4.0.4：只记了退出时间
+        try
+        {
+            ids = JsonSerializer.Deserialize<Marker>(text, Json)?.Revoked;
+            if (ids != null) return MarkerState.Ids;
+        }
+        catch (JsonException) { }
+        return MarkerState.Unreadable;                                       // 内容坏了：判断不了，按未知处理
     }
 
-    /// <summary>重试清理：删凭据，再删标记。返回是否都删干净了。</summary>
+    /// <summary>重试清理 / 确认撤销后清理：删凭据，再删标记。返回是否都删干净了。只在状态明确时调用。</summary>
     public bool Cleanup() => Delete(path) && Delete(TombPath);
 
-    /// <summary>新登录写好凭据之后：旧的退出标记没用了（删不掉也不要紧，保存时间更晚）。</summary>
-    public void Saved() => Delete(TombPath);
+    /// <summary>新登录写好凭据之后：旧的退出标记没用了，删掉；删不掉就改写成空列表（新凭据 id 本来也不在里面）。</summary>
+    public void Saved()
+    {
+        if (!Delete(TombPath)) Write(TombPath, JsonSerializer.Serialize(new Marker(2, []), Json));
+    }
 
     private bool Delete(string p)
     {

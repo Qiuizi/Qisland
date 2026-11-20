@@ -68,20 +68,46 @@ public sealed class YuketangService
     public DateTime? ExpiresAt { get; private set; }
     public event Action? Changed;
 
+    // 这次登录的凭据 id（存在加密凭据里，退出标记按它撤销）；本次运行见过的所有凭据 id，退出时一起撤销
+    private string? _credId;
+    private readonly HashSet<string> _knownIds = [];
+
     public YuketangService(HomeworkHub hub, ActivityStore store)
     {
         _hub = hub; _store = store;
-        if (Dpapi.Load(CredPath) is { } json)
+        // 退出标记读不到（被占用）：状态未知，文件都留着、先不登录，稍后再判断
+        if (LoadSaved() == CredentialCheck.Unknown)
+            LogoutCleanup.DeferLoad("雨课堂", () =>
+            {
+                var r = LoadSaved();
+                if (LoggedIn) { _hub.Adopt(Platform, _account); _next = DateTime.Now.AddSeconds(5); Changed?.Invoke(); }
+                return r;
+            }, () => LoggedIn);
+        if (!LoggedIn) _account = "";
+        // 磁盘上的作业缓存不属于这个账号（换过号、没登录、身份未知、旧格式）就不用
+        _hub.Adopt(Platform, _account);
+        _next = DateTime.Now.AddSeconds(20);
+    }
+
+    /// <summary>读本机保存的登录凭据。已退出（id 在退出标记里）就清理掉；标记读不到返回 Unknown，什么都不删。</summary>
+    private CredentialCheck LoadSaved()
+    {
+        if (Dpapi.Load(CredPath) is not { } json) return CredentialCheck.Ok;
         {
             try
             {
                 var o = JsonNode.Parse(json)!;
-                if (_login.Revoked(o["saved"]?.GetValue<long>() ?? 0))
+                var cid = o["cid"]?.GetValue<string>();
+                var check = _login.Check(cid);
+                if (check == CredentialCheck.Revoked)
                 {
-                    App.Log("雨课堂: 上次已经退出登录（当时凭据文件没删掉），不恢复登录");
+                    App.Log("雨课堂: 这份凭据已经退出登录过（当时文件没删掉），不恢复登录");
                     _login.Cleanup();
-                    throw new OperationCanceledException();
+                    return check;
                 }
+                if (check == CredentialCheck.Unknown) { App.Log("雨课堂: 退出标记暂时读不到，先不恢复登录，稍后再判断（文件都保留）"); return check; }
+                _credId = string.IsNullOrEmpty(cid) ? LoginFile.LegacyId : cid;
+                _knownIds.Add(_credId);
                 UserName = o["name"]?.GetValue<string>();
                 Host = o["host"]?.GetValue<string>() ?? Host;
                 var set = new CookieSet();
@@ -95,13 +121,10 @@ public sealed class YuketangService
                 ExpiresAt = set.ExpiresOf("sessionid")?.LocalDateTime;
                 // 只信 4.0.5 起按用户 id 算的身份（4.0.4 的 acct 可能是按用户名算的）；没有就是未知，不认领缓存
                 _account = o["account"]?.GetValue<string>() ?? "";
+                return check;
             }
-            catch { if (!LoggedIn) UserName = null; }
+            catch { if (!LoggedIn) UserName = null; return CredentialCheck.Ok; }
         }
-        if (!LoggedIn) _account = "";
-        // 磁盘上的作业缓存不属于这个账号（换过号、没登录、旧格式）就不用
-        _hub.Adopt(Platform, _account);
-        _next = DateTime.Now.AddSeconds(20);
     }
 
     /// <summary>加密存登录状态；gen 已经不是当前会话（期间退出 / 换号）就不写。</summary>
@@ -122,7 +145,7 @@ public sealed class YuketangService
                 arr.Add(new JsonObject { ["n"] = n, ["v"] = e.Value, ["e"] = e.Expires is { } x ? x.ToUnixTimeSeconds() : 0 });
             var o = new JsonObject
             {
-                ["host"] = Host, ["name"] = UserName ?? "", ["account"] = _account, ["saved"] = _login.NowMs, ["cookies"] = arr,
+                ["host"] = Host, ["name"] = UserName ?? "", ["account"] = _account, ["cid"] = _credId ?? "", ["cookies"] = arr,
                 // 旧版本回退时还能读
                 ["sessionid"] = c["sessionid"] ?? "", ["expires"] = c.ExpiresOf("sessionid") is { } se ? se.ToUnixTimeSeconds() : 0,
             };
@@ -177,6 +200,8 @@ public sealed class YuketangService
                             set.Set(ck.Name, ck.Value, ck.Expires > DateTime.Now ? new DateTimeOffset(ck.Expires.ToUniversalTime(), TimeSpan.Zero) : null);
                     if (string.IsNullOrEmpty(set["sessionid"])) throw new IOException("登录成功但没拿到会话");
                     var gen = _jar.Replace(set);   // 新登录 / 换账号：开新的一代，之前在途的请求全部作废
+                    _credId = LoginFile.NewId();   // 新登录：新的凭据 id
+                    _knownIds.Add(_credId);
                     ExpiresAt = set.ExpiresOf("sessionid")?.LocalDateTime;
                     UserName = d["Name"]?.ToString() ?? "";
                     var uid = (d["UserID"] ?? d["user_id"] ?? d["UserId"] ?? d["uid"])?.ToString();
@@ -204,8 +229,8 @@ public sealed class YuketangService
     {
         // 先换代（在途请求回来后不能再合并 Cookie / 写盘），再删凭据文件（排在正在进行的保存之后）
         var outcome = LogoutOutcome.Removed;
-        _jar.Clear(() => outcome = _login.Logout());
-        UserName = null; Expired = false; ExpiresAt = null; _health.Reset(); _okButFailing = 0; _account = "";
+        _jar.Clear(() => outcome = _login.Logout(_knownIds.ToList()));
+        UserName = null; Expired = false; ExpiresAt = null; _health.Reset(); _okButFailing = 0; _account = ""; _credId = null;
         _hub.Clear(Platform);
         _store.Remove("ykt:expired");
         LogoutCleanup.Start("雨课堂", _login, outcome, _hub.FlushCache, () => !LoggedIn, _store, "ykt:logout-failed");
