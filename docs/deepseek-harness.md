@@ -27,9 +27,10 @@ DSH 的审批既不弹系统通知，也不改窗口标题，所以上面两条�
 
 它挂在 `approval/request` 上，处理方式和 [CodeIsland](https://github.com/wxtsky/CodeIsland) 的 DSH 桥 [dsh-codeisland-bridge](https://github.com/LeLiu/dsh-codeisland-bridge) 一样，岛先接审批，接不住再交回 DSH：
 
-- 把工具名和命令发到 `POST http://127.0.0.1:9840/v1/approval/deepseek-harness`，岛上弹出审批卡。
+- 读取 Qisland 启动时生成的 `%APPDATA%\Qisland\approval.key`（只允许当前 Windows 用户访问），把工具名和命令签名后发到 `POST http://127.0.0.1:9840/v1/approval/deepseek-harness`，岛上验签后才弹出审批卡。
 - 点「允许」时插件返回 `'allowed-once'`，点「拒绝」时返回 `'rejected'`。这两种情况下 DSH 自己的弹窗都不会出现。
 - 点「回 DSH」、岛没开、100 秒没点或者出错时，插件调用 `next()`，交回 DSH 自己的审批界面。它绝不默认同意。
+- 每次请求带随机 request id / nonce；响应必须状态码 200、JSON 合法、`decision` 恰好为 `allow` / `deny`、回带同一组 request id / nonce，并通过 Qisland 密钥的 HMAC 校验。任何一项不满足都交回 DSH。
 - 这一轮在 DSH 里被取消（`req.signal`）时，插件同步放弃等待。
 - 插件不用 prepend 注册，所以排在 `dsh-approval-gate` 之后，被它自动放行的请求不会打扰你。
 
