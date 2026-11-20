@@ -509,28 +509,32 @@ public sealed partial class App : Application
     }
 
     // ───────────── 收件箱：给 WSL NAT 模式等连不上 localhost 的场景 ─────────────
+    // 一批最多 50 个，剩下的排到下一批（后台优先级），积压再多也会处理完、不卡界面
+    private InboxPump? _inbox;
+
     private void SetupInbox()
     {
+        _inbox = new InboxPump(() => Directory.EnumerateFiles(InboxDir, "*.json"), TakeInboxFile,
+            run => Dispatcher.BeginInvoke(run, DispatcherPriority.Background));
         _inboxWatcher = new FileSystemWatcher(InboxDir, "*.json") { NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite, EnableRaisingEvents = true };
-        _inboxWatcher.Created += (_, _) => Dispatcher.BeginInvoke(DrainInbox, DispatcherPriority.Background);
-        _inboxWatcher.Renamed += (_, _) => Dispatcher.BeginInvoke(DrainInbox, DispatcherPriority.Background);
-        DrainInbox();
+        _inboxWatcher.Created += (_, _) => Dispatcher.BeginInvoke(() => _inbox.Request(), DispatcherPriority.Background);
+        _inboxWatcher.Renamed += (_, _) => Dispatcher.BeginInvoke(() => _inbox.Request(), DispatcherPriority.Background);
+        _inbox.Request();
     }
 
-    private void DrainInbox()
+    /// <summary>取走一个收件箱文件；还没写完 / 被占用返回 false（下次再取）。</summary>
+    private bool TakeInboxFile(string f)
     {
-        foreach (var f in Directory.EnumerateFiles(InboxDir, "*.json").Take(50).ToList())
-        {
-            string text;
-            try { text = File.ReadAllText(f); File.Delete(f); }
-            catch (IOException) { continue; } // 还没写完，下次再取
-            catch (UnauthorizedAccessException) { continue; }
-            var trimmed = text.TrimStart();
-            if (trimmed.Contains("\"activities\"") || trimmed.Contains("\"kind\"") || trimmed.StartsWith('['))
-                foreach (var d in QislandIngest.Parse(text)) _store.Upsert(d);
-            else if (ApiServer.ParsePush(text, out var p) is { } d)
-                _store.Upsert(d, p);
-        }
+        string text;
+        try { text = File.ReadAllText(f); File.Delete(f); }
+        catch (IOException) { return false; } // 还没写完，下次再取
+        catch (UnauthorizedAccessException) { return false; }
+        var trimmed = text.TrimStart();
+        if (trimmed.Contains("\"activities\"") || trimmed.Contains("\"kind\"") || trimmed.StartsWith('['))
+            foreach (var d in QislandIngest.Parse(text)) _store.Upsert(d);
+        else if (ApiServer.ParsePush(text, out var p) is { } d)
+            _store.Upsert(d, p);
+        return true;
     }
 
     // ───────────── 天气（weather.txt 里配的地点，没配就让 wttr.in 按 IP 定位；20 分钟一次，Open-Meteo 兜底） ─────────────
