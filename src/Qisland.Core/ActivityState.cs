@@ -62,5 +62,6 @@ public static class ActivityMerge
 /// <summary>日程提醒：每个日程（每一次）一个活动 id，提醒之间不会互相继承内容或链接。</summary>
 public static class CalendarReminder
 {
-    public static string ActivityId(CalEvent e) => "cal:remind:" + e.Key;
+    public const string IdPrefix = "cal:remind:";
+    public static string ActivityId(CalEvent e) => IdPrefix + e.Key;
 }

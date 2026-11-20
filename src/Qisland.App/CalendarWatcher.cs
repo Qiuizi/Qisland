@@ -26,7 +26,9 @@ public sealed class CalendarWatcher
     private readonly ActivityStore _store;
     private readonly HttpClient _http;
     private readonly HashSet<string> _reminded = [];
+    private readonly Dictionary<string, CalEvent> _shownReminders = new(StringComparer.Ordinal);
     private readonly object _feedsGate = new();
+    private readonly Func<string, bool> _featureOn;
     // 订阅 + 缓存；拉取时领票，期间退订（或退订后重订）的结果不会被收下
     private readonly CalendarFeeds _feeds = new();
     private readonly Generation _gen = new();
@@ -38,16 +40,26 @@ public sealed class CalendarWatcher
 
     public CalendarWatcher(ActivityStore store, HttpClient http) : this(store, http, App.DataDir) { }
 
-    internal CalendarWatcher(ActivityStore store, HttpClient http, string dataDir, Action<string>? log = null)
+    internal CalendarWatcher(ActivityStore store, HttpClient http, string dataDir, Action<string>? log = null, Func<string, bool>? featureOn = null)
     {
         _store = store;
         _http = http;
         _dataDir = dataDir;
         _log = log ?? App.Log;
+        _featureOn = featureOn ?? Features.On;
     }
 
     internal Task LoadForTestAsync() => LoadAsync();
+    internal Task WaitForRebuildAsync() => _rebuild;
+
+    internal async Task ReplaceFeedContentForTestAsync(string url, string ics)
+    {
+        _feeds.Apply(_feeds.BeginFetch(url), ics);
+        await Rebuild();
+    }
+
     private Task? _load;
+    private Task _rebuild = Task.CompletedTask;
 
     /// <summary>读加密的订阅和缓存（后台线程，不占启动时间）。</summary>
     private async Task LoadAsync()
@@ -127,7 +139,7 @@ public sealed class CalendarWatcher
             _feeds.Remove(url);
         }
         PersistCache();
-        _ = Rebuild();
+        _rebuild = Rebuild();
         _log($"日历: 删除订阅 {Host(url)}");
         return true;
     }
@@ -250,31 +262,87 @@ public sealed class CalendarWatcher
     public void Tick()
     {
         if (_day != DateTime.Today) { _day = DateTime.Today; _ = Rebuild(); return; }   // 过了零点：展开窗口往后挪一天
-        if (!Features.On(Features.Calendar) || !HasAny)
+        if (!_featureOn(Features.Calendar) || !HasAny)
         {
             _store.ReplaceSource(ListSource, []);
+            ClearCalendarReminders();
             return;
         }
         var now = DateTime.Now;
         var soon = Events.Where(e => !e.AllDay && e.End > now && e.Start - now <= TimeSpan.FromHours(3)).Take(4).ToList();
         _store.ReplaceSource(ListSource, soon.Select(e => new IslandActivity("agenda:" + e.Key, ListSource, e.Title,
             Line(e, now), e.Start <= now ? ActivityKind.Running : ActivityKind.Info, 30, OpenUri: e.JoinUrl)), sticky: true, quiet: true);
+        SyncCalendarReminders(now);
 
         foreach (var e in Events)
         {
             if (e.AllDay) continue;
             var left = e.Start - now;
             if (left <= TimeSpan.Zero || left > TimeSpan.FromMinutes(10) || !_reminded.Add(e.Key)) continue;
-            var mins = Math.Max(1, (int)Math.Ceiling(left.TotalMinutes));
-            // 每个日程一张卡；Replace：没有会议链接的日程不会沿用上一张卡的链接
-            _store.Upsert(new IslandActivity(CalendarReminder.ActivityId(e), Source, $"{mins} 分钟后 · {e.Title}",
-                e.JoinUrl != null ? $"{e.Start:HH:mm} 开始 · 点这里加入{e.JoinApp}" : Line(e, now), ActivityKind.Warning, 80,
-                DurationSeconds: 120, ResetTtl: true, OpenUri: e.JoinUrl, Replace: true));
-            _log($"日历提醒: {mins} 分钟后有日程{(e.JoinUrl != null ? "（带会议链接 " + e.JoinApp + "）" : "")}");
+            ShowReminder(e, now);
             break;
         }
+        var liveKeys = Events.Select(e => e.Key).ToHashSet(StringComparer.Ordinal);
+        _reminded.RemoveWhere(k => !liveKeys.Contains(k));
         if (_reminded.Count > 200) _reminded.Clear();
     }
+
+    /// <summary>每次快照都核对已上岛的提醒：事件没了就撤回，链接 / 时间 / 标题变了就原地刷新。</summary>
+    private void SyncCalendarReminders(DateTime now)
+    {
+        var byId = Events.ToDictionary(CalendarReminder.ActivityId, StringComparer.Ordinal);
+        var cards = _store.Ranked()
+            .Where(a => a.Source == Source && a.Id.StartsWith(CalendarReminder.IdPrefix, StringComparison.Ordinal))
+            .ToList();
+        foreach (var card in cards)
+        {
+            if (!byId.TryGetValue(card.Id, out var current))
+            {
+                _store.Remove(card.Id);
+                _shownReminders.Remove(card.Id);
+                _reminded.Remove(card.Id[CalendarReminder.IdPrefix.Length..]);
+                continue;
+            }
+
+            if (!_shownReminders.TryGetValue(card.Id, out var shown))
+            {
+                if (card.OpenUri != current.JoinUrl) ShowReminder(current, now);
+                _shownReminders[card.Id] = current;
+                continue;
+            }
+
+            if (SameReminder(shown, current) && card.OpenUri == current.JoinUrl) continue;
+            ShowReminder(current, now);
+            _shownReminders[card.Id] = current;
+        }
+
+        foreach (var id in _shownReminders.Keys.Where(id => _store.Get(id) == null).ToList())
+            _shownReminders.Remove(id);
+    }
+
+    private void ShowReminder(CalEvent e, DateTime now)
+    {
+        var left = e.Start - now;
+        var mins = Math.Max(1, (int)Math.Ceiling(left.TotalMinutes));
+        _store.Upsert(new IslandActivity(CalendarReminder.ActivityId(e), Source, $"{mins} 分钟后 · {e.Title}",
+            e.JoinUrl != null ? $"{e.Start:HH:mm} 开始 · 点这里加入{e.JoinApp}" : Line(e, now), ActivityKind.Warning, 80,
+            DurationSeconds: 120, ResetTtl: true, OpenUri: e.JoinUrl, Replace: true));
+        _shownReminders[CalendarReminder.ActivityId(e)] = e;
+        _log($"日历提醒: {mins} 分钟后有日程{(e.JoinUrl != null ? "（带会议链接 " + e.JoinApp + "）" : "")}");
+    }
+
+    private void ClearCalendarReminders()
+    {
+        foreach (var card in _store.Ranked()
+                     .Where(a => a.Source == Source && a.Id.StartsWith(CalendarReminder.IdPrefix, StringComparison.Ordinal))
+                     .ToList())
+            _store.Remove(card.Id);
+        _shownReminders.Clear();
+        _reminded.Clear();
+    }
+
+    private static bool SameReminder(CalEvent a, CalEvent b) =>
+        a.Title == b.Title && a.Start == b.Start && a.End == b.End && a.JoinUrl == b.JoinUrl && a.JoinApp == b.JoinApp;
 
     public static string Line(CalEvent e, DateTime now)
     {
