@@ -62,7 +62,6 @@ public sealed partial class XuexitongService
                 }
                 UserName = doc.GetProperty("name").GetString();
                 _jar = new CookieContainer();
-                _account = doc.TryGetProperty("acct", out var ac) && ac.GetString() is { Length: > 0 } a ? a : "";
                 foreach (var c in doc.GetProperty("cookies").Deserialize<List<Ck>>() ?? [])
                 {
                     _jar.Add(new Cookie(c.N, c.V, c.P, c.D));
@@ -70,7 +69,8 @@ public sealed partial class XuexitongService
                 }
             }
             catch { _jar = null; UserName = null; }
-            if (_jar != null && _account.Length == 0) _account = AccountId.Of(Platform, Uid(_jar) ?? UserName);   // 4.0.3 及以前的凭据没存账号标记
+            // 身份每次都按 Cookie 里的 UID 重算（4.0.4 存的 acct 可能是按昵称算的，不再信）；没有 UID 就是未知，不认领缓存
+            if (_jar != null) _account = AccountId.Xuexitong(Uid(_jar), UserName);
         }
         if (_jar == null) _account = "";
         // 磁盘上的作业缓存不属于这个账号（换过号、没登录、旧格式）就不用
@@ -92,7 +92,7 @@ public sealed partial class XuexitongService
             .Select(c => new Ck(c.Name, c.Value, c.Domain, c.Path, c.Expires > DateTime.Now ? new DateTimeOffset(c.Expires.ToUniversalTime()).ToUnixTimeSeconds() : 0)).ToList();
         var auth = list.Where(c => c.E > 0 && AuthCookies.Contains(c.N)).Select(c => DateTimeOffset.FromUnixTimeSeconds(c.E).LocalDateTime).ToList();
         ExpiresAt = auth.Count > 0 ? auth.Min() : null;
-        Dpapi.Save(CredPath, JsonSerializer.Serialize(new { name = UserName ?? "", acct = _account, saved = _login.NowMs, cookies = list }));
+        Dpapi.Save(CredPath, JsonSerializer.Serialize(new { name = UserName ?? "", saved = _login.NowMs, cookies = list }));
         _login.Saved();
     }
 
@@ -139,9 +139,10 @@ public sealed partial class XuexitongService
                 }
                 var name = o.TryGetProperty("nickname", out var nn) ? nn.GetString() : null;
                 try { name ??= await FetchName(h); } catch { }
-                var account = AccountId.Of(Platform, Uid(qr.Jar) ?? name);
+                var account = AccountId.Xuexitong(Uid(qr.Jar), name);
                 // 新登录生效：换代（在途拉取作废）；换了账号就撤掉旧账号的作业、重写缓存，提醒随列表一起撤
                 var switched = _sync.SwitchAccount(Platform, account);
+                if (account.Length == 0) App.Log("学习通: 登录 Cookie 里没有 UID，账号身份未知：不沿用任何作业缓存");
                 _account = account;
                 _jar = qr.Jar;
                 Expired = false;

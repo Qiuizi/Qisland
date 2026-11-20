@@ -93,7 +93,8 @@ public sealed class YuketangService
                     set.Set("sessionid", sid, o["expires"]?.GetValue<long>() is { } ex and > 0 ? DateTimeOffset.FromUnixTimeSeconds(ex) : null);
                 _jar.Replace(set);
                 ExpiresAt = set.ExpiresOf("sessionid")?.LocalDateTime;
-                _account = o["acct"]?.GetValue<string>() is { Length: > 0 } a ? a : AccountId.Of(Platform, Host + "|" + UserName);   // 旧凭据没存账号标记
+                // 只信 4.0.5 起按用户 id 算的身份（4.0.4 的 acct 可能是按用户名算的）；没有就是未知，不认领缓存
+                _account = o["account"]?.GetValue<string>() ?? "";
             }
             catch { if (!LoggedIn) UserName = null; }
         }
@@ -121,7 +122,7 @@ public sealed class YuketangService
                 arr.Add(new JsonObject { ["n"] = n, ["v"] = e.Value, ["e"] = e.Expires is { } x ? x.ToUnixTimeSeconds() : 0 });
             var o = new JsonObject
             {
-                ["host"] = Host, ["name"] = UserName ?? "", ["acct"] = _account, ["saved"] = _login.NowMs, ["cookies"] = arr,
+                ["host"] = Host, ["name"] = UserName ?? "", ["account"] = _account, ["saved"] = _login.NowMs, ["cookies"] = arr,
                 // 旧版本回退时还能读
                 ["sessionid"] = c["sessionid"] ?? "", ["expires"] = c.ExpiresOf("sessionid") is { } se ? se.ToUnixTimeSeconds() : 0,
             };
@@ -179,9 +180,10 @@ public sealed class YuketangService
                     ExpiresAt = set.ExpiresOf("sessionid")?.LocalDateTime;
                     UserName = d["Name"]?.ToString() ?? "";
                     var uid = (d["UserID"] ?? d["user_id"] ?? d["UserId"] ?? d["uid"])?.ToString();
-                    _account = AccountId.Of(Platform, Host + "|" + (string.IsNullOrEmpty(uid) ? UserName : uid));
+                    _account = AccountId.Yuketang(Host, uid, UserName);
                     // 换了账号：撤掉旧账号的作业、重写缓存，提醒随列表一起撤
-                    if (_hub.Adopt(Platform, _account)) App.Log("雨课堂: 换了账号，已撤下旧账号的作业");
+                    if (_hub.Adopt(Platform, _account)) App.Log("雨课堂: 换了账号（或身份未知），已撤下旧账号的作业");
+                    if (_account.Length == 0) App.Log("雨课堂: 登录结果里没有用户 id，账号身份未知：不沿用任何作业缓存");
                     Expired = false;
                     _health.Reset(); _okButFailing = 0;
                     Save(gen);
