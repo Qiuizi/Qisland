@@ -24,7 +24,7 @@ public sealed class MediaWatcher
     private readonly Dispatcher _ui;
     private GlobalSystemMediaTransportControlsSessionManager? _mgr;
     private GlobalSystemMediaTransportControlsSession? _session;
-    private string? _pinnedId;                       // 用户手动切到的来源
+    private string? _pinnedId;                       // 用户手动切到的来源（会话 AUMID，或网易云日志伪来源 MediaSources.NcmLog）
     // 每个会话挂一个播放状态监听；会话关掉（浏览器标签页、播放器退出）就摘掉，不让它们越攒越多
     private readonly Dictionary<GlobalSystemMediaTransportControlsSession, Windows.Foundation.TypedEventHandler<GlobalSystemMediaTransportControlsSession, PlaybackInfoChangedEventArgs>> _hooked = [];
     private TimeSpan _start;
@@ -127,6 +127,7 @@ public sealed class MediaWatcher
             }
             var prev = _ncmCur;
             _ncmCur = st;
+            if (_pinnedId == MediaSources.NcmLog && !NcmLogOnly) _pinnedId = null;   // 手动切到的网易云日志没了（或改走 SMTC）：取消手动选择
             var drift = st != null && prev != null && Current?.SongId == st.SongId && Current is { AppSource: "music", FromSmtc: false }
                 && Math.Abs((LivePosition() - st.Position).TotalSeconds) > 1.5;
             CompareClocks(st);
@@ -217,6 +218,11 @@ public sealed class MediaWatcher
         App.Log($"网易云控制：媒体键 0x{vk:X2}");
     }
     private bool CurrentIsNcm => Current is { AppSource: "music", SongId: not null, FromSmtc: false } && _ncmCur != null;
+    /// <summary>网易云只在日志里（没开 SMTC）：它是系统会话之外的一个可切换来源。</summary>
+    private bool NcmLogOnly => _ncmCur != null && !_ncmSmtc;
+    private List<string> SessionIds() => All().Select(x => x.SourceAppUserModelId ?? "").ToList();
+    /// <summary>切换按钮的计数和轮换用同一份候选（规则在 Core 的 MediaSources）。</summary>
+    private int SourceCount() => MediaSources.Count(SessionIds(), NcmLogOnly);
 
     private void Attach()
     {
@@ -305,7 +311,7 @@ public sealed class MediaWatcher
         try
         {
             var all = All();
-            if (_pinnedId != null)
+            if (_pinnedId != null && _pinnedId != MediaSources.NcmLog)   // 切到网易云日志时系统会话照常挑，显示由 Choose 决定
             {
                 var pinned = all.FirstOrDefault(x => x.SourceAppUserModelId == _pinnedId);
                 if (pinned != null) return pinned;
@@ -319,13 +325,13 @@ public sealed class MediaWatcher
         catch { return null; }
     }
 
-    /// <summary>同时有多个来源时（比如网易云 + 浏览器视频），在它们之间轮换。</summary>
+    /// <summary>同时有多个来源时（比如网易云 + 浏览器视频），在它们之间轮换；网易云只在日志里时也算一个来源。</summary>
     public void Cycle()
     {
-        var all = All();
-        if (all.Count < 2) return;
-        var i = _session == null ? -1 : all.IndexOf(_session);
-        _pinnedId = all[(i + 1 + all.Count) % all.Count].SourceAppUserModelId;
+        var candidates = MediaSources.Candidates(SessionIds(), NcmLogOnly);
+        var current = CurrentIsNcm && NcmLogOnly ? MediaSources.NcmLog : _session?.SourceAppUserModelId;
+        if (MediaSources.Next(candidates, current) is not { } next) return;
+        _pinnedId = next;
         Attach();
     }
 
@@ -363,8 +369,9 @@ public sealed class MediaWatcher
     {
         var n = _ncmCur;
         var manual = _pinnedId != null && _session?.SourceAppUserModelId == _pinnedId;
+        var manualNcm = _pinnedId == MediaSources.NcmLog;
         var pick = MediaPick.Choose(smtc is null ? null : new MediaCandidate(smtc.Playing, smtc.AppSource == "music"),
-            n is null ? null : new MediaCandidate(n.Playing, true), _ncmSmtc, manual);
+            n is null ? null : new MediaCandidate(n.Playing, true), _ncmSmtc, manual, manualNcm);
         if (pick == MediaPickResult.None) return null;
         if (n == null) return smtc;
         if (_ncmSmtc)
@@ -375,8 +382,10 @@ public sealed class MediaWatcher
                 return smtc with { SongId = n.SongId, Duration = smtc.Duration > TimeSpan.Zero ? smtc.Duration : n.Duration };
             return smtc;
         }
-        if (pick == MediaPickResult.Smtc) return smtc! with { Sessions = smtc.Sessions + 1 };
-        return smtc == null ? n : n with { Sessions = smtc.Sessions + 1 }; // 都没在放时网易云优先（浏览器标签页常年挂着暂停的会话）
+        // 来源数 = 系统会话 + 网易云日志伪来源（和 Cycle 用同一份候选）
+        var count = SourceCount();
+        if (pick == MediaPickResult.Smtc) return smtc! with { Sessions = count };
+        return n with { Sessions = count }; // 都没在放时网易云优先（浏览器标签页常年挂着暂停的会话）
     }
 
     // 只有界面上要换的东西变了才算变化。进度不算：浏览器每隔几秒就推一次时间轴，
@@ -424,7 +433,7 @@ public sealed class MediaWatcher
         if (dur <= TimeSpan.Zero && LocalLyricCaches.DurationFor(title, artist) is { } hint) dur = hint;   // 酷狗 SMTC 不给时长：用它本机歌词里的 [total]
         return new MediaState(title, artist, app, src, playing, _art,
             tl.Position - tl.StartTime, dur < TimeSpan.Zero ? TimeSpan.Zero : dur, tl.LastUpdatedTime.LocalDateTime,
-            video, Math.Max(1, All().Count), canSeek, Aumid: aumid);
+            video, SourceCount(), canSeek, Aumid: aumid);
     }
 
     private static async Task<BitmapSource?> LoadArt(Windows.Storage.Streams.IRandomAccessStreamReference r)
