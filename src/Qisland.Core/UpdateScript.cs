@@ -6,7 +6,7 @@ namespace Qisland.Core;
 /// <summary>
 /// 自动更新的替换脚本（PowerShell，-EncodedCommand 传入，不再经过 cmd 的代码页）：
 /// 1. 等旧进程退出后，先把安装目录整份镜像备份；备份失败就不动安装目录，直接启动旧版并报错；
-/// 2. robocopy 新版本过去，退出码 ≥ 8 视为失败（有文件被锁、没复制完，新旧混装）；
+/// 2. 用 PowerShell 逐项覆盖成新版本；任何一项被锁 / 没复制完都算失败；
 /// 3. 失败时用备份 /MIR 还原成旧版，启动旧版（--update-failed），结果写进 result 文件给旧版读出来提示。
 /// 脚本内容用 UTF-16LE Base64 编码，中文路径不会受 cmd 代码页影响。
 /// </summary>
@@ -71,11 +71,18 @@ if ($backupCode -ge 8) {
     exit 1
 }
 
-$copyCode = Invoke-Robocopy $from $appDir (@('/E', '/R:5', '/W:1') + $common)
-if ($copyCode -ge 8) {
+$copyError = $null
+try {
+    Get-ChildItem -LiteralPath $from -Force | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $appDir -Recurse -Force -ErrorAction Stop
+    }
+} catch {
+    $copyError = $_.Exception.Message
+}
+if ($null -ne $copyError) {
     $restoreCode = Invoke-Robocopy $backupDir $appDir (@('/MIR', '/R:10', '/W:1') + $common)
-    if ($restoreCode -ge 8) { Write-Result "rollback-failed $copyCode $restoreCode" }
-    else { Write-Result "rolled-back $copyCode" }
+    if ($restoreCode -ge 8) { Write-Result "rollback-failed copy $restoreCode" }
+    else { Write-Result 'rolled-back copy' }
     Start-Old
     exit 1
 }
