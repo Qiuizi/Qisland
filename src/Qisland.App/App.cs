@@ -586,6 +586,9 @@ public sealed partial class App : Application
     private void SetupTray()
     {
         var menu = new System.Windows.Forms.ContextMenuStrip();
+        _trayMenu = menu;
+        menu.Items.Add("设置…", null, (_, _) => Dispatcher.BeginInvoke(() => OpenSettings()));
+        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         var focus = new System.Windows.Forms.ToolStripMenuItem("计时");
         foreach (var (m, label) in new[] { (25, "专注 25 分钟"), (50, "专注 50 分钟"), (5, "计时 5 分钟"), (10, "计时 10 分钟") })
             focus.DropDownItems.Add(label, null, (_, _) => Dispatcher.BeginInvoke(() => _timer?.Start(m, label.StartsWith("专注") ? "专注" : "计时")));
@@ -659,10 +662,16 @@ public sealed partial class App : Application
             (Features.OledShift, "OLED 防烧屏（默认关）", "收起时岛每隔几分钟左右挪 1–3 像素，避免 OLED 屏留下残影"),
         })
         {
-            var it = new System.Windows.Forms.ToolStripMenuItem(label) { CheckOnClick = true, Checked = Features.On(key), ToolTipText = tip };
+            var it = new System.Windows.Forms.ToolStripMenuItem(label) { CheckOnClick = true, Checked = Features.On(key), ToolTipText = tip, Tag = key };
             it.CheckedChanged += (_, _) => Features.Set(key, it.Checked);
             hints.DropDownItems.Add(it);
         }
+        // 设置窗里也能改这些开关：打开菜单时按实际状态重新勾一遍
+        hints.DropDownOpening += (_, _) =>
+        {
+            foreach (var it in hints.DropDownItems.OfType<System.Windows.Forms.ToolStripMenuItem>())
+                if (it.Tag is string k && it.Checked != Features.On(k)) it.Checked = Features.On(k);
+        };
         menu.Items.Add(hints);
         var cdx = new System.Windows.Forms.ToolStripMenuItem("Codex");
         var approve = new System.Windows.Forms.ToolStripMenuItem("在岛上批准 Codex 请求") { ToolTipText = "Codex 要你批准命令时，岛上直接点允许 / 拒绝；100 秒不点就回终端问你。只改 ~/.codex/hooks.json 里 Qisland 的 PermissionRequest 一条，改前备份。" };

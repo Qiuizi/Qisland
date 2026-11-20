@@ -49,7 +49,9 @@ public static class DialogKit
             Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 24, ShadowDepth = 4, Opacity = 0.28, Color = Colors.Black },
         };
         w.Content = card;
-        w.MouseLeftButtonDown += (_, e) => { if (e.OriginalSource is not TextBox && e.OriginalSource is not ButtonBase) try { w.DragMove(); } catch { } };
+        // 只在标题栏拖动：内容里的开关、按钮是 Border，按下时整窗拖动会吞掉它们的 MouseUp
+        head.Background = Brushes.Transparent;
+        head.MouseLeftButtonDown += (_, e) => { if (e.OriginalSource == close) return; try { w.DragMove(); } catch { } };
         w.KeyDown += (_, e) => { if (e.Key == Key.Escape) w.Close(); };
         // 打开时轻轻浮起（精简动效时直接出现）
         if (!IslandWindow.ReducedMotion)

@@ -47,3 +47,18 @@ public sealed partial class App
         return m;
     }
 }
+
+public sealed partial class App
+{
+    private System.Windows.Forms.ContextMenuStrip? _trayMenu;
+    internal CalendarWatcher? CalendarService => _cal;
+    internal IslandWindow? Island => _window;
+
+    /// <summary>打开（或切到）统一设置窗。</summary>
+    public void OpenSettings(int category = 0)
+    {
+        if (_trayMenu == null) return;
+        foreach (System.Windows.Window w in Windows) if (w is SettingsWindow sw) { sw.Show(category); return; }
+        new SettingsWindow(this, _trayMenu, category).Show();
+    }
+}

@@ -22,7 +22,7 @@ public sealed partial class IslandWindow
         var sp = new StackPanel();
         var water = Features.On(Features.Water);
         var sit = Features.On(Features.Sit);
-        var tip = (water, sit) switch { (true, true) => "喝水 · 久坐提醒开", (true, false) => "喝水提醒开", (false, true) => "久坐提醒开", _ => "提醒关（托盘里开）" };
+        var tip = (water, sit) switch { (true, true) => "喝水 · 久坐提醒开", (true, false) => "喝水提醒开", (false, true) => "久坐提醒开", _ => "提醒关（设置里开）" };
         sp.Children.Add(WidgetHead(Def("health"), tip, null));
 
         var g = new Grid();
