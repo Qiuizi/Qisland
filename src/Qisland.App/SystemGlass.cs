@@ -41,7 +41,8 @@ internal sealed class SystemGlass : IDisposable
     private SpriteVisual? _pill;
     // 液态玻璃的边缘折射带：宿主背景模糊不能进遮罩画刷（系统报参数错误），所以用几圈「贴边的窄条」叠出来：
     // 每圈四条（上下左右），宽度递增、各自半透明，越靠外沿叠得越厚 → 外沿磨砂、往里渐清，中间通透。窄条都套胶囊的圆角裁剪。
-    private static readonly (float px, float op)[] Rings = [(10, 0.45f), (20, 0.35f), (32, 0.25f)];
+    // 五圈、每圈只淡淡一层：越往里台阶越小，看起来接近连续的渐变（外沿约七成磨砂，往里逐级变清）
+    private static readonly (float px, float op)[] Rings = [(5, 0.26f), (10, 0.24f), (16, 0.22f), (23, 0.2f), (32, 0.17f)];
     private readonly List<SpriteVisual> _bands = [];
     private volatile bool _liquid;
     private bool _edgeFailed;

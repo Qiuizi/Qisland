@@ -22,6 +22,29 @@ internal static class Theme
     public static Brush? InnerRim { get; private set; }
     /// <summary>液态玻璃左上角的一团镜面高光（动画时随弹簧晃）。</summary>
     public static Brush? Specular { get; private set; }
+    /// <summary>液态玻璃里小按钮 / 胶囊标签的细亮边（其它外观为 null，不加边）。</summary>
+    public static Brush? ChipRim { get; private set; }
+    /// <summary>液态玻璃里卡片内圈的斜面亮边（贴在卡片内容层外沿；其它外观为 null）。</summary>
+    public static Brush? CardInner { get; private set; }
+
+    /// <summary>
+    /// 统一的「表面」样式：卡片 / 列表容器 / 输入框都走这里，按当前外观给底色、外沿亮边和（液态玻璃的）内圈亮边。
+    /// 静态画刷，建好就不再改，不加任何逐帧开销。
+    /// </summary>
+    public static void Surface(System.Windows.Controls.Border b)
+    {
+        b.Background = Card;
+        b.BorderBrush = CardRim;
+        b.BorderThickness = new Thickness(CardRim == null ? 0 : IsLiquid ? 1.2 : 1);
+    }
+
+    /// <summary>小按钮 / 标签：液态玻璃加一圈细亮边。</summary>
+    public static void ChipSurface(System.Windows.Controls.Border b)
+    {
+        if (ChipRim == null) return;
+        b.BorderBrush = ChipRim;
+        b.BorderThickness = new Thickness(0.8);
+    }
 
     public static Brush Primary { get; private set; } = null!;
     public static Brush Secondary { get; private set; } = null!;
@@ -55,7 +78,7 @@ internal static class Theme
     public static void Apply(Look look)
     {
         Current = look;
-        Rim = null; Sheen = null; CardRim = null; InnerRim = null; Specular = null; LiquidDark = false;
+        Rim = null; Sheen = null; CardRim = null; InnerRim = null; Specular = null; ChipRim = null; CardInner = null; LiquidDark = false;
         switch (look)
         {
             case Look.Light:
@@ -172,11 +195,35 @@ internal static class Theme
         spec.GradientStops.Add(new GradientStop(Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF), 1));
         Specular = Freeze(spec);
         ShadowAlpha = 0x14;
-        var cr = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0.3, 1) };
-        cr.GradientStops.Add(new GradientStop(Color.FromArgb(0x90, 0xFF, 0xFF, 0xFF), 0));
-        cr.GradientStops.Add(new GradientStop(Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF), 0.5));
-        cr.GradientStops.Add(new GradientStop(Color.FromArgb(0x50, 0xFF, 0xFF, 0xFF), 1));
+        // 里面的卡片 / 列表 / 按钮：同一套液态语言——几乎不盖色、上下沿一道淡淡的磨砂边（画在底色渐变里）、
+        // 外沿对角镜面亮边（左上最亮）、内容层外沿一圈内斜面亮边。深色时底色压一点黑、提高文字对比
+        var cardTop = dark ? (byte)0x26 : (byte)0x5A; var cardMid = dark ? (byte)0x10 : (byte)0x22; var cardBot = dark ? (byte)0x1E : (byte)0x44;
+        var cardRgb = dark ? (byte)0x30 : (byte)0xFF;
+        var card = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
+        card.GradientStops.Add(new GradientStop(Color.FromArgb(cardTop, cardRgb, cardRgb, cardRgb), 0));
+        card.GradientStops.Add(new GradientStop(Color.FromArgb(cardMid, cardRgb, cardRgb, cardRgb), 0.12));
+        card.GradientStops.Add(new GradientStop(Color.FromArgb(cardMid, cardRgb, cardRgb, cardRgb), 0.88));
+        card.GradientStops.Add(new GradientStop(Color.FromArgb(cardBot, cardRgb, cardRgb, cardRgb), 1));
+        Card = Freeze(card);
+        CardHover = S(dark ? (byte)0x30 : (byte)0x50, 0xFF, 0xFF, 0xFF);
+        var cr = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
+        cr.GradientStops.Add(new GradientStop(Color.FromArgb(0xE0, 0xF4, 0xFB, 0xFF), 0));
+        cr.GradientStops.Add(new GradientStop(Color.FromArgb(0x60, 0xFF, 0xFF, 0xFF), 0.25));
+        cr.GradientStops.Add(new GradientStop(Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF), 0.55));
+        cr.GradientStops.Add(new GradientStop(Color.FromArgb(0x70, 0xFF, 0xF4, 0xF8), 1));
         CardRim = Freeze(cr);
+        var ci = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
+        ci.GradientStops.Add(new GradientStop(Color.FromArgb(dark ? (byte)0x30 : (byte)0x58, 0xFF, 0xFF, 0xFF), 0));
+        ci.GradientStops.Add(new GradientStop(Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF), 0.25));
+        ci.GradientStops.Add(new GradientStop(Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF), 0.8));
+        ci.GradientStops.Add(new GradientStop(Color.FromArgb(dark ? (byte)0x1C : (byte)0x34, 0xFF, 0xFF, 0xFF), 1));
+        CardInner = Freeze(ci);
+        var chip = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
+        chip.GradientStops.Add(new GradientStop(Color.FromArgb(0xC0, 0xFF, 0xFF, 0xFF), 0));
+        chip.GradientStops.Add(new GradientStop(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF), 0.6));
+        chip.GradientStops.Add(new GradientStop(Color.FromArgb(0x60, 0xFF, 0xFF, 0xFF), 1));
+        ChipRim = Freeze(chip);
+        Fill = S(dark ? (byte)0x22 : (byte)0x2C, 0xFF, 0xFF, 0xFF);
     }
 
     public static T Freeze<T>(T b) where T : Freezable { b.Freeze(); return b; }

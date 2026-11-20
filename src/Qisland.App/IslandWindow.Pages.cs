@@ -373,10 +373,12 @@ public sealed partial class IslandWindow
         _translated.Clear();
     }
 
-    private static Border Card(UIElement? child) => new()
+    private static Border Card(UIElement? child)
     {
-        Background = Theme.Card, BorderBrush = Theme.CardRim, BorderThickness = new Thickness(Theme.CardRim == null ? 0 : 1), CornerRadius = new CornerRadius(18), Padding = new Thickness(14, 12, 14, 12), Child = child,
-    };
+        var b = new Border { CornerRadius = new CornerRadius(18), Padding = new Thickness(14, 12, 14, 12), Child = child };
+        Theme.Surface(b);
+        return b;
+    }
 
     private static FrameworkElement PillButton(string text, Brush accent, Action click)
     {
@@ -384,6 +386,7 @@ public sealed partial class IslandWindow
         var normal = Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x26, c.R, c.G, c.B)));
         var hover = Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x40, c.R, c.G, c.B)));
         var b = new Border { CornerRadius = new CornerRadius(11), Background = normal, Height = 30, Margin = new Thickness(0, 0, 0, 6), Cursor = Cursors.Hand };
+        Theme.ChipSurface(b);
         b.Child = new TextBlock { Text = text, FontFamily = Theme.Text, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = accent, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         b.MouseEnter += (_, _) => b.Background = hover;
         b.MouseLeave += (_, _) => b.Background = normal;

@@ -68,8 +68,11 @@ public sealed partial class IslandWindow
         var sheen = new LinearGradientBrush(Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF), Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF), 90);
         sheen.Freeze();
         var inner = new Border { CornerRadius = new CornerRadius(22), Background = sheen, Padding = new Thickness(14, 12, 14, 12), Child = child };
-        var outer = new Border { CornerRadius = new CornerRadius(22), Background = bg ?? Theme.Card, Child = inner };
-        if (Theme.CardRim != null) { outer.BorderBrush = Theme.CardRim; outer.BorderThickness = new Thickness(1); inner.CornerRadius = new CornerRadius(21); }
+        var outer = new Border { CornerRadius = new CornerRadius(22), Child = inner };
+        Theme.Surface(outer);
+        if (bg != null) outer.Background = bg;
+        if (Theme.CardRim != null) inner.CornerRadius = new CornerRadius(21);
+        if (Theme.CardInner != null) { inner.BorderBrush = Theme.CardInner; inner.BorderThickness = new Thickness(1); inner.Background = null; }
         return outer;
     }
 
@@ -144,7 +147,7 @@ public sealed partial class IslandWindow
         var golden = Math.Abs((now.TimeOfDay - set).TotalMinutes) < 50 || Math.Abs((now.TimeOfDay - rise).TotalMinutes) < 40;
         Brush sky = w == null ? Theme.Card : Sky.For(w.Code, night, golden);
         // 玻璃主题：天空色也变成半透明的染色玻璃，底下的模糊能透上来
-        if (Theme.IsGlass && w != null) { sky = sky.CloneCurrentValue(); sky.Opacity = 0.74; sky.Freeze(); }
+        if (Theme.IsGlass && w != null) { sky = sky.CloneCurrentValue(); sky.Opacity = Theme.IsLiquid ? 0.5 : 0.74; sky.Freeze(); }
         var card = WCard(null, sky);
         ((Border)card.Child).Padding = new Thickness(18, 14, 18, 12);
         if (w != null) { card.BorderBrush = Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x2E, 0xFF, 0xFF, 0xFF))); card.BorderThickness = new Thickness(1); ((Border)card.Child).CornerRadius = new CornerRadius(21); }

@@ -242,7 +242,7 @@ public sealed partial class App : Application
                 try { Log($"调试跳转{(dry ? "（只解析）" : "")} {id}: {(_window?.OpenRequested?.Invoke(a) == true ? "成功" : "没跳")}"); }
                 finally { Launcher.DryRun = false; }
             };
-            if (_api != null) { _api.PerfJson = _perf.Json; _api.Peek = s => _window?.PeekFor(s); }
+            if (_api != null) { _api.PerfJson = _perf.Json; _api.Peek = (s, p) => _window?.PeekFor(s, p); }
             PerfGuard.Changed += () => _window?.OnPerfChanged();
             PerfGuard.MemoryPressure += () => _window?.OnMemoryPressure();
             _quota = new CodexQuota(a => Dispatcher.BeginInvoke(a));

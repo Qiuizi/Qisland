@@ -149,7 +149,11 @@ public sealed partial class IslandWindow
     }
 
     /// <summary>调试：展开几秒（测展开状态下的占用）。</summary>
-    public void PeekFor(double seconds) => Peek(seconds);
+    public void PeekFor(double seconds, string? page = null)
+    {
+        if (page != null && Enum.TryParse<Page>(page, true, out var pg) && pg != _page) { _page = pg; _expDirty = true; }
+        Peek(seconds);
+    }
 
     /// <summary>性能护栏升降级：重建用到动画的部分（频谱条），歌词计时器换档。</summary>
     public void OnPerfChanged()

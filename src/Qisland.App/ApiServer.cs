@@ -18,7 +18,7 @@ public sealed class ApiServer : IDisposable
     /// <summary>调试：按条目 id 走一遍点击跳转（dry=true 只解析目标、写日志，不切前台不启动）。只在本机回环上监听。</summary>
     public Action<string, bool>? Jump;
     public Func<string>? PerfJson;
-    public Action<double>? Peek;
+    public Action<double, string?>? Peek;
     private readonly Action<Action> _post;
     private readonly ActivityStore _store;
     private readonly CancellationTokenSource _cts = new();
@@ -130,8 +130,11 @@ public sealed class ApiServer : IDisposable
 
         if (method == "POST" && path == "/v1/debug/peek" && Peek != null)
         {
-            var secs = double.TryParse(body.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? Math.Clamp(v, 1, 30) : 10;
-            _post(() => Peek(secs));
+            // 正文「秒数 [页名]」，比如「8 widgets」：调试 / 截图用，展开后停在指定页
+            var parts = body.Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            var secs = parts.Length > 0 && double.TryParse(parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? Math.Clamp(v, 1, 30) : 10;
+            var page = parts.Length > 1 ? parts[1] : null;
+            _post(() => Peek(secs, page));
             return (200, "{\"ok\":true}");
         }
 

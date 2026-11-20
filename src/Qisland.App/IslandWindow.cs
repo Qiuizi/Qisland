@@ -1001,11 +1001,13 @@ public sealed partial class IslandWindow : Window
     {
         if (Theme.CardRim == null) return child;
         child.Margin = new Thickness(0);
-        return new Border
+        var b = new Border
         {
-            Background = Theme.Card, BorderBrush = Theme.CardRim, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(20),
+            CornerRadius = new CornerRadius(20),
             Padding = footer ? new Thickness(14, 0, 14, 0) : new Thickness(14, 4, 14, 4), Margin = new Thickness(0, 4, 0, 4), Child = child,
         };
+        Theme.Surface(b);
+        return b;
     }
 
     // 首页天气只留一句有用的话：接下来 12 小时第一次可能下雨的时间
@@ -1449,6 +1451,7 @@ public sealed partial class IslandWindow : Window
             Child = tb, Padding = new Thickness(8, 2, 8, 3), CornerRadius = new CornerRadius(9), Background = Theme.Fill,
             Cursor = Cursors.Hand, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 4, 0, 0), ToolTip = tip,
         };
+        Theme.ChipSurface(b);
         b.MouseEnter += (_, _) => b.Background = PressFill;
         b.MouseLeave += (_, _) => b.Background = Theme.Fill;
         b.MouseLeftButtonDown += (_, e) => e.Handled = true;
@@ -1574,11 +1577,13 @@ public sealed partial class IslandWindow : Window
     {
         var tb = new TextBlock { Text = text, FontFamily = Theme.Text, FontSize = 11.5, FontWeight = FontWeights.SemiBold, Foreground = color };
         var c = ((SolidColorBrush)color).Color;
-        return new Border
+        var chip = new Border
         {
             Child = tb, Padding = new Thickness(8, 2, 8, 3), CornerRadius = new CornerRadius(10),
             Background = Theme.Freeze(new SolidColorBrush(Color.FromArgb(0x2E, c.R, c.G, c.B))),
         };
+        Theme.ChipSurface(chip);
+        return chip;
     }
 
     // 苹果式 8 辐条活动指示器：本来就是逐格跳动的，10 fps 就够，渲染开销只有连续旋转的几分之一

@@ -15,6 +15,7 @@ public sealed class PerfGuard
     private const double RestoreBelow = 1.2;
     /// <summary>私有内存目标：超过就（最多 10 分钟一次）丢掉收起状态下用不到的缓存并回收。</summary>
     public const double MemoryTargetMb = 180;
+    private static double _memTrigger;
     public static event Action? MemoryPressure;
     private long _lastMemTrim = -1;
 
@@ -84,9 +85,12 @@ public sealed class PerfGuard
                 Changed?.Invoke();
             }
         }
-        if (_n % 12 == 1 && PrivateMb > MemoryTargetMb && (_lastMemTrim < 0 || now - _lastMemTrim > 10 * 60_000))
+        if (_n % 12 == 1 && PrivateMb > Math.Max(MemoryTargetMb, _memTrigger) && (_lastMemTrim < 0 || now - _lastMemTrim > 10 * 60_000))
         {
             _lastMemTrim = now;
+            // 回收一次压不下去的部分（系统合成、运行时本身）是常驻的：下一次要再涨 60 MB 才再回收，
+            // 不再每 10 分钟丢一遍页面缓存、又重建一遍
+            _memTrigger = PrivateMb + 60;
             App.Log($"性能护栏: 私有内存 {PrivateMb:0} MB 超过 {MemoryTargetMb} MB 目标 → 丢掉页面缓存并回收一次");
             MemoryPressure?.Invoke();
             App.TrimSoon();
