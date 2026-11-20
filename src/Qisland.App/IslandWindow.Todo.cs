@@ -68,7 +68,7 @@ public sealed partial class IslandWindow
         b.MouseLeave += (_, _) => b.Opacity = 1;
         b.MouseLeftButtonDown += (_, e) => e.Handled = true;
         b.MouseLeftButtonUp += (_, e) => { e.Handled = true; act(); };
-        return b;
+        return Pressable(b, 0.94);
     }
 
     private void BuildTodo(StackPanel stack)

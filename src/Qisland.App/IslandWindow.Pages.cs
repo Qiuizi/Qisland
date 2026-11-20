@@ -74,7 +74,7 @@ public sealed partial class IslandWindow
     // ───────────── 页面切换 ─────────────
 
     // 翻页偏移由一根弹簧驱动：手指拖动时直接跟手（带橡皮筋阻尼），松手后弹簧带轻微回弹归位
-    private readonly Spring _pageX = new(0) { Response = 0.46, DampingRatio = 0.74, Epsilon = 0.2 };
+    private readonly Spring _pageX = new(0) { Response = 0.40, DampingRatio = 0.86, Epsilon = 0.2 };
     private readonly TranslateTransform _pageTT = new();
     private double _scrollAcc;
     private DateTime _scrollLast = DateTime.MinValue, _scrollSwitched = DateTime.MinValue, _pageFlippedAt = DateTime.MinValue;
@@ -89,7 +89,7 @@ public sealed partial class IslandWindow
         var x = _pageX.Value;
         if (Math.Abs(x) < 0.5) x = 0; // 停在小数像素上文字会糊
         _pageTT.X = x;
-        _expStack.Opacity = 1 - Math.Min(0.55, Math.Abs(x) / 260);
+        _expStack.Opacity = (1 - Math.Min(0.55, Math.Abs(x) / 260)) * _flipAlpha;
         // 翻页滑动期间把整页栅格化成一张位图，GPU 只做平移和淡入；否则每帧都要按 300% 缩放把整页重画一遍
         // （组件页的渐变卡片、半透明天空最重，实测从 ~62 帧提到 ~90 帧）。停稳后撤掉，避免文字发糊。
         {
@@ -210,6 +210,9 @@ public sealed partial class IslandWindow
         if (p == _page) return;
         if (p == Page.Widgets) { _wScroll = 0; _wScrollTT.BeginAnimation(TranslateTransform.YProperty, null); _wScrollTT.Y = 0; } // 每次翻进来都从顶部开始
         if (_page == Page.Widgets && _widgetEdit) { _widgetEdit = false; _pageCache.Remove(Page.Widgets); }
+        var from = (int)_page;
+        var old = _expStack;
+        var (carryX, carryV) = _flipping ? (_pageX.Value, _pageX.Velocity) : (0, 0);
         _page = p;
         var sw = System.Diagnostics.Stopwatch.StartNew();
         ShowPage();
@@ -218,10 +221,10 @@ public sealed partial class IslandWindow
         else PopChildren();
         var t2 = sw.Elapsed.TotalMilliseconds;
         if (t2 > 8) App.Log($"翻页到{PageNames[(int)p]}：换页 {t1:0} ms，进入 {t2 - t1:0} ms");
-        // 新页从运动方向那一侧滑进来，弹簧收尾时会轻轻过冲一下再停住
-        _pageX.Value = dir * 110;
-        _pageX.Velocity = 0;
-        _pageX.Target = 0;
+        // 新页从运动方向那一侧滑进来（弹簧收尾轻轻过冲一下），旧页留在原地往反方向挪 18 px 淡出；
+        // 连续快翻时带上上一次没走完的位移和速度（岛仔 go() 的做法）
+        BeginFlip(old, dir, carryX, carryV);
+        AnimateDots(from, (int)p);
         ApplyPageOffset();
         SetMode(Mode.Expanded);
         Kick();
@@ -328,6 +331,7 @@ public sealed partial class IslandWindow
     private FrameworkElement PageDots()
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 10, 0, 0), Background = Brushes.Transparent };
+        var dots = new Border[LastPage + 1];
         for (var i = 0; i <= LastPage; i++)
         {
             var on = i == (int)_page;
@@ -340,7 +344,9 @@ public sealed partial class IslandWindow
             var hit = new Border { Padding = new Thickness(2, 6, 2, 6), Background = Brushes.Transparent, Child = dot, Cursor = Cursors.Hand };
             hit.MouseLeftButtonUp += (_, e) => { GoTo(target, target > _page ? 1 : -1); e.Handled = true; };
             row.Children.Add(hit);
+            dots[i] = dot;
         }
+        row.Tag = dots;
         return row;
     }
 
@@ -382,7 +388,7 @@ public sealed partial class IslandWindow
         b.MouseEnter += (_, _) => b.Background = hover;
         b.MouseLeave += (_, _) => b.Background = normal;
         b.MouseLeftButtonUp += (_, e) => { click(); e.Handled = true; };
-        return b;
+        return Pressable(b, 0.97);
     }
 
     // ───────────── 文件架 ─────────────

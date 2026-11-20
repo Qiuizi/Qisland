@@ -45,6 +45,7 @@ public sealed partial class IslandWindow
     /// </summary>
     private static void PopIn(FrameworkElement el, double delayMs, double fromScale = 0.84, double fromY = 22)
     {
+        if (ReducedMotion) { HideForPop(el, 1); return; } // 系统关了动画效果：直接出现
         var st = new ScaleTransform(fromScale, fromScale);
         var tt = new TranslateTransform(0, fromY);
         var tg = new TransformGroup(); tg.Children.Add(st); tg.Children.Add(tt);

@@ -541,7 +541,7 @@ public sealed partial class IslandWindow
         b.MouseLeave += (_, _) => b.Background = rest;
         b.MouseLeftButtonDown += (_, e) => { b.Background = Theme.Press; e.Handled = true; };
         b.MouseLeftButtonUp += (_, e) => { b.Background = Theme.Hover; click(); e.Handled = true; };
-        return b;
+        return Pressable(b, 0.88);
     }
 
     // ───────────── 专注 ─────────────

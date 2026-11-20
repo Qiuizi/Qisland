@@ -126,6 +126,8 @@ public sealed partial class IslandWindow
     {
         SetMode(DesiredRestMode());
         if (_mode != Mode.Compact) return;
+        Ring();
+        if (ReducedMotion) return;
         _w.Velocity += 220;
         _h.Velocity += 26;
         Kick();

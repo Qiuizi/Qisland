@@ -33,6 +33,7 @@ WinIslands 应用本体为 **MIT License**（见 [LICENSE](LICENSE)）。
 | 项目 | 用途 | 许可证 |
 | --- | --- | --- |
 | 岛仔 Daozai（Renly1994/xiaotang-daozai） | 岛体布局、纯黑/液态玻璃配色、字体层级、页标题、圆形徽标、页码豆与组件视觉语言；WPF 端按其设计常量重实现 | MIT |
+| 岛仔 Daozai（Renly1994/xiaotang-daozai） | 动效节奏参考（v4 动效）：形体弹簧参数（OPEN_W k330 ζ0.70、OPEN_H k290 ζ0.74、CLOSE k620 ζ1.0、SWELL k420 ζ0.8）、悬停胀大、收起越过停靠尺寸即贴住、内容按形体进度 smoothstep 揭开、翻页旧页残影 + 余速延续、页码点伸缩、铃铛摆动曲线 sin(4πt)·√(1−t)、系统「动画效果」开关；C# / WPF 自行实现（解析解弹簧），未复制代码 | MIT |
 | LiquidMusic（JudeKwong） | 歌词滚动 ease-out cubic tween、逐行焦点缩放/透明度、程序坞液态玻璃配方（半透明底 + 1px 内高光 + 柔和投影）；WPF 端按相同参数重实现 | 同作者项目，随本仓库分发 |
 
 ## 在线数据源 / 思路参考（v4）

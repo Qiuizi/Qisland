@@ -142,6 +142,7 @@ public sealed partial class IslandWindow : Window
         _tick.Tick += (_, _) => OnSecond();
         SourceInitialized += (_, _) => SetupHwnd();
         SetupPages();
+        SetupMotion();
         Loaded += (_, _) => { App.Log($"render tier {RenderCapability.Tier >> 16}, layered={_layered}"); PlaceOnScreen(); OnSecond(); RebuildIdle(); ApplyFrame(); _poll.Start(); _tick.Start(); };
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) => Dispatcher.BeginInvoke(PlaceOnScreen);
     }
@@ -249,7 +250,8 @@ public sealed partial class IslandWindow : Window
 
     private void SetMode(Mode m)
     {
-        var opening = m == Mode.Expanded && _mode != Mode.Expanded;
+        var wasExpanded = _mode == Mode.Expanded;
+        var opening = m == Mode.Expanded && !wasExpanded;
         if (m != Mode.Expanded && _mode == Mode.Expanded) OnCollapsed();
         if (m == Mode.Expanded && _expDirty) RebuildExpanded();
         _mode = m;
@@ -261,10 +263,8 @@ public sealed partial class IslandWindow : Window
             Mode.Compact => (_compactW, CompactH, CompactH / 2),
             _ => (IdleW, IdleH, IdleH / 2),
         };
-        // 展开时更有弹性，收起时更干脆
-        var resp = m == Mode.Expanded ? 0.42 : 0.36;
-        var damp = m == Mode.Expanded ? 0.86 : 0.96;
-        foreach (var s in new[] { _w, _h, _r }) { s.Response = resp; s.DampingRatio = damp; }
+        // 展开时带一点过冲（宽 ζ0.72、高 ζ0.76），收起临界阻尼更干脆；悬停时先胀大一圈
+        ShapeMotion(m, wasExpanded);
         _idleOp.Target = m == Mode.Idle ? 1 : 0;
         _compactOp.Target = m == Mode.Compact ? 1 : 0;
         _expOp.Target = m == Mode.Expanded ? 1 : 0;
@@ -282,6 +282,7 @@ public sealed partial class IslandWindow : Window
         NoteHeld();
         var ranked = _store.Pill();
         var top = ranked.Count > 0 ? ranked[0] : null;
+        var newTop = top != null && top.Id != _lastTopId;
         // 新的头条活动：像 iOS 一样先展开“偷看”几秒
         var fresh = top != null && (top.Id != _lastTopId || top.Updated > _lastTopUpdated)
                     && (DateTime.Now - top.Updated).TotalSeconds < 2
@@ -289,6 +290,7 @@ public sealed partial class IslandWindow : Window
         _lastTopId = top?.Id;
         _lastTopUpdated = top?.Updated ?? DateTime.MinValue;
         RebuildCompact();
+        if (newTop && _mode == Mode.Compact && _compactOp.Value > 0.5) CompactSwapIn();
         RebuildBubble(ranked);
         RebuildExpanded(); // 数据变化时就预先建好展开视图，悬停展开那一帧不再临时造控件
         if (_mode == Mode.Expanded) SetMode(Mode.Expanded);
@@ -383,14 +385,16 @@ public sealed partial class IslandWindow : Window
             _outsideSince = DateTime.MinValue;
             _edgeSummoned = false;
             // 收起的岛：指针停稳一下才展开（擦过去不展开）；已经展开的岛照常
+            SetSwell(_mode != Mode.Expanded && !buttons);
             if (_mode != Mode.Expanded && _hoverGate.Update(!buttons, dipX, dipY, now)) { _hoverGate.Reset(); SetMode(Mode.Expanded); }
         }
         else
         {
             _hoverSince = DateTime.MaxValue; _hoverGate.Reset();
+            SetSwell(false);
             if (keep) _outsideSince = now;
             else if (_outsideSince == DateTime.MinValue) _outsideSince = now;
-            if (_mode == Mode.Expanded && !_pinned && !_swiping && !_editing && now > _peekUntil && (now - _outsideSince).TotalMilliseconds > 420)
+            if (_mode == Mode.Expanded && !_pinned && !_swiping && !_editing && now > _peekUntil && (now - _outsideSince).TotalMilliseconds > 300)
                 SetMode(DesiredRestMode());
         }
 
@@ -433,11 +437,15 @@ public sealed partial class IslandWindow : Window
         if (_frames == 0) _animStart = t;
         _lastRender = t;
         _frames++; _maxDt = Math.Max(_maxDt, dt); if (dt > Math.Max(1.6 / App.Hz, 0.0125)) _slowFrames++;
+        foreach (var s in Springs) s.Step(dt);
+        AfterStep(false);
         var settled = true;
-        foreach (var s in Springs) { s.Step(dt); settled &= s.IsSettled; }
+        foreach (var s in Springs) settled &= s.IsSettled;
         ApplyFrame();
+        if (_flipping) settled = false; // 翻页残影还在淡出
         if (settled)
         {
+            AfterStep(true);
             // 停稳时把弹簧精确归位：否则透明度停在 0.97、缩放停在 0.998，整页文字会被缩放采样而发糊
             foreach (var s in Springs) s.Snap(s.Target);
             CompositionTarget.Rendering -= OnRendering;
@@ -455,11 +463,13 @@ public sealed partial class IslandWindow : Window
 
     private void ApplyFrame()
     {
+        StepFlip();
         ApplyPageOffset();
         var w = Math.Max(20, _w.Value);
         var h = Math.Max(20, _h.Value);
         var r = Math.Clamp(_r.Value, 4, h / 2);
         var left = (WinW - w) / 2;
+        var drop = 5 + 4 * ShapeProgress(h); // 展开越大，影子落得越低（更「浮」）
 
         _pillGeo.Rect = new Rect(left, TopGap, w, h);
         _pillGeo.RadiusX = _pillGeo.RadiusY = r;
@@ -467,7 +477,7 @@ public sealed partial class IslandWindow : Window
         {
             var k = ShadowLayers[i].k;
             var g = _shadows[i];
-            g.Rect = new Rect(left - k, TopGap - k + 5, w + 2 * k, h + 2 * k);
+            g.Rect = new Rect(left - k, TopGap - k + drop, w + 2 * k, h + 2 * k);
             g.RadiusX = g.RadiusY = r + k;
         }
         _clip.Rect = new Rect(left, TopGap, w, h);
@@ -475,9 +485,7 @@ public sealed partial class IslandWindow : Window
         _rimGeo.Rect = new Rect(left + 0.5, TopGap + 0.5, w - 1, h - 1);
         _rimGeo.RadiusX = _rimGeo.RadiusY = Math.Max(0, r - 0.5);
 
-        Fade(_idle, _idleOp.Value);
-        Fade(_compact, _compactOp.Value);
-        Fade(_expanded, _expOp.Value);
+        ApplyLayers(h);
 
         var bo = Math.Clamp(_bubbleOp.Value, 0, 1);
         _bubble.Opacity = bo;
@@ -778,6 +786,8 @@ public sealed partial class IslandWindow : Window
         CompositionTarget.Rendering -= OnRendering;
         _animating = false;
         StopPacer();
+        EndGhost(); _flipping = false; _flipClock.Reset();
+        AfterStep(true);
         ApplyFrame();
         _frames = 0; _slowFrames = 0; _maxDt = 0;
     }
@@ -1083,12 +1093,12 @@ public sealed partial class IslandWindow : Window
     // 行悬停给一层很淡的底色（圆角，不画任何分隔线），让「能点」这件事看得见
     private static void AddHover(Grid g)
     {
-        var bg = new Border { CornerRadius = new CornerRadius(14), Margin = new Thickness(-8, 2, -8, 2), Background = Brushes.Transparent, IsHitTestVisible = false };
+        var bg = new Border { CornerRadius = new CornerRadius(14), Margin = new Thickness(-8, 2, -8, 2), Background = HoverFill, Opacity = 0, IsHitTestVisible = false };
         Grid.SetColumnSpan(bg, Math.Max(1, g.ColumnDefinitions.Count));
         g.Children.Insert(0, bg);
-        g.MouseEnter += (_, _) => bg.Background = HoverFill;
-        g.MouseLeave += (_, _) => bg.Background = Brushes.Transparent;
-        g.PreviewMouseLeftButtonDown += (_, _) => bg.Background = PressFill;
+        g.MouseEnter += (_, _) => { bg.Background = HoverFill; HoverFade(bg, true); };
+        g.MouseLeave += (_, _) => HoverFade(bg, false);
+        g.PreviewMouseLeftButtonDown += (_, _) => { bg.BeginAnimation(OpacityProperty, null); bg.Opacity = 1; bg.Background = PressFill; };
     }
 
     // 视频用 16:9 缩略图，音乐用方形封面；没有封面时用来源软件的图标
