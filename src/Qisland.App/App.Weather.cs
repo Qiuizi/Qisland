@@ -21,8 +21,10 @@ public sealed partial class App
     /// </summary>
     private readonly CityResults<WeatherShown> _wx = new();
     private sealed record WeatherShown(WeatherSnapshot Now, WeatherDetail Detail, string Label);
-    private static string CityKey(WeatherCity? c) => c?.Label ?? "";
-    private readonly HashSet<string> _alerted = [];
+    // 地点身份（名字 + 坐标），同名不同地的城市不共用缓存 / 响应归属
+    private static string CityKey(WeatherCity? c) => WeatherKeys.City(c);
+    // 天气提醒按城市去重；切城时撤下上一城还挂着的提醒卡
+    private readonly WeatherAlertTracker _wxAlerts = new();
 
     private static string SafeRead(string f) { try { return File.ReadAllText(f); } catch { return ""; } }
 
@@ -39,7 +41,7 @@ public sealed partial class App
         if (!_wx.Commit(cityKey, new WeatherShown(now, d, label))) return;   // 期间换了城市：只进缓存，不改界面、不发提醒
         WeatherLabel = label;
         _window?.SetWeather(now, d);
-        AnnounceWeatherAlerts(d);
+        AnnounceWeatherAlerts(cityKey, d);
     }
 
     /// <summary>切换城市（-1 = 自动定位）：先换上缓存，再马上联网刷新。</summary>
@@ -49,6 +51,7 @@ public sealed partial class App
         list.Active = index >= 0 && index < list.Saved.Count ? index : -1;
         SaveCities();
         _wx.Select(CityKey(list.Current));
+        foreach (var id in _wxAlerts.SwitchTo(CityKey(list.Current))) _store.Remove(id);
         if (_wx.Shown is { } c) { WeatherLabel = c.Label; _window?.SetWeather(c.Now, c.Detail); }
         else
         {
@@ -86,18 +89,17 @@ public sealed partial class App
 
     public static void RemoveWeatherCity(int i) { WeatherCityList.Remove(i); SaveCities(); }
 
-    /// <summary>天气提醒：同一件事一天只提醒一次；只在「岛上提示 → 天气提醒」打开时弹。</summary>
-    private void AnnounceWeatherAlerts(WeatherDetail d)
+    /// <summary>天气提醒：同一城市同一件事一天只提醒一次；只在「岛上提示 → 天气提醒」打开时弹。</summary>
+    private void AnnounceWeatherAlerts(string cityKey, WeatherDetail d)
     {
         if (!Features.On(Features.WeatherAlerts)) return;
-        foreach (var a in d.Alerts)
+        foreach (var id in _wxAlerts.SwitchTo(cityKey)) _store.Remove(id);
+        // 单独的 source（weather-alert）：按普通通知排序上列表和胶囊；普通天气数据仍不进主队列
+        foreach (var card in _wxAlerts.Announce(cityKey, d.Alerts))
         {
-            if (!_alerted.Add(a.Key)) continue;
-            // 单独的 source（weather-alert）：按普通通知排序上列表和胶囊；普通天气数据仍不进主队列
-            _store.Upsert(WeatherAlertCards.ToActivity(a));
-            Log($"天气提醒: {a.Title}");
+            _store.Upsert(card);
+            Log($"天气提醒: {card.Title}");
         }
-        if (_alerted.Count > 200) _alerted.Clear();
     }
 
     private Forms.ToolStripMenuItem WeatherMenu()

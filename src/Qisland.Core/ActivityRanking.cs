@@ -25,7 +25,8 @@ public static class ActivityRanking
 /// <summary>天气提醒 → 岛上的通知卡。</summary>
 public static class WeatherAlertCards
 {
-    public static IslandActivity ToActivity(WeatherAlert a) =>
-        new("wx:alert:" + a.Key.Split(':')[0], ActivityRanking.WeatherAlertSource, a.Title, a.Body,
+    /// <param name="cityKey">提醒属于哪个地点（<see cref="WeatherKeys.City"/>），写进 id，不同城市的卡互不覆盖。</param>
+    public static IslandActivity ToActivity(WeatherAlert a, string cityKey = "") =>
+        new("wx:alert:" + (cityKey.Length > 0 ? cityKey + ":" : "") + a.Key.Split(':')[0], ActivityRanking.WeatherAlertSource, a.Title, a.Body,
             ActivityKind.Warning, a.Severe ? 58 : 44, DurationSeconds: a.Severe ? 14 : 9, ResetTtl: true);
 }
