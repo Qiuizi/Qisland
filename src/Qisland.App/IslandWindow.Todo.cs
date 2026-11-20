@@ -32,6 +32,17 @@ public sealed partial class IslandWindow
         Kick();
     }
 
+    /// <summary>点了待办提醒：展开到待办页，停留几秒。</summary>
+    public void OpenTodoPage()
+    {
+        _page = Page.Todo;
+        _expDirty = true;
+        _peekUntil = DateTime.Now.AddSeconds(8);
+        if (_mode == Mode.Expanded) RebuildExpanded();
+        SetMode(Mode.Expanded);
+        Kick();
+    }
+
     private FrameworkElement? FocusDoneCard()
     {
         if (_focusDone == null) return null;
@@ -198,10 +209,12 @@ public sealed partial class IslandWindow
         circle.Children.Add(ring);
         circle.Children.Add(check);
         g.Children.Add(circle);
+        var meta = Qisland.Core.TodoMeta.Parse(it.Text);
         var tx = Txt(13, FontWeights.Normal, it.Done ? Theme.Tertiary : Theme.Primary);
-        tx.Text = it.Text;
+        tx.Text = meta.Title;
         tx.VerticalAlignment = VerticalAlignment.Center;
-        tx.ToolTip = it.Text;
+        tx.TextTrimming = TextTrimming.CharacterEllipsis;
+        tx.ToolTip = meta.Due != null || meta.Repeats ? $"{meta.Title}\n提醒：{meta.When(DateTime.Now)}" : meta.Title;
         if (it.Done) tx.TextDecorations = TextDecorations.Strikethrough;
         Grid.SetColumn(tx, 1);
         g.Children.Add(tx);
@@ -235,7 +248,23 @@ public sealed partial class IslandWindow
                 b.MouseLeave += (_, _) => b.Background = Theme.Fill;
                 b.MouseLeftButtonDown += (_, e) => e.Handled = true;
                 b.MouseLeftButtonUp += (_, e) => { e.Handled = true; Timer?.Start(25, "专注", it.Text); RebuildExpanded(); };
-                right = b;
+                // 提醒：有提醒时常显「⏰ 今天 20:00」（过时变红），没有时悬停出一个铃铛；点它设时间和每周重复
+                var hasWhen = meta.Due != null || meta.Repeats;
+                var bell = new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(7, 2, 8, 3), Background = hasWhen ? Brushes.Transparent : Theme.Fill, Opacity = hasWhen ? 1 : 0, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0), ToolTip = hasWhen ? "改提醒 / 重复" : "设提醒时间、每周重复" };
+                var bsp = new StackPanel { Orientation = Orientation.Horizontal };
+                var overdue = meta.Overdue(DateTime.Now) && !meta.Repeats;
+                var bfg = overdue ? Theme.Red : hasWhen ? Theme.Orange : Theme.Primary;
+                bsp.Children.Add(Glyph(meta.Repeats ? "\uE8EE" : "\uEA8F", 9.5, bfg));
+                if (hasWhen) { var wl = Txt(11, FontWeights.SemiBold, bfg); wl.Text = " " + meta.When(DateTime.Now); bsp.Children.Add(wl); }
+                bell.Child = bsp;
+                if (!hasWhen) { g.MouseEnter += (_, _) => bell.Opacity = 1; g.MouseLeave += (_, _) => bell.Opacity = 0; }
+                bell.MouseEnter += (_, _) => bell.Background = HoverFill;
+                bell.MouseLeave += (_, _) => bell.Background = hasWhen ? Brushes.Transparent : Theme.Fill;
+                bell.MouseLeftButtonDown += (_, e) => e.Handled = true;
+                bell.MouseLeftButtonUp += (_, e) => { e.Handled = true; if (Todo != null) new TodoReminderWindow(Todo, it).Show(); };
+                var both = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+                both.Children.Add(bell); both.Children.Add(b);
+                right = both;
             }
             Grid.SetColumn(right, 2);
             g.Children.Add(right);

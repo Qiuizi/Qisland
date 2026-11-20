@@ -378,7 +378,8 @@ public sealed class TodoFile : IDisposable
     public static string PathName => System.IO.Path.Combine(App.DataDir, "todo.md");
     private const string Sample = "在这里写下第一件事";
     public IReadOnlyList<TodoItem> Items { get; private set; } = [];
-    public IReadOnlyList<string> Open => Items.Where(i => !i.Done).Select(i => i.Text).ToList();
+    /// <summary>未完成的标题（去掉 ⏰ / 🔁 标记），给首页和组件显示。</summary>
+    public IReadOnlyList<string> Open => Items.Where(i => !i.Done).Select(i => TodoMeta.Parse(i.Text).Title).ToList();
     public event Action? Changed;
 
     public TodoFile(ActivityStore store)
@@ -453,9 +454,19 @@ public sealed class TodoFile : IDisposable
         });
     }
 
+    /// <summary>改一条的文字（提醒时间 / 重复写在文字里）。</summary>
+    public void SetText(TodoItem it, string text)
+    {
+        text = text.Replace("\r", " ").Replace("\n", " ").Trim();
+        if (text.Length == 0) return;
+        Edit(lines => { if (Same(lines, it)) lines[it.Line] = (it.Done ? "- [x] " : "- [ ] ") + text; });
+    }
+
     public void SetDone(TodoItem it, bool done) => Edit(lines =>
     {
         if (!Same(lines, it)) return;
+        // 每周重复的：勾掉 = 这次做完，⏰ 挪到下一次，仍然留在未完成里
+        if (done && TodoMeta.Parse(it.Text).Complete(DateTime.Now) is { } next) { lines[it.Line] = "- [ ] " + next.ToText(); return; }
         lines.RemoveAt(it.Line);
         // 勾掉的挪到文件末尾（最近完成的在最后），取消勾选的放回未完成末尾
         if (done) lines.Add("- [x] " + it.Text);

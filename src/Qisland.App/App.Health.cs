@@ -12,7 +12,20 @@ namespace Qisland.App;
 /// </summary>
 public sealed partial class App
 {
-    public static readonly HealthSettings Health = new();
+    private static string HealthFile => Path.Combine(DataDir, "health.txt");
+    private static HealthSettings? _health;
+    /// <summary>健康提醒设置（health.txt；设置窗里改）。</summary>
+    public static HealthSettings Health
+    {
+        get => _health ??= HealthSettings.Parse(File.Exists(HealthFile) ? SafeRead(HealthFile) : null);
+        set
+        {
+            _health = value.Clamp();
+            try { File.WriteAllText(HealthFile, _health.Serialize()); } catch (Exception ex) { Log("保存 health.txt: " + ex.Message); }
+        }
+    }
+    private DateTime _todoSince = DateTime.Now;
+    private int _healthMinute = -1;
     private static string WaterFile => Path.Combine(DataDir, "water.txt");
     private static WaterLog? _water;
     public static WaterLog Water => _water ??= WaterLog.Parse(File.Exists(WaterFile) ? SafeRead(WaterFile) : null, DateTime.Now);
@@ -37,9 +50,15 @@ public sealed partial class App
 
     private void StartHealth()
     {
-        // 一分钟看一次，够用且几乎不耗电
-        _healthTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMinutes(1) };
-        _healthTimer.Tick += (_, _) => HealthTick();
+        // 30 秒看一次（待办提醒按分钟准；健康每分钟一次），几乎不耗电
+        _healthTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(30) };
+        _healthTimer.Tick += (_, _) =>
+        {
+            TodoTick();
+            if (DateTime.Now.Minute == _healthMinute) return;
+            _healthMinute = DateTime.Now.Minute;
+            HealthTick();
+        };
         _healthTimer.Start();
     }
 
@@ -74,8 +93,27 @@ public sealed partial class App
         catch (Exception ex) { Log("保存 water.txt: " + ex.Message); }
     }
 
+    /// <summary>待办到点提醒：上次检查之后到点的弹一下（启动前已过的不补弹，免得一开机一串）。</summary>
+    private void TodoTick()
+    {
+        var now = DateTime.Now;
+        var since = _todoSince;
+        _todoSince = now;
+        if (_todo == null) return;
+        foreach (var it in _todo.Items)
+        {
+            if (it.Done) continue;
+            var m = TodoMeta.Parse(it.Text);
+            if (!m.DueBetween(since, now)) continue;
+            _store.Upsert(new IslandActivity("todo:remind:" + m.Title.GetHashCode().ToString("x8"), "todo", m.Title,
+                m.Repeats ? $"待办提醒 · {m.When(now)} · 点一下去待办" : "待办提醒 · 点一下去待办", ActivityKind.Warning, 70, DurationSeconds: 90, ResetTtl: true));
+            Log("待办提醒");
+        }
+    }
+
     private bool OpenHealth(LiveActivity a)
     {
+        if (a.Id.StartsWith("todo:remind:", StringComparison.Ordinal)) { _store.Remove(a.Id); _window?.OpenTodoPage(); return true; }
         if (a.Id == "health:water")
         {
             DrinkWater(Health.ServingMl);
