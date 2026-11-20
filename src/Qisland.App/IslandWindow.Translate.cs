@@ -24,6 +24,8 @@ public sealed partial class IslandWindow
         public string Engine = "";
         public bool Busy;
         public IntPtr Target;
+        /// <summary>划词时的现场（窗口、焦点控件、原文），「替换原文」前核对。</summary>
+        public SelectionGrabber.Grab? Origin;
         public DateTime At = DateTime.Now;
         public CancellationTokenSource Cts = new();
     }
@@ -97,7 +99,7 @@ public sealed partial class IslandWindow
                 ShowAiCard(new AiCard { Ask = ask, Error = g.Refused ?? "没有选中文字", Target = g.Window }, 4);
                 return;
             }
-            var card = new AiCard { Ask = ask, Source = g.Text!.Trim(), Target = g.Window };
+            var card = new AiCard { Ask = ask, Source = g.Text!.Trim(), Target = g.Window, Origin = g };
             if (ask && Ai.AskTarget == "doubao") { await PasteToDoubao(card); return; }
             await RunAi(card);
         }
@@ -225,9 +227,15 @@ public sealed partial class IslandWindow
             if (!c.Ask && c.Target != IntPtr.Zero)
                 btns.Children.Add(Pill("替换原文", Theme.Blue, Brushes.White, async () =>
                 {
-                    var ok = await SelectionGrabber.PasteInto(c.Target, c.Result);
-                    if (ok) CloseAiCard();
-                    else { SelectionGrabber.SetPrivateText(c.Result); c.Error = null; c.Note = "原窗口回不到前台，译文已复制，自己粘贴一下"; RefreshAiCard(); }
+                    var outcome = await SelectionGrabber.ReplaceSelection(c.Origin ?? new SelectionGrabber.Grab(c.Source, c.Target, null), c.Result);
+                    if (outcome == SelectionGrabber.PasteOutcome.Pasted) CloseAiCard();
+                    else
+                    {
+                        if (outcome == SelectionGrabber.PasteOutcome.Failed) SelectionGrabber.SetPrivateText(c.Result);
+                        c.Error = null;
+                        c.Note = "选区或输入框变了（或原窗口回不到前台），没有粘贴；译文已复制，自己粘贴一下";
+                        RefreshAiCard();
+                    }
                 }));
         }
         if (!c.Ask && !c.Busy)
