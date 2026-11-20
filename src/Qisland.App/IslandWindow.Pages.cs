@@ -93,7 +93,7 @@ public sealed partial class IslandWindow
         // 翻页滑动期间把整页栅格化成一张位图，GPU 只做平移和淡入；否则每帧都要按 300% 缩放把整页重画一遍
         // （组件页的渐变卡片、半透明天空最重，实测从 ~62 帧提到 ~90 帧）。停稳后撤掉，避免文字发糊。
         {
-            var want = Math.Abs(x) > 0.5;
+            var want = Math.Abs(x) > 0.5 && !Perf.NoPageCache;
             if (want && _expStack.CacheMode == null) _expStack.CacheMode = new BitmapCache(VisualTreeHelper.GetDpi(this).DpiScaleX);
             else if (!want && _expStack.CacheMode != null) _expStack.CacheMode = null;
         }
@@ -304,7 +304,7 @@ public sealed partial class IslandWindow
     /// <summary>当前页的每一块依次「蹦」出来（带一点过冲），组件页里的卡片另外按行弹。</summary>
     private void PopChildren()
     {
-        if (_expStack == null) return;
+        if (_expStack == null || Perf.NoPop) return;
         var i = 0;
         foreach (FrameworkElement c in _expStack.Children)
         {

@@ -19,6 +19,13 @@ public sealed class PerfGuard
     private long _lastMemTrim = -1;
 
     public static bool Degraded { get; private set; }
+    private static long _benchUntil;
+    /// <summary>测速期间（本机调试接口触发）：先恢复全部效果，这段时间里不因为测速本身的 CPU 降级。</summary>
+    public static void Bench(int seconds)
+    {
+        _benchUntil = Environment.TickCount64 + seconds * 1000L;
+        if (Degraded) { Degraded = false; App.Log("性能护栏: 测速中，暂不降级"); Changed?.Invoke(); }
+    }
     public static event Action? Changed;
     /// <summary>动画该用的帧率：降级时最多 60。</summary>
     public static int Hz => Degraded ? Math.Min(60, App.Hz) : App.Hz;
@@ -61,7 +68,7 @@ public sealed class PerfGuard
             PrivateMb = _p.PrivateMemorySize64 / 1048576.0;
         }
 
-        if (!Degraded && _n > 12 && _samples.Count >= 6 && Avg30 > Budget)   // 启动后第一分钟（加载、首帧）不算
+        if (!Degraded && _n > 12 && _samples.Count >= 6 && Avg30 > Budget && now > _benchUntil)   // 启动后第一分钟（加载、首帧）不算
         {
             Degraded = true; _calm = 0;
             App.Log($"性能护栏: 30 秒平均 CPU {Avg30:0.0}% 超过 {Budget}% → 降级（60 fps、频谱静止、玻璃少截屏）");

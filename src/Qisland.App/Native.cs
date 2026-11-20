@@ -27,6 +27,45 @@ internal static class Native
     [DllImport("dwmapi.dll")] public static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS margins);
     [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
     [DllImport("dwmapi.dll")] public static extern int DwmFlush();
+    [DllImport("winmm.dll")] private static extern uint timeBeginPeriod(uint ms);
+    [DllImport("winmm.dll")] private static extern uint timeEndPeriod(uint ms);
+    [DllImport("kernel32.dll")] private static extern bool SetProcessInformation(IntPtr process, int infoClass, ref PowerThrottling info, int size);
+    [DllImport("kernel32.dll")] private static extern IntPtr GetCurrentProcess();
+    [StructLayout(LayoutKind.Sequential)] private struct PowerThrottling { public uint Version, ControlMask, StateMask; }
+    private static bool _fast;
+
+    /// <summary>
+    /// 动画期间要 120 Hz 的节拍：岛从不是前台窗口，Win11 会给这种进程上 EcoQoS（效率核、降频）并忽略它的定时器精度请求，
+    /// WPF 不出画面的那几拍就只能按 15.6 ms 的系统时钟醒来——实测「什么都不动、只挂节拍器」也只有 40–55 fps。
+    /// 所以动画开始时：退出执行速度节流和「忽略定时器精度」，把系统定时器调到 1 ms；停稳后立刻还原（空闲不耗电）。
+    /// </summary>
+    public static void FastTimers(bool on)
+    {
+        if (on == _fast) return;
+        _fast = on;
+        try
+        {
+            // PROCESS_POWER_THROTTLING_EXECUTION_SPEED = 1, IGNORE_TIMER_RESOLUTION = 4；StateMask 置位 = 开节流，清零 = 关
+            var p = new PowerThrottling { Version = 1, ControlMask = on ? 1u | 4u : 0u, StateMask = 0 };
+            SetProcessInformation(GetCurrentProcess(), 4 /*ProcessPowerThrottling*/, ref p, Marshal.SizeOf<PowerThrottling>());
+            if (on) timeBeginPeriod(1); else timeEndPeriod(1);
+        }
+        catch { }
+    }
+    [DllImport("dwmapi.dll")] private static extern int DwmGetCompositionTimingInfo(IntPtr hwnd, byte[] info);
+    /// <summary>DWM 全局合成计数（DWM_TIMING_INFO，按 1 字节对齐的偏移读）：刷新次数、合成帧数、迟到 / 丢 / 错过的帧。</summary>
+    public static (long refresh, long frame, long late, long dropped, long missed)? DwmTiming()
+    {
+        var b = new byte[292];
+        BitConverter.TryWriteBytes(b.AsSpan(0, 4), 292);
+        try
+        {
+            if (DwmGetCompositionTimingInfo(IntPtr.Zero, b) != 0) return null;
+            long U(int o) => BitConverter.ToInt64(b, o);
+            return (U(36), U(56), U(112), U(212), U(220));
+        }
+        catch { return null; }
+    }
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] public static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);

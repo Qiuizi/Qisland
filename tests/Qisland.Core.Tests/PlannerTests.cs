@@ -144,3 +144,45 @@ public class IslandLayoutTests
         Assert.True(bad.EndHour > bad.StartHour);
     }
 }
+
+public class FrameStatsTests
+{
+    [Fact]
+    public void CountsSlowFramesAndExpected()
+    {
+        var s = new FrameStats();
+        s.Begin();
+        s.Frame(null);
+        for (var i = 0; i < 59; i++) s.Frame(1.0 / 120);
+        s.Frame(0.05);
+        s.Ui(1); s.Ui(3);
+        s.Count("rgn"); s.Count("rgn");
+        Assert.Equal(1, s.Slow(120));
+        Assert.Equal(60, s.Frames);
+        Assert.Equal(2, s.Events("rgn"));
+        Assert.Equal(2, s.UiAvgMs, 3);
+        Assert.Equal(50, s.DtMaxMs, 3);
+        var line = s.End("Expanded", 120);
+        Assert.Contains("掉帧 1", line);
+        Assert.Contains("rgn=2", line);
+        Assert.Contains("anim → Expanded: 61 帧", line);
+    }
+
+    [Fact]
+    public void SlowThresholdNeverBelow12_5ms()
+    {
+        Assert.Equal(0.0125, FrameStats.SlowThreshold(240), 6);
+        Assert.Equal(0.025, FrameStats.SlowThreshold(60), 6);
+        Assert.Equal(0.0125, FrameStats.SlowThreshold(120), 6);
+    }
+
+    [Fact]
+    public void IgnoresWhenNotRunning()
+    {
+        var s = new FrameStats();
+        s.Frame(0.1); s.Count("x");
+        Assert.Equal(0, s.Frames);
+        Assert.Equal(0, s.Events("x"));
+        Assert.Equal(0, FrameStats.Percentile(Array.Empty<double>(), 0.95));
+    }
+}

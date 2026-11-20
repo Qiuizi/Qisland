@@ -66,6 +66,7 @@ public sealed class GlassBackdrop
         // 范围变大（展开）时必须先补一张够大的，否则新长出来的部分是空的。
         // 但最多沿用 150 ms：鼠标在展开的岛上移动、翻页时也会触发动画，如果一直沿用，
         // 背后切了窗口、滚了页面，玻璃里还是展开那一刻的旧画面，看起来就像影子错了位。
+        if (Perf.NoGlassAnim && Animating() && _wb != null) return;
         if (Animating() && _wb != null && Covers(_lastArea, a) && Environment.TickCount64 - _lastCap < 150) return;
         // 收起静止时不必 20 fps 盯着背后：降到约 4 fps，背后真变了也只晚 1/4 秒，CPU 省下大半
         if (!Animating() && Slow() && _wb != null && Covers(_lastArea, a) && Environment.TickCount64 - _lastCap < (PerfGuard.Degraded ? 1000 : 240)) return;
@@ -77,6 +78,7 @@ public sealed class GlassBackdrop
         int sx = wr.Left + (int)Math.Floor(a.X * s), sy = wr.Top + (int)Math.Floor((a.Y + ShiftY()) * s);
         int sw = (int)Math.Ceiling(a.Width * s), sh = (int)Math.Ceiling(a.Height * s);
         _lastArea = a; _lastCap = Environment.TickCount64;
+        IslandWindow.Stats.Count("cap");
         // 截屏 + 模糊放到后台线程：GDI 读屏要等 DWM，在 UI 线程上做会直接吃掉动画帧。
         lock (_gate) _req = new Req(sx, sy, sw, sh, a, s);
         EnsureWorker();
@@ -124,6 +126,9 @@ public sealed class GlassBackdrop
         a.Left >= big.Left - 0.5 && a.Top >= big.Top - 0.5 && a.Right <= big.Right + 0.5 && a.Bottom <= big.Bottom + 0.5;
 
     /// <summary>岛的目标尺寸刚变：立刻按新范围补一张背景，赶在动画前几帧之内。</summary>
+    /// <summary>测速对照：临时撤掉 / 恢复「截图时排除本窗口」。</summary>
+    public void Affinity(bool on) { var h = new System.Windows.Interop.WindowInteropHelper(_win).Handle; SetWindowDisplayAffinity(h, on && _on ? 0x11u : 0u); }
+
     public void Refresh() { _lastCap = 0; _same = false; Capture(); }
 
     /// <summary>岛收起且没在动时返回 true，截屏降频。</summary>
@@ -177,6 +182,7 @@ public sealed class GlassBackdrop
             _img.Source = _wb;
         }
         _wb.WritePixels(new Int32Rect(0, 0, bw, bh), px, bw * 4, 0);
+        IslandWindow.Stats.Count("glass");
         lock (_gate) if (_spare == null) _spare = px;
         var s = r.S;
         Canvas.SetLeft(_img, Math.Floor(r.A.X * s) / s);

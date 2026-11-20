@@ -9,6 +9,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using System.Windows.Threading;
 using Qisland.Core;
 
 namespace Qisland.App;
@@ -44,6 +45,21 @@ public sealed partial class IslandWindow : Window
     private bool _expDirty = true;
     private int _frames, _slowFrames;
     private double _maxDt;
+    /// <summary>逐帧统计（帧间隔、UI 线程每帧耗时、改区域 / 改高度 / 布局 / 玻璃贴图 / GC 次数），停稳时写一行日志。</summary>
+    internal static readonly FrameStats Stats = new();
+    private readonly System.Diagnostics.Stopwatch _frameSw = new();
+    private readonly Action _frameDone;
+    private (long refresh, long frame, long late, long dropped, long missed)? _dwm0;
+    /// <summary>把这段动画期间 DWM 自己的合成数据记进统计：dwm 刷新 / 合成帧 / 迟到 / 错过——DWM 也掉的话是整机合成在卡，不是岛。</summary>
+    private void DwmDelta()
+    {
+        if (_dwm0 is not { } a || Native.DwmTiming() is not { } b) return;
+        Stats.Count("dwmRefresh", (int)(b.refresh - a.refresh));
+        Stats.Count("dwmFrames", (int)(b.frame - a.frame));
+        Stats.Count("dwmLate", (int)(b.late - a.late));
+        Stats.Count("dwmDropped", (int)(b.dropped - a.dropped));
+        Stats.Count("dwmMissed", (int)(b.missed - a.missed));
+    }
     private readonly RectangleGeometry _clip = new();
     private readonly Grid _idle = new(), _compact = new(), _expanded = new();
     private readonly Border _bubble = new() { Background = Theme.Pill, Width = CompactH, Height = CompactH, CornerRadius = new CornerRadius(CompactH / 2) };
@@ -109,6 +125,7 @@ public sealed partial class IslandWindow : Window
     public IslandWindow(ActivityStore store)
     {
         _store = store;
+        _frameDone = () => Stats.Ui(_frameSw.Elapsed.TotalMilliseconds);
         _layered = Environment.GetEnvironmentVariable("QISLAND_LAYERED") == "1";
         Title = "Qisland";
         WindowStyle = WindowStyle.None;
@@ -127,6 +144,7 @@ public sealed partial class IslandWindow : Window
 
         BuildVisuals();
         Content = _root;
+        LayoutUpdated += (_, _) => Stats.Count("layout");
 
         _store.Changed += OnStoreChanged;
         // 真实软件图标在后台读好后，重建一次用到图标的地方
@@ -423,8 +441,9 @@ public sealed partial class IslandWindow : Window
         var a = new DoubleAnimation(0, 1, TimeSpan.FromSeconds(1)) { RepeatBehavior = RepeatBehavior.Forever };
         Timeline.SetDesiredFrameRate(a, PerfGuard.Hz);
         _pacer.BeginAnimation(WidthProperty, a);
+        Native.FastTimers(Perf.Has("hires")); // 实测对这台机器出帧无改善，只留作测速开关
     }
-    private void StopPacer() => _pacer.BeginAnimation(WidthProperty, null);
+    private void StopPacer() { _pacer.BeginAnimation(WidthProperty, null); Native.FastTimers(false); }
 
     private void Kick()
     {
@@ -440,9 +459,13 @@ public sealed partial class IslandWindow : Window
         var t = ((RenderingEventArgs)e).RenderingTime;
         if (t == _lastRender) return;
         var dt = _lastRender == TimeSpan.Zero ? 1.0 / 60 : (t - _lastRender).TotalSeconds;
-        if (_frames == 0) _animStart = t;
+        if (_frames == 0) { _animStart = t; Stats.Begin(); _dwm0 = Native.DwmTiming(); }
+        Stats.Frame(_frames == 0 ? null : dt);
+        _frameSw.Restart();
+        // Input 优先级排在这一帧的布局 + 渲染提交之后：量到的是 UI 线程这一帧总共忙了多久
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, _frameDone);
         _lastRender = t;
-        _frames++; _maxDt = Math.Max(_maxDt, dt); if (dt > Math.Max(1.6 / App.Hz, 0.0125)) _slowFrames++;
+        _frames++; if (_frames > 1) { _maxDt = Math.Max(_maxDt, dt); if (dt > FrameStats.SlowThreshold(App.Hz)) _slowFrames++; }
         foreach (var s in Springs) s.Step(dt);
         AfterStep(false);
         var settled = true;
@@ -461,7 +484,8 @@ public sealed partial class IslandWindow : Window
             if (_glass.Host.Visibility == Visibility.Visible) _glass.Refresh(); // 停稳立刻补一张当前背景，不等下一个 50 ms
             if (_afterSettle is { } after) { _afterSettle = null; after(); }
             if (_mode == Mode.Expanded) SchedulePrebuild();
-            App.Log($"anim → {_mode}: {_frames} 帧 / {(_lastRender - _animStart).TotalSeconds:0.00}s, 掉帧 {_slowFrames}, 最长 {_maxDt * 1000:0} ms");
+            DwmDelta();
+            App.Log(Stats.End(_mode.ToString(), App.Hz));
             _frames = 0; _slowFrames = 0; _maxDt = 0;
             if (_mode != Mode.Expanded) App.TrimSoon();
         }
@@ -496,6 +520,7 @@ public sealed partial class IslandWindow : Window
         _rimGeo.RadiusX = _rimGeo.RadiusY = Math.Max(0, r - 0.5);
 
         ApplyLayers(h);
+        if (Perf.NoShadow) { var sv = _animating ? Visibility.Hidden : Visibility.Visible; foreach (var sp in _shadowPaths) if (sp.Visibility != sv) sp.Visibility = sv; }
 
         var bo = Math.Clamp(_bubbleOp.Value, 0, 1);
         _bubble.Opacity = bo;
@@ -598,6 +623,7 @@ public sealed partial class IslandWindow : Window
         if (key.Item3 != 0 && !Side) FitHeight(key.Item4 + 1, dpi.DpiScaleY);
         if (key == _lastRgn) return;
         _lastRgn = key;
+        Stats.Count("rgn");
         IntPtr rgn;
         if (key.Item3 == 0) rgn = Native.CreateRoundRectRgn(0, 0, 0, 0, 0, 0);
         else
@@ -628,6 +654,7 @@ public sealed partial class IslandWindow : Window
         else want = Math.Min(WinH, need);
         if (Math.Abs(want - cur) < 0.5) return;
         Height = want;
+        Stats.Count("height");
         if (DebugHeight) { Native.GetWindowRect(_hwnd, out var r); App.Log($"window height {cur:0} → {want:0} DIP（实际 {r.Bottom - r.Top} px）"); }
     }
     private static readonly bool DebugHeight = Environment.GetEnvironmentVariable("QISLAND_DEBUG") == "1" || System.IO.File.Exists(System.IO.Path.Combine(App.DataDir, "debug", "height"));
@@ -751,7 +778,8 @@ public sealed partial class IslandWindow : Window
         _expanded.Height = _expandedH;
         if (_mode == Mode.Expanded) _h.Target = _expandedH;
         _pageCache[_page] = (stack, _expandedH, _mediaFill, _mediaTime);
-        if (sw.Elapsed.TotalMilliseconds > 6) App.Log($"rebuild {_page}: {sw.Elapsed.TotalMilliseconds:0.0} ms");
+        if (sw.Elapsed.TotalMilliseconds > 6) App.Log($"rebuild {_page}: {sw.Elapsed.TotalMilliseconds:0.0} ms{(_animating ? "（动画中）" : "")}");
+        Stats.Count("rebuild");
         SchedulePrebuild();
     }
 

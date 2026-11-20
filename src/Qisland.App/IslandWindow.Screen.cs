@@ -104,6 +104,7 @@ public sealed partial class IslandWindow
         else if (proc.Length > 0 && _showList.Contains(proc)) hide = false;
         else hide = FullscreenOnMyScreen(fg);
         if (OsdActive) hide = false;   // 按音量键时总要看到反馈
+        if (DateTime.Now < _benchShowUntil && !_manualHide) hide = false;   // 本机测速期间：全屏程序在前台也让岛露出来，量的才是真实画面
         if (_edgeShow && (_mode == Mode.Expanded || _animating) && !_manualHide) hide = false;   // 顶边呼出的岛展开期间不藏
         else _edgeShow = false;
         if (hide != _hidden)
@@ -117,6 +118,8 @@ public sealed partial class IslandWindow
             Kick();
         }
     }
+
+    private DateTime _benchShowUntil = DateTime.MinValue;
 
     private bool FullscreenOnMyScreen(IntPtr fg)
     {

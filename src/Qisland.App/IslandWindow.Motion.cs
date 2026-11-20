@@ -134,11 +134,15 @@ public sealed partial class IslandWindow
         if (_closing)
             foreach (var s in new[] { _w, _h })
                 if (s.Velocity < 0 && s.Value < s.Target) { s.Value = s.Target; s.Velocity = 0; }
-        if (settled) { _morphing = false; _closing = false; if (_expanded.Effect != null) _expanded.Effect = null; }
+        if (settled)
+        {
+            _morphing = false; _closing = false; if (_expanded.Effect != null) _expanded.Effect = null;
+            if (Perf.Cache) foreach (var l in new FrameworkElement[] { _expanded, _compact, _idle, _idleV }) l.CacheMode = null;
+        }
     }
 
     private BlurEffect? _revealBlur;
-    private bool BlurAllowed => !_reducedMotion && !PerfGuard.Degraded && (RenderCapability.Tier >> 16) >= 2;
+    private bool BlurAllowed => !Perf.NoBlur && !_reducedMotion && !PerfGuard.Degraded && (RenderCapability.Tier >> 16) >= 2;
 
     /// <summary>形体进度 0（停靠）→ 1（展开高度）。</summary>
     private double ShapeProgress(double h)
@@ -159,6 +163,7 @@ public sealed partial class IslandWindow
         }
         var p = ShapeProgress(h);
         var opening = _mode == Mode.Expanded;
+        if (Perf.Cache) foreach (var l in new FrameworkElement[] { _expanded, _compact, IdleLayer }) if (l.CacheMode == null) l.CacheMode = new BitmapCache(VisualTreeHelper.GetDpi(this).DpiScaleX);
         // 停靠内容：展开时形体走到 38% 前就放大淡出（像穿过去）；收起时形体缩回 40% 以内才出来
         var restVis = opening ? 1 - MotionMath.Smoothstep(0.06, 0.38, p) : 1 - MotionMath.Smoothstep(0.08, 0.4, p);
         var zoom = 1 + 0.10 * MotionMath.Smoothstep(0, 0.5, p);
@@ -217,7 +222,7 @@ public sealed partial class IslandWindow
             old.RenderTransform = _ghostTT;
             _ghostTT.X = 0;
             old.IsHitTestVisible = false;
-            if (old.CacheMode == null) old.CacheMode = new BitmapCache(VisualTreeHelper.GetDpi(this).DpiScaleX);
+            if (old.CacheMode == null && !Perf.NoGhostCache) old.CacheMode = new BitmapCache(VisualTreeHelper.GetDpi(this).DpiScaleX);
             _expanded.Children.Insert(0, old);
         }
         TuneP(_pageX, PageSpring);
@@ -256,7 +261,7 @@ public sealed partial class IslandWindow
     /// <summary>页码点：当前页那颗从 6 拉长到 16，上一页那颗从 16 缩回 6（带一点回弹）。</summary>
     private void AnimateDots(int from, int to)
     {
-        if (_reducedMotion || _expStack == null || _expStack.Children.Count == 0) return;
+        if (_reducedMotion || Perf.NoDots || _expStack == null || _expStack.Children.Count == 0) return;
         if (_expStack.Children[^1] is not FrameworkElement { Tag: Border[] dots }) return;
         void Run(int i, double a, double b)
         {

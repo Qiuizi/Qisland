@@ -84,8 +84,53 @@ public sealed partial class IslandWindow
     public void RunBench()
     {
         Perf.Load();
-        App.Log("bench flags: " + Perf.Text);
+        PerfGuard.Bench(60);
+        var wasHidden = _hidden;
+        _benchShowUntil = DateTime.Now.AddSeconds(Perf.Has("pages") ? 9 : 10);
+        if (_hidden) { _hidden = false; _show.Snap(1); ApplyFrame(); if (_glass.Host.Visibility == System.Windows.Visibility.Visible) _glass.Refresh(); }
+        App.Log($"bench flags: {Perf.Text} · hidden={wasHidden} glass={_glass.Host.Visibility} dpi={System.Windows.Media.VisualTreeHelper.GetDpi(this).DpiScaleX} hz={App.Hz}/{PerfGuard.Hz}");
         var i = 0;
+        if (Perf.Has("noaff"))
+        {
+            _glass.Affinity(false);
+            var back = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(11) };
+            back.Tick += (_, _) => { back.Stop(); _glass.Affinity(true); };
+            back.Start();
+        }
+        if (Perf.Has("still") || Perf.Has("tiny"))
+        {
+            var tiny = Perf.Has("tiny") ? new System.Windows.Shapes.Rectangle { Width = 2, Height = 2, Fill = System.Windows.Media.Brushes.White, IsHitTestVisible = false } : null;
+            if (tiny != null)
+            {
+                System.Windows.Controls.Canvas.SetLeft(tiny, WinW / 2); System.Windows.Controls.Canvas.SetTop(tiny, TopGap + 2);
+                _root.Children.Add(tiny);
+                var ta = new System.Windows.Media.Animation.DoubleAnimation(0.02, 0.06, TimeSpan.FromMilliseconds(100)) { AutoReverse = true, RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever };
+                System.Windows.Media.Animation.Timeline.SetDesiredFrameRate(ta, App.Hz);
+                tiny.BeginAnimation(OpacityProperty, ta);
+            }
+            // 对照组：只挂节拍器、什么都不变，量这台机器空转时的出帧（看是不是整机合成本来就掉帧）
+            var still = new FrameStats();
+            var last = TimeSpan.Zero; var d0 = Native.DwmTiming();
+            void R(object? s, EventArgs e)
+            {
+                var t = ((System.Windows.Media.RenderingEventArgs)e).RenderingTime;
+                if (t == last) return;
+                still.Frame(last == TimeSpan.Zero ? null : (t - last).TotalSeconds);
+                last = t;
+            }
+            still.Begin();
+            System.Windows.Media.CompositionTarget.Rendering += R; StartPacer();
+            var done = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+            done.Tick += (_, _) =>
+            {
+                done.Stop(); System.Windows.Media.CompositionTarget.Rendering -= R; if (!_animating) StopPacer();
+                if (tiny != null) _root.Children.Remove(tiny);
+                if (d0 is { } a && Native.DwmTiming() is { } b) { still.Count("dwmRefresh", (int)(b.refresh - a.refresh)); still.Count("dwmFrames", (int)(b.frame - a.frame)); still.Count("dwmMissed", (int)(b.missed - a.missed)); still.Count("dwmLate", (int)(b.late - a.late)); }
+                App.Log(still.End(tiny != null ? "tiny" : "still", App.Hz));
+            };
+            done.Start();
+            return;
+        }
         if (Perf.Has("pages"))
         {
             // 翻页测速：展开后左右各翻两次
@@ -152,8 +197,10 @@ internal static class Perf
 {
     public static string Text = "";
     public static bool Has(string f) => (" " + Text + " ").Contains(" " + f + " ");
+    public static bool NoPop, NoDots, NoPageCache, NoHiRes, NoBlur, Cache, NoShadow, NoGhostCache, NoGlassAnim;
     public static void Load()
     {
         try { var p = System.IO.Path.Combine(App.DataDir, "perf.txt"); Text = System.IO.File.Exists(p) ? System.IO.File.ReadAllText(p).Trim() : ""; } catch { Text = ""; }
+        NoHiRes = Has("nohires"); NoPop = Has("nopop"); NoDots = Has("nodots"); NoPageCache = Has("nopagecache"); NoBlur = Has("noblur"); Cache = Has("cache"); NoShadow = Has("noshadow"); NoGhostCache = Has("noghostcache"); NoGlassAnim = Has("noglassanim");
     }
 }

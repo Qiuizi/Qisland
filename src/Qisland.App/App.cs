@@ -114,6 +114,12 @@ public sealed partial class App : Application
         Log($"屏幕刷新率 {Hz} Hz");
 
         LoadLayout();
+        try
+        {
+            var ps = Path.Combine(DataDir, "perf-start.txt");
+            if (File.Exists(ps) && File.ReadAllText(ps).Contains("sw")) { System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly; Log("测速: 软件渲染"); }
+        }
+        catch { }
         _window = new IslandWindow(_store) { Ai = _ai };
         _window.Show();
 
