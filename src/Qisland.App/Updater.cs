@@ -169,6 +169,19 @@ public sealed class Updater
         if (total > 0 && got != total) throw new IOException($"只下到 {got}/{total} 字节");
     }
 
+    private static string ResultFile => Path.Combine(Path.GetTempPath(), "Qisland-update", "result.txt");
+
+    /// <summary>以 --update-failed 启动（替换脚本回滚后拉起的旧版）：读脚本留下的结果，记日志并在岛上报错。</summary>
+    public void ReportFailedUpdate()
+    {
+        string? text = null;
+        try { if (File.Exists(ResultFile)) text = File.ReadAllText(ResultFile); } catch (Exception ex) { App.Log("读更新结果失败: " + ex.Message); }
+        var res = UpdateScript.ParseResult(text);
+        var msg = UpdateScript.Describe(res);
+        App.Log($"更新失败（{res.State} {res.Detail}）: {msg}");
+        _store.Upsert(new IslandActivity(Id, "update", $"更新没成功 · 仍是 v{Current}", msg, ActivityKind.Error, 60, DurationSeconds: 0, Replace: true), sticky: true);
+    }
+
     private async Task Install(Release r)
     {
         _busy = true;
@@ -215,12 +228,8 @@ public sealed class Updater
 
             var script = Path.Combine(tmp, "apply.cmd");
             var pid = Environment.ProcessId;
-            File.WriteAllText(script,
-                "@echo off\r\n" +
-                ":wait\r\n" +
-                $"tasklist /fi \"PID eq {pid}\" 2>nul | find \"{pid}\" >nul && (timeout /t 1 /nobreak >nul & goto wait)\r\n" +
-                $"robocopy \"{from}\" \"{appDir}\" /E /R:5 /W:1 /NFL /NDL /NJH /NJS /NP >nul\r\n" +
-                $"start \"\" \"{appDir}\\Qisland.exe\" --updated\r\n", new UTF8Encoding(false));
+            // 先备份旧版；robocopy 退出码 ≥ 8（文件被锁等）就用备份还原并启动旧版，结果写进 result.txt 给旧版提示
+            File.WriteAllText(script, UpdateScript.Build(pid, from, appDir, Path.Combine(tmp, "backup"), ResultFile), new UTF8Encoding(false));
             App.Log($"更新 {Current} → {r.Tag}，覆盖 {appDir}");
             Process.Start(new ProcessStartInfo("cmd.exe", $"/c \"{script}\"") { CreateNoWindow = true, UseShellExecute = false, WindowStyle = ProcessWindowStyle.Hidden });
             Progress(1, "马上重启…");

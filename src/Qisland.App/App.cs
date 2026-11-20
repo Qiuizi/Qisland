@@ -79,8 +79,11 @@ public sealed partial class App : Application
 
     public static int Hz { get; private set; } = 60;
 
+    private string[] _args = [];
+
     private void Boot(string[] args)
     {
+        _args = args;
         Directory.CreateDirectory(InboxDir);
         Http.DefaultRequestHeaders.UserAgent.ParseAdd($"Qisland/{Updater.Current} (+https://github.com/Qiuizi/Qisland)");
         DispatcherUnhandledException += (_, e) => { Log(e.Exception.ToString()); e.Handled = true; };
@@ -200,6 +203,7 @@ public sealed partial class App : Application
     {
         _sys = new SystemWatch(_store);
         _upd = new Updater(_store, Http, Quit);
+        if (_args.Contains("--update-failed")) _upd.ReportFailedUpdate();
         _ = _upd.Loop();
         StartHealth();
         _window!.OpenRequested = a => OpenHealth(a) || OpenLogin(a) || _upd.Open(a) || _sys.Open(a) || (_calls?.Open(a) ?? false) || Launcher.Open(a);
