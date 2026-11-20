@@ -113,6 +113,7 @@ public sealed partial class App : Application
         catch (Exception ex) { Log("帧率设置: " + ex.Message); }
         Log($"屏幕刷新率 {Hz} Hz");
 
+        LoadLayout();
         _window = new IslandWindow(_store) { Ai = _ai };
         _window.Show();
 
@@ -615,6 +616,7 @@ public sealed partial class App : Application
             foreach (System.Windows.Forms.ToolStripMenuItem i in motion.DropDownItems) i.Checked = (IslandWindow.MotionPref)i.Tag! == IslandWindow.MotionMode;
         };
         menu.Items.Add(motion);
+        menu.Items.Add(DockMenu());
         menu.Items.Add("导入课表（.ics）…", null, (_, _) => Dispatcher.BeginInvoke(ImportTimetable));
         var hwMenu = new System.Windows.Forms.ToolStripMenuItem("作业 DDL");
         var yktLogin = new System.Windows.Forms.ToolStripMenuItem("雨课堂：扫码登录…");

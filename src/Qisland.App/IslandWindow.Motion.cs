@@ -103,11 +103,17 @@ public sealed partial class IslandWindow
         _restH = _h.Target;
         if (wasExpanded) { _morphing = true; _closing = true; }
         var swell = _swell && !_reducedMotion && !_closing && !_hidden;
-        if (swell)
+        if (swell && Minimal && m == Mode.Idle)
+        {
+            // 极简小条：罩住时明显胀大一截，告诉你「这里能展开」
+            (_w.Target, _h.Target) = IslandLayout.MiniSwell(Dock);
+            _r.Target = Math.Min(_w.Target, _h.Target) / 2;
+        }
+        else if (swell)
         {
             _w.Target = Math.Round(_w.Target * IslandMotion.SwellW);
             _h.Target = Math.Round(_h.Target * IslandMotion.SwellH);
-            _r.Target = _h.Target / 2;
+            _r.Target = Math.Min(_w.Target, _h.Target) / 2;
         }
         var p = _closing ? IslandMotion.Close : IslandMotion.Swell;
         TuneP(_w, p); TuneP(_h, p); TuneP(_r, p);
@@ -146,7 +152,7 @@ public sealed partial class IslandWindow
     {
         if (!_morphing)
         {
-            Fade(_idle, _idleOp.Value);
+            Fade(IdleLayer, _idleOp.Value);
             Fade(_compact, _compactOp.Value);
             Fade(_expanded, _expOp.Value);
             return;
@@ -156,7 +162,7 @@ public sealed partial class IslandWindow
         // 停靠内容：展开时形体走到 38% 前就放大淡出（像穿过去）；收起时形体缩回 40% 以内才出来
         var restVis = opening ? 1 - MotionMath.Smoothstep(0.06, 0.38, p) : 1 - MotionMath.Smoothstep(0.08, 0.4, p);
         var zoom = 1 + 0.10 * MotionMath.Smoothstep(0, 0.5, p);
-        FadeScaled(_idle, Math.Min(_idleOp.Value, restVis), zoom);
+        FadeScaled(IdleLayer, Math.Min(_idleOp.Value, restVis), zoom);
         FadeScaled(_compact, Math.Min(_compactOp.Value, restVis), zoom);
         var reveal = IslandMotion.Reveal(p, opening);
         var e = Math.Clamp(Math.Min(_expOp.Value, reveal), 0, 1);

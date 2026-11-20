@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using Qisland.Core;
 
 namespace Qisland.App;
 
@@ -202,10 +203,22 @@ public sealed partial class IslandWindow
         if (GetDpiForMonitor(mon, 0, out var dx, out _) != 0) dx = 96;
         var widthPx = (int)Math.Round(WinW * dx / 96.0);
         var m = info.rcMonitor; var w = info.rcWork;
-        var x = m.Left + (m.Right - m.Left - widthPx) / 2 + (int)Math.Round(_oledOffset * dx / 96.0);
-        var y = w.Top > m.Top + 1 ? w.Top : m.Top;   // 任务栏在顶部时让开它
+        var shift = (int)Math.Round(_oledOffset * dx / 96.0);
+        int x, y;
+        if (Dock == DockSide.Top)
+        {
+            x = m.Left + (m.Right - m.Left - widthPx) / 2 + shift;
+            y = w.Top > m.Top + 1 ? w.Top : m.Top;   // 任务栏在顶部时让开它
+        }
+        else
+        {
+            // 侧边：窗口贴住屏幕左 / 右边（任务栏在那一侧时贴工作区），竖直居中在工作区里；OLED 位移改成上下挪
+            var heightPx = (int)Math.Round(WinH * dx / 96.0);
+            x = Dock == DockSide.Left ? w.Left : w.Right - widthPx;
+            y = w.Top + (w.Bottom - w.Top - heightPx) / 2 + shift;
+        }
         _monitor = mon;
-        _monRect = m; _winAtTop = y == m.Top;
+        _monRect = Dock == DockSide.Top ? m : w; _winAtTop = Dock == DockSide.Top && y == m.Top;
         SetWindowPos(_hwnd, IntPtr.Zero, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010);
     }
 

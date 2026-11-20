@@ -177,6 +177,7 @@ public sealed partial class IslandWindow : Window
             layer.RenderTransform = new ScaleTransform(1, 1);
             _content.Children.Add(layer);
         }
+        BuildSideIdle();
         _root.Children.Add(_content);
 
         _bubble.Opacity = 0;
@@ -261,14 +262,14 @@ public sealed partial class IslandWindow : Window
         {
             Mode.Expanded => (ExpandedW, _expandedH, 30d),
             Mode.Compact => (_compactW, CompactH, CompactH / 2),
-            _ => (IdleW, IdleH, IdleH / 2),
+            _ => RestSize(),
         };
         // 展开时带一点过冲（宽 ζ0.72、高 ζ0.76），收起临界阻尼更干脆；悬停时先胀大一圈
         ShapeMotion(m, wasExpanded);
-        _idleOp.Target = m == Mode.Idle ? 1 : 0;
+        _idleOp.Target = m == Mode.Idle && !Minimal ? 1 : 0;
         _compactOp.Target = m == Mode.Compact ? 1 : 0;
         _expOp.Target = m == Mode.Expanded ? 1 : 0;
-        _bubbleOp.Target = m == Mode.Compact && top.Count > 1 ? 1 : 0;
+        _bubbleOp.Target = m == Mode.Compact && top.Count > 1 && !Side ? 1 : 0;
         _idle.IsHitTestVisible = false;
         _compact.IsHitTestVisible = false;
         _expanded.IsHitTestVisible = m == Mode.Expanded;
@@ -301,7 +302,7 @@ public sealed partial class IslandWindow : Window
     {
         var now = DateTime.Now;
         var text = now.ToString(Features.On(Features.Clock12) ? "h:mm" : "HH:mm", CultureInfo.InvariantCulture);
-        if (text != _clockText) { _clockText = text; _idleClock.Text = text; _expDirty = true; }
+        if (text != _clockText) { _clockText = text; _idleClock.Text = text; RebuildSideIdle(); _expDirty = true; }
         if (_expDirty && !_animating) RebuildExpanded();
         UpdateMediaProgress();
         OnPageSecond();
@@ -344,9 +345,12 @@ public sealed partial class IslandWindow : Window
         var dpi = VisualTreeHelper.GetDpi(this);
         var x = (p.X / dpi.DpiScaleX) - Left;
         var y = (p.Y / dpi.DpiScaleY) - Top;
-        var pillLeft = (WinW - _w.Value) / 2;
-        const double slop = 6;
-        var inPill = x >= pillLeft - slop && x <= pillLeft + _w.Value + slop && y >= 0 && y <= TopGap + _h.Value + slop;
+        var (pillLeft, pillTop) = Origin(_w.Value, _h.Value);
+        // 极简小条很细：判定范围放宽一点，好够着
+        var slop = Minimal && _mode == Mode.Idle ? 10 : 6;
+        var inPill = Side
+            ? x >= (Dock == DockSide.Left ? 0 : pillLeft - slop) && x <= (Dock == DockSide.Right ? WinW : pillLeft + _w.Value + slop) && y >= pillTop - slop && y <= pillTop + _h.Value + slop
+            : x >= pillLeft - slop && x <= pillLeft + _w.Value + slop && y >= 0 && y <= TopGap + _h.Value + slop;
         var bx = pillLeft + _w.Value + 8;
         var inBubble = _bubble.Opacity > 0.5 && x >= bx && x <= bx + CompactH && y >= TopGap && y <= TopGap + CompactH;
         var inside = !_hidden && (inPill || inBubble);
@@ -366,9 +370,10 @@ public sealed partial class IslandWindow : Window
         var buttons = (Native.GetAsyncKeyState(0x01) & 0x8000) != 0 || (Native.GetAsyncKeyState(0x02) & 0x8000) != 0;
         var spanL = (int)Math.Round((Left + pillLeft) * dpi.DpiScaleX);
         var spanR = (int)Math.Round((Left + pillLeft + _w.Value) * dpi.DpiScaleX);
-        var onEdge = _winAtTop && !(_hidden && _manualHide) && !buttons
-                     && EdgeZone.Contains(p.X, p.Y, new Box(m.Left, m.Top, m.Right, m.Bottom), spanL, spanR, (int)Math.Round(EdgeMarginDip * dpi.DpiScaleX));
-        if (!onEdge && p.Y > m.Top + 8) _edgeArmed = true;
+        var onEdge = !(_hidden && _manualHide) && !buttons
+                     && (Side ? OnSideEdge(p, pillTop, _h.Value, dpi)
+                              : _winAtTop && EdgeZone.Contains(p.X, p.Y, new Box(m.Left, m.Top, m.Right, m.Bottom), spanL, spanR, (int)Math.Round(EdgeMarginDip * dpi.DpiScaleX)));
+        if (!onEdge && (Side ? (Dock == DockSide.Left ? p.X > m.Left + 8 : p.X < m.Right - 8) : p.Y > m.Top + 8)) _edgeArmed = true;
         var dipX = (int)Math.Round(p.X / dpi.DpiScaleX); var dipY = (int)Math.Round(p.Y / dpi.DpiScaleY);
         if (_edgeGate.Update(onEdge && _edgeArmed && _mode != Mode.Expanded, dipX, dipY, now))
         {
@@ -377,7 +382,7 @@ public sealed partial class IslandWindow : Window
             SetMode(Mode.Expanded);
         }
         // 从顶边呼出后，鼠标还贴在顶部那一条里就别收回去，给它时间挪进岛
-        var keep = _edgeSummoned && p.Y <= m.Top + 6;
+        var keep = _edgeSummoned && (Side ? (Dock == DockSide.Left ? p.X <= m.Left + 6 : p.X >= m.Right - 6) : p.Y <= m.Top + 6);
         if (_mode != Mode.Expanded) _edgeSummoned = false;
 
         if (inside)
@@ -466,24 +471,28 @@ public sealed partial class IslandWindow : Window
     {
         StepFlip();
         ApplyPageOffset();
-        var w = Math.Max(20, _w.Value);
-        var h = Math.Max(20, _h.Value);
-        var r = Math.Clamp(_r.Value, 4, h / 2);
-        var left = (WinW - w) / 2;
+        // 极简小条只有 5 DIP 厚：下限放到 4，半径不超过一半厚度
+        var w = Math.Max(4, _w.Value);
+        var h = Math.Max(4, _h.Value);
+        var r = Math.Min(Math.Max(_r.Value, 2), Math.Min(w, h) / 2);
+        var (left, top) = Origin(w, h);
         var drop = 5 + 4 * ShapeProgress(h); // 展开越大，影子落得越低（更「浮」）
 
-        _pillGeo.Rect = new Rect(left, TopGap, w, h);
+        _pillGeo.Rect = new Rect(left, top, w, h);
         _pillGeo.RadiusX = _pillGeo.RadiusY = r;
         for (var i = 0; i < _shadows.Count; i++)
         {
             var k = ShadowLayers[i].k;
             var g = _shadows[i];
-            g.Rect = new Rect(left - k, TopGap - k + drop, w + 2 * k, h + 2 * k);
+            g.Rect = new Rect(left - k, top - k + drop, w + 2 * k, h + 2 * k);
             g.RadiusX = g.RadiusY = r + k;
         }
-        _clip.Rect = new Rect(left, TopGap, w, h);
+        // 内容层按「顶部居中」排版，整体平移到胶囊实际位置（侧边停靠时贴边、竖直居中）
+        var cl = (WinW - w) / 2;
+        _clip.Rect = new Rect(cl, TopGap, w, h);
         _clip.RadiusX = _clip.RadiusY = r;
-        _rimGeo.Rect = new Rect(left + 0.5, TopGap + 0.5, w - 1, h - 1);
+        _dockShift.X = left - cl; _dockShift.Y = top - TopGap;
+        _rimGeo.Rect = new Rect(left + 0.5, top + 0.5, w - 1, h - 1);
         _rimGeo.RadiusX = _rimGeo.RadiusY = Math.Max(0, r - 0.5);
 
         ApplyLayers(h);
@@ -496,7 +505,7 @@ public sealed partial class IslandWindow : Window
 
         var show = Math.Clamp(_show.Value, 0, 1);
         _root.Opacity = show;
-        _rootShift.Y = (1 - show) * -(TopGap + h);
+        (_rootShift.X, _rootShift.Y) = IslandLayout.HideShift(Dock, show, w, h, TopGap);
         UpdateHitRegion(left, w, h, r, bo, show);
     }
 
@@ -542,7 +551,8 @@ public sealed partial class IslandWindow : Window
         if (_show.Value < 0.02 && _show.Target < 0.5) return null;
         var w = Math.Max(_w.Value, _w.Target) + 16;
         var h = Math.Max(_h.Value, _h.Target) + 12;
-        return new Rect((WinW - w) / 2, TopGap - 4, w, h);
+        var (gx, gy) = Origin(w - 16, h - 12);
+        return new Rect(gx - 8, gy - 4, w, h);
     }
 
     private double _stickW, _stickH, _stickR = 999;
@@ -566,10 +576,10 @@ public sealed partial class IslandWindow : Window
         double side = tight ? 6 : 16, below = tight ? 11 : 20;
         for (var i = 0; i < _shadowPaths.Count && i < 2; i++) { var op = tight ? 0.0 : 1.0; if (_shadowPaths[i].Opacity != op) _shadowPaths[i].Opacity = op; }
         var visible = show >= 0.02 || _show.Target > 0.5;
-        var y0 = TopGap + (_show.Target > 0.5 ? 0 : _rootShift.Y);
         var bw = Up(Math.Max(w, _w.Target));
         var bh = Up(Math.Max(h, _h.Target));
-        var bl = (WinW - bw) / 2;
+        var (bl, by) = Origin(bw, bh);
+        var y0 = by + (_show.Target > 0.5 ? 0 : _rootShift.Y);
         var rr = Math.Min(Math.Min(r, _r.Target), bh / 2);
         if (_animating)
         {
@@ -577,14 +587,15 @@ public sealed partial class IslandWindow : Window
             bw = _stickW = Math.Max(bw, _stickW);
             bh = _stickH = Math.Max(bh, _stickH);
             rr = _stickR = Math.Min(rr, _stickR);
-            bl = (WinW - bw) / 2;
+            (bl, by) = Origin(bw, bh);
+            y0 = by + (_show.Target > 0.5 ? 0 : _rootShift.Y);
         }
         else { _stickW = 0; _stickH = 0; _stickR = 999; }
         var bubble = bubbleOp > 0.05 || _bubbleOp.Target > 0.05;
         var bubbleX = bl + bw + 8;
         var key = !visible ? (0, 0, 0, 0, 0, 0)
             : (P(bl - side), P(Math.Max(0, y0 - side)), P(bl + bw + side), P(y0 + bh + below), P((rr + side) * 2), bubble ? P(bubbleX) : -1);
-        if (key.Item3 != 0) FitHeight(key.Item4 + 1, dpi.DpiScaleY);
+        if (key.Item3 != 0 && !Side) FitHeight(key.Item4 + 1, dpi.DpiScaleY);
         if (key == _lastRgn) return;
         _lastRgn = key;
         IntPtr rgn;
@@ -640,6 +651,11 @@ public sealed partial class IslandWindow : Window
     private void RebuildIdle()
     {
         _idleClock.Text = _clockText;
+        try { RebuildIdleWeather(); } finally { RebuildSideIdle(); }
+    }
+
+    private void RebuildIdleWeather()
+    {
         if (_weather is { } w)
         {
             _idleWeatherGlyph.Text = Theme.WeatherGlyph(w.Code, Theme.IsNight(DateTime.Now));
