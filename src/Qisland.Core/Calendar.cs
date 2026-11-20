@@ -23,6 +23,7 @@ public static class CalendarIcs
         public TimeZoneInfo? StartZone;
         public bool AllDay;
         public readonly HashSet<DateTime> ExDates = [];
+        public readonly HashSet<DateTime> RDates = [];
     }
 
     /// <param name="local">换算到哪个时区显示（默认本机时区；单测里指定）。</param>
@@ -40,11 +41,15 @@ public static class CalendarIcs
             var dur = end - s;
             if (dur < TimeSpan.Zero || dur > TimeSpan.FromDays(14)) dur = TimeSpan.FromHours(1);
             var join = MeetingLink.Find(e.Url, e.Location, e.Desc);
-            IEnumerable<DateTime> occ = e.RecurrenceId != null ? new[] { s } : Timetable.OccurrencesLocal(s, e.StartWall, e.StartZone, e.Rrule, from.AddDays(-1), to, local);
+            IEnumerable<DateTime> occ = e.RecurrenceId != null
+                ? new[] { s }
+                : Timetable.OccurrencesLocal(s, e.StartWall, e.StartZone, e.Rrule, from.AddDays(-1), to, local)
+                    .Concat(e.RDates)
+                    .Distinct();
             foreach (var st in occ)
             {
                 if (e.ExDates.Contains(st)) continue;
-                if (e.RecurrenceId == null && e.Rrule.Length > 0 && moved.Contains((e.Uid, st))) continue;
+                if (e.RecurrenceId == null && moved.Contains((e.Uid, st))) continue;
                 var en = st + dur;
                 if (en <= from || st >= to) continue;
                 list.Add(new CalEvent(e.Uid, Clean(e.Summary), Clean(e.Location), st, en, e.AllDay, join?.Url, join?.App));
@@ -98,6 +103,9 @@ public static class CalendarIcs
                 case "RECURRENCE-ID": cur.RecurrenceId = Timetable.ParseDate(val, pars, local); break;
                 case "EXDATE":
                     foreach (var v in val.Split(',')) if (Timetable.ParseDate(v, pars, local) is { } d) cur.ExDates.Add(d);
+                    break;
+                case "RDATE":
+                    foreach (var v in val.Split(',')) if (Timetable.ParseDate(v, pars, local) is { } d) cur.RDates.Add(d);
                     break;
                 case "X-MICROSOFT-SKYPETEAMSMEETINGURL":
                 case "X-GOOGLE-CONFERENCE":
