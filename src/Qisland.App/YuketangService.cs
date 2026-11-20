@@ -272,10 +272,13 @@ public sealed class YuketangService
     {
         // 先换代（在途请求回来后不能再合并 Cookie / 写盘），再删凭据文件（排在正在进行的保存之后）
         var outcome = LogoutOutcome.Removed;
-        _jar.Clear(() => outcome = _login.Logout(_knownIds.ToList()));
-        UserName = null; Expired = false; ExpiresAt = null; _health.Reset(); _okButFailing = 0; _account = ""; _credId = null;
-        _hub.Clear(Platform);
-        _store.Remove("ykt:expired");
+        lock (_state)
+        {
+            _jar.Clear(() => outcome = _login.Logout(_knownIds.ToList()));
+            UserName = null; Expired = false; ExpiresAt = null; _health.Reset(); _okButFailing = 0; _account = ""; _credId = null;
+            _hub.Clear(Platform);
+            _store.Remove("ykt:expired");
+        }
         LogoutCleanup.Start("雨课堂", _login, outcome, _hub.FlushCache, () => !LoggedIn, _store, "ykt:logout-failed");
         Changed?.Invoke();
         return outcome;
@@ -411,15 +414,21 @@ public sealed class YuketangService
     private bool AbsorbCookies(HttpResponseMessage res, long gen)
     {
         if (!res.Headers.TryGetValues("Set-Cookie", out var values)) return false;
-        var r = _jar.Absorb(gen, values, DateTimeOffset.UtcNow);
+        var r = _jar.AbsorbAndPersist(gen, values, DateTimeOffset.UtcNow,
+            c => WriteCredential(c, Host, UserName ?? "", _account, _credId));
         if (r.Stale) throw new StaleSession();
         var (changed, deleted, rotated, names) = (r.Changed, r.Deleted, r.Rotated, r.Names);
+        if (!r.Persisted)
+        {
+            App.Log("雨课堂: 服务器更新了 Cookie，但写盘失败，保留原来的会话");
+            _next = DateTime.Now.AddMinutes(2);
+            return deleted;
+        }
         ExpiresAt = r.Expires?.LocalDateTime;
         if (!_loggedCookieNames) { _loggedCookieNames = true; App.Log($"雨课堂: 服务器回的 Set-Cookie：{string.Join(", ", names.Distinct())}（只记名字）"); }
         if (deleted) return true;
         if (changed)
         {
-            Save(gen);
             if (rotated) App.Log($"雨课堂: 服务器换了新的 sessionid，已加密保存（到 {ExpiresAt:MM-dd HH:mm}）");
             else if (DateTime.Now - _lastExtendLog > TimeSpan.FromHours(2)) { _lastExtendLog = DateTime.Now; App.Log($"雨课堂: 会话已续期到 {ExpiresAt:MM-dd HH:mm}"); }
         }

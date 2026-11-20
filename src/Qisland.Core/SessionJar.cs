@@ -39,7 +39,7 @@ public sealed class SessionJar
         }
     }
 
-    public sealed record AbsorbResult(bool Stale, bool Changed, bool Deleted, bool Rotated, DateTimeOffset? Expires, IReadOnlyList<string> Names);
+    public sealed record AbsorbResult(bool Stale, bool Changed, bool Deleted, bool Rotated, DateTimeOffset? Expires, IReadOnlyList<string> Names, bool Persisted = true);
 
     /// <summary>合并一次响应的 Set-Cookie；gen 不是当前代就丢弃。</summary>
     public AbsorbResult Absorb(long gen, IEnumerable<string> setCookies, DateTimeOffset now, string sessionCookie = "sessionid")
@@ -60,6 +60,46 @@ public sealed class SessionJar
             }
             var rotated = before != null && _cookies[sessionCookie] is { } after && after != before;
             return new(false, changed, deleted, rotated, _cookies.ExpiresOf(sessionCookie), names);
+        }
+    }
+
+    /// <summary>
+    /// 合并 Set-Cookie，并在写盘成功后才换成新 Cookie。写失败时内存保持上一份会话。
+    /// 刷新响应里的续期 / 轮换不换代，所以不能走 <see cref="TryReplace"/>。
+    /// </summary>
+    public AbsorbResult AbsorbAndPersist(long gen, IEnumerable<string> setCookies, DateTimeOffset now,
+        Func<CookieSet, bool> write, string sessionCookie = "sessionid")
+    {
+        lock (_disk)
+        {
+            CookieSet next;
+            lock (_lock)
+            {
+                if (gen != _gen) return new(true, false, false, false, null, []);
+                next = Copy(_cookies);
+            }
+
+            bool changed = false, deleted = false;
+            var names = new List<string>();
+            var before = next[sessionCookie];
+            foreach (var v in setCookies)
+            {
+                var (c, d) = next.Apply(v, now);
+                var n = v.Split('=', 2)[0].Trim();
+                names.Add(n);
+                changed |= c;
+                if (n == sessionCookie) deleted |= d;
+            }
+            var rotated = before != null && next[sessionCookie] is { } after && after != before;
+            var result = new AbsorbResult(false, changed, deleted, rotated, next.ExpiresOf(sessionCookie), names);
+            if (!changed && !deleted) return result;
+            if (!write(Copy(next))) return result with { Persisted = false };
+            lock (_lock)
+            {
+                if (gen != _gen) return result with { Stale = true, Persisted = false };
+                _cookies = next;
+            }
+            return result;
         }
     }
 
