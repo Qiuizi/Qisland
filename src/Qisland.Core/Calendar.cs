@@ -19,13 +19,17 @@ public static class CalendarIcs
     {
         public string Uid = "", Summary = "", Location = "", Desc = "", Url = "", Rrule = "", Status = "";
         public DateTime? Start, End, RecurrenceId;
+        public DateTime StartWall;
+        public TimeZoneInfo? StartZone;
         public bool AllDay;
         public readonly HashSet<DateTime> ExDates = [];
     }
 
-    public static List<CalEvent> Expand(string ics, DateTime from, DateTime to)
+    /// <param name="local">换算到哪个时区显示（默认本机时区；单测里指定）。</param>
+    public static List<CalEvent> Expand(string ics, DateTime from, DateTime to, TimeZoneInfo? local = null)
     {
-        var evs = Parse(ics).ToList();
+        local ??= TimeZoneInfo.Local;
+        var evs = Parse(ics, local).ToList();
         // 改期 / 取消的单次：从主日程的展开里拿掉，改期后的那条单独算
         var moved = evs.Where(e => e.RecurrenceId != null).Select(e => (e.Uid, e.RecurrenceId!.Value)).ToHashSet();
         var list = new List<CalEvent>();
@@ -36,7 +40,7 @@ public static class CalendarIcs
             var dur = end - s;
             if (dur < TimeSpan.Zero || dur > TimeSpan.FromDays(14)) dur = TimeSpan.FromHours(1);
             var join = MeetingLink.Find(e.Url, e.Location, e.Desc);
-            IEnumerable<DateTime> occ = e.RecurrenceId != null ? new[] { s } : Timetable.Occurrences(s, e.Rrule, from.AddDays(-1), to);
+            IEnumerable<DateTime> occ = e.RecurrenceId != null ? new[] { s } : Timetable.OccurrencesLocal(s, e.StartWall, e.StartZone, e.Rrule, from.AddDays(-1), to, local);
             foreach (var st in occ)
             {
                 if (e.ExDates.Contains(st)) continue;
@@ -46,10 +50,18 @@ public static class CalendarIcs
                 list.Add(new CalEvent(e.Uid, Clean(e.Summary), Clean(e.Location), st, en, e.AllDay, join?.Url, join?.App));
             }
         }
-        return list.GroupBy(c => (c.Title, c.Start)).Select(g => g.First()).OrderBy(c => c.Start).ToList();
+        return Dedupe(list);
     }
 
-    private static IEnumerable<Ev> Parse(string ics)
+    /// <summary>
+    /// 去重：有 UID 的按 UID + 这一次的开始时间（RECURRENCE-ID 改期后的单次和主日程同 UID、不同时间，不会互相吞掉）；
+    /// 没有 UID 才退回 标题 + 开始 + 地点。同名同时、UID 或地点不同的两个日程都保留。
+    /// </summary>
+    public static List<CalEvent> Dedupe(IEnumerable<CalEvent> events) =>
+        events.GroupBy(c => c.Uid.Length > 0 ? ("u", c.Uid, c.Start, "") : ("t", c.Title, c.Start, c.Location))
+            .Select(g => g.First()).OrderBy(c => c.Start).ToList();
+
+    private static IEnumerable<Ev> Parse(string ics, TimeZoneInfo local)
     {
         Ev? cur = null;
         var depth = 0;   // VEVENT 里嵌的 VALARM 不能覆盖日程本身的字段
@@ -78,13 +90,14 @@ public static class CalendarIcs
                 case "STATUS": cur.Status = val.Trim(); break;
                 case "RRULE": cur.Rrule = val; break;
                 case "DTSTART":
-                    cur.Start = Timetable.ParseDate(val, pars);
+                    cur.Start = Timetable.ParseDate(val, pars, local);
+                    if (Timetable.ParseZoned(val, pars) is { } z) { cur.StartWall = z.wall; cur.StartZone = z.zone; }
                     cur.AllDay = val.Trim().Length == 8 || pars.Contains("VALUE=DATE", StringComparison.OrdinalIgnoreCase) && !pars.Contains("DATE-TIME", StringComparison.OrdinalIgnoreCase);
                     break;
-                case "DTEND": cur.End = Timetable.ParseDate(val, pars); break;
-                case "RECURRENCE-ID": cur.RecurrenceId = Timetable.ParseDate(val, pars); break;
+                case "DTEND": cur.End = Timetable.ParseDate(val, pars, local); break;
+                case "RECURRENCE-ID": cur.RecurrenceId = Timetable.ParseDate(val, pars, local); break;
                 case "EXDATE":
-                    foreach (var v in val.Split(',')) if (Timetable.ParseDate(v, pars) is { } d) cur.ExDates.Add(d);
+                    foreach (var v in val.Split(',')) if (Timetable.ParseDate(v, pars, local) is { } d) cur.ExDates.Add(d);
                     break;
                 case "X-MICROSOFT-SKYPETEAMSMEETINGURL":
                 case "X-GOOGLE-CONFERENCE":

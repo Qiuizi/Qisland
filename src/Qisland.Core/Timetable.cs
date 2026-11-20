@@ -20,18 +20,22 @@ public static class Timetable
     {
         public string Summary = "", Location = "", Desc = "", Rrule = "";
         public DateTime? Start, End;
+        public DateTime StartWall;
+        public TimeZoneInfo? StartZone;
         public readonly HashSet<DateTime> ExDates = [];
     }
 
-    public static IReadOnlyList<ClassSession> Expand(string ics, DateTime from, DateTime to)
+    /// <param name="local">换算到哪个时区显示（默认本机时区；单测里指定）。</param>
+    public static IReadOnlyList<ClassSession> Expand(string ics, DateTime from, DateTime to, TimeZoneInfo? local = null)
     {
+        local ??= TimeZoneInfo.Local;
         var list = new List<ClassSession>();
-        foreach (var e in Parse(ics))
+        foreach (var e in Parse(ics, local))
         {
             if (e.Start is not { } s) continue;
             var dur = (e.End ?? s.AddMinutes(45)) - s;
             if (dur <= TimeSpan.Zero || dur > TimeSpan.FromHours(12)) dur = TimeSpan.FromMinutes(45);
-            foreach (var st in Occurrences(s, e.Rrule, from.AddHours(-12), to))
+            foreach (var st in OccurrencesLocal(s, e.StartWall, e.StartZone, e.Rrule, from.AddHours(-12), to, local))
             {
                 if (e.ExDates.Contains(st)) continue;
                 var en = st + dur;
@@ -43,7 +47,7 @@ public static class Timetable
         return list.GroupBy(c => (c.Name, c.Start)).Select(g => g.First()).OrderBy(c => c.Start).ToList();
     }
 
-    private static IEnumerable<Ev> Parse(string ics)
+    private static IEnumerable<Ev> Parse(string ics, TimeZoneInfo local)
     {
         Ev? cur = null;
         foreach (var line in Unfold(ics))
@@ -64,10 +68,13 @@ public static class Timetable
                 case "LOCATION": cur.Location = Unescape(val); break;
                 case "DESCRIPTION": cur.Desc = Unescape(val); break;
                 case "RRULE": cur.Rrule = val; break;
-                case "DTSTART": cur.Start = ParseDate(val, pars); break;
-                case "DTEND": cur.End = ParseDate(val, pars); break;
+                case "DTSTART":
+                    cur.Start = ParseDate(val, pars, local);
+                    if (ParseZoned(val, pars) is { } z) { cur.StartWall = z.wall; cur.StartZone = z.zone; }
+                    break;
+                case "DTEND": cur.End = ParseDate(val, pars, local); break;
                 case "EXDATE":
-                    foreach (var v in val.Split(',')) if (ParseDate(v, pars) is { } d) cur.ExDates.Add(d);
+                    foreach (var v in val.Split(',')) if (ParseDate(v, pars, local) is { } d) cur.ExDates.Add(d);
                     break;
             }
         }
@@ -114,31 +121,71 @@ public static class Timetable
         return "";
     }
 
-    public static DateTime? ParseDate(string v, string pars)
+    public static DateTime? ParseDate(string v, string pars) => ParseDate(v, pars, TimeZoneInfo.Local);
+
+    /// <summary>解析 DTSTART / DTEND 等时间并换算到 local。全天日期和不带时区的「浮动时间」原样当本地时间。</summary>
+    public static DateTime? ParseDate(string v, string pars, TimeZoneInfo local) =>
+        ParseZoned(v, pars) is { } z ? ToLocal(z.wall, z.zone, local) : null;
+
+    /// <summary>解析成「墙上时间 + 所在时区」：Z 结尾是 UTC，TZID 找得到就是那个时区，否则时区为 null（浮动 / 认不出的时区当本地）。</summary>
+    internal static (DateTime wall, TimeZoneInfo? zone)? ParseZoned(string v, string pars)
     {
         v = v.Trim();
         var utc = v.EndsWith('Z');
         if (utc) v = v[..^1];
-        if (v.Length == 8 && DateTime.TryParseExact(v, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)) return d;
+        if (v.Length == 8 && DateTime.TryParseExact(v, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)) return (d, null);
         if (!DateTime.TryParseExact(v, ["yyyyMMdd'T'HHmmss", "yyyyMMdd'T'HHmm"], CultureInfo.InvariantCulture, DateTimeStyles.None, out var t)) return null;
-        if (utc) return DateTime.SpecifyKind(t, DateTimeKind.Utc).ToLocalTime();
-        // TZID：课表几乎都是 Asia/Shanghai；其它时区就按系统时区换算，找不到就当本地时间
+        if (utc) return (t, TimeZoneInfo.Utc);
         var tz = pars.Split(';').FirstOrDefault(p => p.StartsWith("TZID=", StringComparison.OrdinalIgnoreCase))?[5..].Trim('"');
-        if (!string.IsNullOrEmpty(tz) && tz is not ("Asia/Shanghai" or "China Standard Time" or "Asia/Chongqing" or "PRC"))
+        return (t, FindZone(tz));
+    }
+
+    private static readonly TimeZoneInfo China = TimeZoneInfo.CreateCustomTimeZone("Qisland China", TimeSpan.FromHours(8), "China", "China");
+
+    /// <summary>按 TZID 找时区：IANA（America/New_York）和 Windows（Eastern Standard Time）两种写法都认；找不到返回 null。</summary>
+    public static TimeZoneInfo? FindZone(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return null;
+        id = id.Trim();
+        // Outlook 有时写成 "(UTC+08:00) Beijing, Chongqing, Hong Kong, Urumqi" 之类；先试原样，再试两种 id 互转
+        try { return TimeZoneInfo.FindSystemTimeZoneById(id); } catch { }
+        try { if (TimeZoneInfo.TryConvertIanaIdToWindowsId(id, out var w)) return TimeZoneInfo.FindSystemTimeZoneById(w); } catch { }
+        try { if (TimeZoneInfo.TryConvertWindowsIdToIanaId(id, out var ia)) return TimeZoneInfo.FindSystemTimeZoneById(ia); } catch { }
+        if (id is "Asia/Shanghai" or "China Standard Time" or "Asia/Chongqing" or "PRC" or "Asia/Harbin" or "Asia/Urumqi" || id.Contains("Beijing", StringComparison.OrdinalIgnoreCase))
+            return China;
+        return null;
+    }
+
+    /// <summary>某时区的墙上时间换算到 local。夏令时跳过的那一小时（不存在的时间）往后挪一小时。</summary>
+    internal static DateTime ToLocal(DateTime wall, TimeZoneInfo? zone, TimeZoneInfo local)
+    {
+        if (zone == null) return wall;
+        wall = DateTime.SpecifyKind(wall, DateTimeKind.Unspecified);
+        if (zone.IsInvalidTime(wall)) wall = wall.AddHours(1);
+        return DateTime.SpecifyKind(TimeZoneInfo.ConvertTime(wall, zone, local), DateTimeKind.Unspecified);
+    }
+
+    private static DateTime ToZone(DateTime localTime, TimeZoneInfo local, TimeZoneInfo zone)
+    {
+        localTime = DateTime.SpecifyKind(localTime, DateTimeKind.Unspecified);
+        if (local.IsInvalidTime(localTime)) localTime = localTime.AddHours(1);
+        return DateTime.SpecifyKind(TimeZoneInfo.ConvertTime(localTime, local, zone), DateTimeKind.Unspecified);
+    }
+
+    /// <summary>
+    /// 在日程自己的时区里按 RRULE 展开（纽约每周一 09:00 就是每个纽约周一 09:00，跨夏令时也不变），再逐次换算到 local。
+    /// 浮动时间（没有时区）直接在本地展开。startLocal 是第一次换算后的本地时间（没时区信息时用它）。
+    /// </summary>
+    internal static IEnumerable<DateTime> OccurrencesLocal(DateTime startLocal, DateTime startWall, TimeZoneInfo? zone, string rrule, DateTime from, DateTime to, TimeZoneInfo local)
+    {
+        if (zone == null || startWall == default)
         {
-            try
-            {
-                var zone = TimeZoneInfo.FindSystemTimeZoneById(tz);
-                return TimeZoneInfo.ConvertTime(DateTime.SpecifyKind(t, DateTimeKind.Unspecified), zone, TimeZoneInfo.Local);
-            }
-            catch { }
+            foreach (var t in Occurrences(startLocal, rrule, from, to, null, local)) yield return t;
+            yield break;
         }
-        else if (!string.IsNullOrEmpty(tz))
-        {
-            var off = TimeZoneInfo.Local.GetUtcOffset(t) - TimeSpan.FromHours(8);
-            return t + off;
-        }
-        return t;
+        var zf = ToZone(from.AddDays(-1), local, zone);
+        var zt = ToZone(to.AddDays(1), local, zone);
+        foreach (var w in Occurrences(startWall, rrule, zf, zt, zone, local)) yield return ToLocal(w, zone, local);
     }
 
     /// <summary>
@@ -146,7 +193,8 @@ public static class Timetable
     /// BYDAY（含序号：2MO 第二个周一、-1FR 最后一个周五）、BYMONTHDAY（含负数：-1 月末）、BYMONTH、BYSETPOS。
     /// COUNT 从第一次算起（包括 from 之前的），和 RFC 5545 一致；EXDATE 由调用方过滤。
     /// </summary>
-    internal static IEnumerable<DateTime> Occurrences(DateTime start, string rrule, DateTime from, DateTime to)
+    /// <param name="wallZone">start / from / to 所在的时区（UNTIL 若是 UTC 要换到这个时区比较）；null 表示都是本地时间。</param>
+    internal static IEnumerable<DateTime> Occurrences(DateTime start, string rrule, DateTime from, DateTime to, TimeZoneInfo? wallZone = null, TimeZoneInfo? local = null)
     {
         if (string.IsNullOrWhiteSpace(rrule)) { yield return start; yield break; }
         var r = rrule.Split(';', StringSplitOptions.RemoveEmptyEntries)
@@ -155,7 +203,9 @@ public static class Timetable
         var freq = r.GetValueOrDefault("FREQ", "WEEKLY").ToUpperInvariant();
         var interval = int.TryParse(r.GetValueOrDefault("INTERVAL"), out var iv) && iv > 0 ? iv : 1;
         int? count = int.TryParse(r.GetValueOrDefault("COUNT"), out var c) && c > 0 ? c : null;
-        DateTime? until = r.TryGetValue("UNTIL", out var u) ? ParseDate(u, "") : null;
+        DateTime? until = null;
+        if (r.TryGetValue("UNTIL", out var u) && ParseZoned(u, "") is { } uz)
+            until = uz.zone == null ? uz.wall : ToLocal(uz.wall, uz.zone, wallZone ?? local ?? TimeZoneInfo.Local);
         if (until is { } uu && uu.TimeOfDay == TimeSpan.Zero && u!.Length == 8) until = uu.AddDays(1).AddTicks(-1);
         var byDay = r.TryGetValue("BYDAY", out var bd) ? ParseByDay(bd) : [];
         var byMonthDay = Ints(r.GetValueOrDefault("BYMONTHDAY")).Where(x => x != 0 && x >= -31 && x <= 31).ToList();

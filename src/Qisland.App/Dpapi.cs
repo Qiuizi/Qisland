@@ -1,6 +1,7 @@
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using Qisland.Core;
 
 namespace Qisland.App;
 
@@ -37,7 +38,20 @@ public static class Dpapi
         finally { h.Free(); }
     }
 
-    public static void Save(string path, string text) => File.WriteAllBytes(path, Run(Encoding.UTF8.GetBytes(text), true));
+    /// <summary>加密后原子写入（先写临时文件再替换），写不进去抛 IOException，旧文件保持原样。</summary>
+    public static void Save(string path, string text)
+    {
+        if (!TrySave(path, text, out var err)) throw new IOException(err);
+    }
+
+    /// <summary>同 Save，但返回是否真的写进了磁盘。</summary>
+    public static bool TrySave(string path, string text, out string? error)
+    {
+        byte[] data;
+        try { data = Run(Encoding.UTF8.GetBytes(text), true); }
+        catch (Exception ex) { error = ex.Message; return false; }
+        return AtomicFile.TryWrite(path, data, out error);
+    }
 
     public static string? Load(string path)
     {

@@ -41,7 +41,11 @@ public sealed class CalendarEventWindow : Window
         sp.Children.Add(note);
 
         var btns = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
-        if (existing != null) btns.Children.Add(DialogKit.Button("删除", () => { cal.DeleteLocal(existing.Id); Close(); }, danger: true));
+        if (existing != null) btns.Children.Add(DialogKit.Button("删除", () =>
+        {
+            if (cal.DeleteLocal(existing.Id) == LocalSaveResult.WriteFailed) { err.Text = "没删掉：写入失败（" + cal.LastSaveError + "），再试一次"; return; }
+            Close();
+        }, danger: true));
         btns.Children.Add(DialogKit.Button("取消", Close));
         btns.Children.Add(DialogKit.Button("保存", () =>
         {
@@ -56,7 +60,12 @@ public sealed class CalendarEventWindow : Window
                 if (en <= s) en = en.AddDays(1);   // 跨过零点
             }
             var ev = e with { Title = title.Text.Trim(), Location = loc.Text.Trim(), Start = s, End = en, AllDay = allDay, Weekly = weekly };
-            if (!cal.SaveLocal(ev)) { err.Text = $"没保存上（最多 {LocalCalendar.MaxEvents} 个日程）"; return; }
+            switch (cal.SaveLocal(ev))
+            {
+                case LocalSaveResult.Invalid: err.Text = $"没保存上（最多 {LocalCalendar.MaxEvents} 个日程）"; return;
+                // 窗口留着、内容不动，用户可以直接再点保存
+                case LocalSaveResult.WriteFailed: err.Text = "没保存上：写入失败（" + cal.LastSaveError + "），再试一次"; return;
+            }
             Close();
         }, primary: true));
         sp.Children.Add(btns);

@@ -8,6 +8,8 @@ public sealed record LocalEvent(string Id, string Title, string Location, DateTi
     public bool Valid => Title.Trim().Length > 0 && End >= Start && (AllDay || End > Start);
 }
 
+public enum LocalSaveResult { Saved, Invalid, WriteFailed }
+
 /// <summary>
 /// 本机日程表：增删改、序列化、按时间窗展开成 CalEvent（和 .ics 订阅一起显示、一起提醒）。
 /// 思路参考小糖岛仔（MIT）的本地日历编辑器，C# 重写。
@@ -39,6 +41,28 @@ public sealed class LocalCalendar
     }
 
     public bool Delete(string id) => _items.RemoveAll(x => x.Id == id) > 0;
+
+    /// <summary>
+    /// 改内存 + 写盘，写盘失败就把内存退回原样（界面不会显示一个其实没存上的日程）。
+    /// persist 收到序列化后的 JSON，返回是否真的写进了磁盘。
+    /// </summary>
+    public LocalSaveResult TrySave(LocalEvent e, Func<string, bool> persist)
+    {
+        var before = _items.ToList();
+        if (!Upsert(e)) return LocalSaveResult.Invalid;
+        if (persist(ToJson())) return LocalSaveResult.Saved;
+        _items.Clear(); _items.AddRange(before);
+        return LocalSaveResult.WriteFailed;
+    }
+
+    public LocalSaveResult TryDelete(string id, Func<string, bool> persist)
+    {
+        var before = _items.ToList();
+        if (!Delete(id)) return LocalSaveResult.Invalid;
+        if (persist(ToJson())) return LocalSaveResult.Saved;
+        _items.Clear(); _items.AddRange(before);
+        return LocalSaveResult.WriteFailed;
+    }
 
     public LocalEvent? Find(string id) => _items.FirstOrDefault(x => x.Id == id);
 

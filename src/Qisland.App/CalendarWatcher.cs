@@ -20,11 +20,13 @@ public sealed class CalendarWatcher
     /// <summary>本机日程（不依赖订阅；DPAPI 加密存在 local-calendar.dat）。</summary>
     public LocalCalendar Local => _local;
     public bool HasAny => _feeds.Count > 0 || _local.Count > 0;
+    public string LastSaveError { get; private set; } = "";
     private readonly ActivityStore _store;
     private readonly HttpClient _http;
     private readonly HashSet<string> _reminded = [];
-    private List<string> _feeds = [];
-    private readonly Dictionary<string, string> _cache = [];   // url → ics
+    // 订阅 + 缓存；拉取时领票，期间退订（或退订后重订）的结果不会被收下
+    private readonly CalendarFeeds _feeds = new();
+    private readonly Generation _gen = new();
     public IReadOnlyList<CalEvent> Events { get; private set; } = [];
     public DateTime? LastOk { get; private set; }
     public string LastError { get; private set; } = "";
@@ -56,13 +58,12 @@ public sealed class CalendarWatcher
         });
         var (feeds, cache, local) = loaded;
         if (_local.Count == 0) _local = local;
-        foreach (var u in feeds) if (!_feeds.Contains(u)) _feeds.Add(u);
-        foreach (var kv in cache) _cache.TryAdd(kv.Key, kv.Value);
-        if (_feeds.Count > 0 || _local.Count > 0) App.Log($"日历: {_feeds.Count} 个订阅，缓存 {_cache.Count} 个，本机日程 {_local.Count} 个");
+        foreach (var u in feeds) if (!_feeds.Contains(u)) _feeds.Add(u, cache.GetValueOrDefault(u));
+        if (_feeds.Count > 0 || _local.Count > 0) App.Log($"日历: {_feeds.Count} 个订阅，缓存 {_feeds.Cache.Count} 个，本机日程 {_local.Count} 个");
         await Rebuild();
     }
 
-    public IReadOnlyList<string> Feeds => _feeds;
+    public IReadOnlyList<string> Feeds => _feeds.Urls;
     public static string Host(string url) => Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.Host : "?";
 
     /// <summary>webcal:// 改成 https://；只收 http(s)。</summary>
@@ -84,8 +85,7 @@ public sealed class CalendarWatcher
         {
             var ics = await Fetch(url);
             if (!ics.Contains("BEGIN:VCALENDAR", StringComparison.OrdinalIgnoreCase)) return (false, "这个链接返回的不是 .ics 日历");
-            _feeds.Add(url);
-            _cache[url] = ics;
+            if (!_feeds.Add(url, ics)) return (false, "这个日历已经订阅过了");
             Save();
             await Rebuild();
             var n = CalendarIcs.Expand(ics, DateTime.Today, DateTime.Today.AddDays(8)).Count;
@@ -98,7 +98,6 @@ public sealed class CalendarWatcher
     public void Remove(string url)
     {
         if (!_feeds.Remove(url)) return;
-        _cache.Remove(url);
         Save();
         _ = Rebuild();
         App.Log($"日历: 删除订阅 {Host(url)}");
@@ -106,29 +105,24 @@ public sealed class CalendarWatcher
 
     public void RefreshNow() => _kick.TrySetResult();
 
-    /// <summary>新增 / 修改本机日程；不合法返回 false。</summary>
-    public bool SaveLocal(LocalEvent e)
+    /// <summary>新增 / 修改本机日程。写盘失败时内存退回原样并返回 WriteFailed（窗口留着让用户重试），说明在 LastSaveError。</summary>
+    public LocalSaveResult SaveLocal(LocalEvent e) => Done(_local.TrySave(e, PersistLocal));
+
+    public LocalSaveResult DeleteLocal(string id) => Done(_local.TryDelete(id, PersistLocal));
+
+    private LocalSaveResult Done(LocalSaveResult r)
     {
-        if (!_local.Upsert(e)) return false;
-        PersistLocal();
-        return true;
+        if (r == LocalSaveResult.Saved) _ = Rebuild();
+        return r;
     }
 
-    public void DeleteLocal(string id)
+    private bool PersistLocal(string json)
     {
-        if (!_local.Delete(id)) return;
-        PersistLocal();
-    }
-
-    private void PersistLocal()
-    {
-        try
-        {
-            if (_local.Count == 0) { if (File.Exists(LocalPath)) File.Delete(LocalPath); }
-            else Dpapi.Save(LocalPath, _local.ToJson());
-        }
-        catch (Exception ex) { App.Log("本机日程保存: " + ex.Message); }
-        _ = Rebuild();
+        string? err;
+        var ok = _local.Count == 0 ? AtomicFile.TryDelete(LocalPath, out err) : Dpapi.TrySave(LocalPath, json, out err);
+        LastSaveError = ok ? "" : err ?? "写入失败";
+        if (!ok) App.Log("本机日程保存失败: " + LastSaveError);
+        return ok;
     }
 
     private void Save()
@@ -136,8 +130,8 @@ public sealed class CalendarWatcher
         try
         {
             if (_feeds.Count == 0) { File.Delete(FeedsPath); File.Delete(CachePath); return; }
-            Dpapi.Save(FeedsPath, string.Join("\n", _feeds));
-            Dpapi.Save(CachePath, string.Join("\u0001\u0001", _cache.Select(kv => kv.Key + "\u0001" + kv.Value)));
+            Dpapi.Save(FeedsPath, string.Join("\n", _feeds.Urls));
+            Dpapi.Save(CachePath, string.Join("\u0001\u0001", _feeds.Cache.Select(kv => kv.Key + "\u0001" + kv.Value)));
         }
         catch (Exception ex) { App.Log("日历保存: " + ex.Message); }
     }
@@ -163,9 +157,10 @@ public sealed class CalendarWatcher
             if (_feeds.Count > 0 && Features.On(Features.Calendar) && App.NetReady())
             {
                 var ok = 0; var err = "";
-                foreach (var url in _feeds.ToList())
+                foreach (var url in _feeds.Urls.ToList())
                 {
-                    try { var ics = await Fetch(url); if (ics.Contains("BEGIN:VCALENDAR", StringComparison.OrdinalIgnoreCase)) { _cache[url] = ics; ok++; } }
+                    var ticket = _feeds.BeginFetch(url);
+                    try { var ics = await Fetch(url); if (ics.Contains("BEGIN:VCALENDAR", StringComparison.OrdinalIgnoreCase) && _feeds.Apply(ticket, ics)) ok++; }
                     catch (Exception ex) { err = $"{Host(url)}: {ex.GetType().Name}"; App.Log("日历拉取失败 " + err); }
                 }
                 if (ok > 0) { LastOk = DateTime.Now; Save(); }
@@ -181,7 +176,8 @@ public sealed class CalendarWatcher
     /// <summary>解析放到后台线程（大的日历文件几十毫秒），结果回到 UI 线程再换上。</summary>
     private async Task Rebuild()
     {
-        var sources = _cache.Values.ToList();
+        var gen = _gen.Next();
+        var sources = _feeds.Sources();
         var from = DateTime.Today.AddDays(-1);
         var local = _local.Expand(from, DateTime.Today.AddDays(8)).ToList();
         var events = await Task.Run(() =>
@@ -193,8 +189,9 @@ public sealed class CalendarWatcher
                 catch (Exception ex) { App.Log("日历解析: " + ex.Message); }
             }
             all.AddRange(local);
-            return all.GroupBy(e => (e.Title, e.Start)).Select(g => g.First()).OrderBy(e => e.Start).ToList();
+            return CalendarIcs.Dedupe(all);
         });
+        if (!_gen.IsCurrent(gen)) return;   // 期间又有更新的重建（比如刚退订），旧结果作废
         Events = events;
         Tick();
         Changed?.Invoke();
@@ -229,9 +226,10 @@ public sealed class CalendarWatcher
             var left = e.Start - now;
             if (left <= TimeSpan.Zero || left > TimeSpan.FromMinutes(10) || !_reminded.Add(e.Key)) continue;
             var mins = Math.Max(1, (int)Math.Ceiling(left.TotalMinutes));
-            _store.Upsert(new IslandActivity("cal:remind", Source, $"{mins} 分钟后 · {e.Title}",
+            // 每个日程一张卡；Replace：没有会议链接的日程不会沿用上一张卡的链接
+            _store.Upsert(new IslandActivity(CalendarReminder.ActivityId(e), Source, $"{mins} 分钟后 · {e.Title}",
                 e.JoinUrl != null ? $"{e.Start:HH:mm} 开始 · 点这里加入{e.JoinApp}" : Line(e, now), ActivityKind.Warning, 80,
-                DurationSeconds: 120, ResetTtl: true, OpenUri: e.JoinUrl));
+                DurationSeconds: 120, ResetTtl: true, OpenUri: e.JoinUrl, Replace: true));
             App.Log($"日历提醒: {mins} 分钟后有日程{(e.JoinUrl != null ? "（带会议链接 " + e.JoinApp + "）" : "")}");
             break;
         }
