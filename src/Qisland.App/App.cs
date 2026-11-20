@@ -240,14 +240,14 @@ public sealed partial class App : Application
             if (_api != null) _api.Approval = _approvals.Request;
             if (_api != null) _api.AgentEvent = a => _window?.OnAgentEvent(a);
             if (_api != null) _api.Bench = () => _window?.RunBench();
-            if (_api != null) _api.Jump = (id, dry) =>
+            if (_api != null) _api.Jump = id =>
             {
-                if (id == "media") { Launcher.DryRun = dry; try { if (_window?.Media?.Current is { } m) Launcher.OpenMedia(m); else Log("调试跳转: 没有媒体"); } finally { Launcher.DryRun = false; } return; }
+                if (id == "media") { if (_window?.Media?.Current is { } m) Launcher.OpenMedia(m); else Log("调试跳转: 没有媒体"); return; }
                 if (_store.Get(id) is not { } a) { Log($"调试跳转: 没有 {id}"); return; }
-                Launcher.DryRun = dry;
-                try { Log($"调试跳转{(dry ? "（只解析）" : "")} {id}: {(_window?.OpenRequested?.Invoke(a) == true ? "成功" : "没跳")}"); }
-                finally { Launcher.DryRun = false; }
+                Log($"调试跳转 {id}: {(_window?.OpenRequested?.Invoke(a) == true ? "成功" : "没跳")}");
             };
+            if (_api != null) _api.Preview = id =>
+                Dispatcher.Invoke(() => DebugJumpTarget.Resolve(_store, id, _media));
             if (_api != null) { _api.PerfJson = _perf.Json; _api.Peek = (s, p) => _window?.PeekFor(s, p); }
             PerfGuard.Changed += () => _window?.OnPerfChanged();
             PerfGuard.MemoryPressure += () => _window?.OnMemoryPressure();

@@ -15,8 +15,10 @@ public sealed class ApiServer : IDisposable
     private readonly TcpListener _listener;
     /// <summary>本机调试：连续展开收起几次，帧数据写进日志。</summary>
     public Action? Bench;
-    /// <summary>调试：按条目 id 走一遍点击跳转（dry=true 只解析目标、写日志，不切前台不启动）。只在本机回环上监听。</summary>
-    public Action<string, bool>? Jump;
+    /// <summary>调试：按条目 id 走一遍点击跳转。只在本机回环上监听。</summary>
+    public Action<string>? Jump;
+    /// <summary>调试预览：只解析会跳到哪，不调用 Jump、更新器、进程或窗口。</summary>
+    public Func<string, string>? Preview;
     public Func<string>? PerfJson;
     public Action<double, string?>? Peek;
     private readonly Action<Action> _post;
@@ -241,6 +243,7 @@ public sealed class ApiServer : IDisposable
         if (method == "GET" && path == "/v1/perf" && PerfJson != null)
             return (200, PerfJson());
 
+#if DEBUG
         if (method == "POST" && path == "/v1/debug/peek" && Peek != null)
         {
             // 正文「秒数 [页名]」，比如「8 widgets」：调试 / 截图用，展开后停在指定页
@@ -256,7 +259,12 @@ public sealed class ApiServer : IDisposable
             using var jd = JsonDocument.Parse(body.Length == 0 ? "{}" : body);
             var id = jd.RootElement.TryGetProperty("id", out var ie) ? ie.GetString() ?? "" : "";
             var dry = !jd.RootElement.TryGetProperty("dry", out var de) || de.ValueKind != JsonValueKind.False;
-            _post(() => Jump(id, dry));
+            if (dry)
+            {
+                var target = Preview?.Invoke(id) ?? "没有跳转解析器";
+                return (200, JsonSerializer.Serialize(new { ok = true, preview = target }));
+            }
+            _post(() => Jump(id));
             return (200, "{\"ok\":true}");
         }
 
@@ -265,6 +273,7 @@ public sealed class ApiServer : IDisposable
             _post(Bench);
             return (200, "{\"ok\":true}");
         }
+#endif
 
         if (method == "POST" && (path is "/v1/island/push" or "/v3/island/push" or "/push"))
         {
