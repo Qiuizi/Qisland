@@ -314,6 +314,7 @@ public sealed partial class IslandWindow : Window
         }
         UpdateVisibility();
         if (now.Second % 2 == 0) GuardTopmost();
+        OledTick(now);
     }
 
     /// <summary>点一行：返回 true 表示已经打开了对应软件。</summary>

@@ -14,7 +14,29 @@ namespace Qisland.App;
 /// </summary>
 public sealed partial class IslandWindow
 {
-    private sealed record ClipItem(string Text, string[]? Files, DateTime At, System.Windows.Media.Imaging.BitmapSource? Image = null);
+    private sealed record ClipItem(string Text, string[]? Files, DateTime At, System.Windows.Media.Imaging.BitmapSource? Image = null, bool Pinned = false);
+    // 置顶的文字：用户主动钉住才落盘，DPAPI 加密（只有本机本用户能解开）
+    private ClipPins? _pins;
+    private static string PinFile => Path.Combine(App.DataDir, "clip-pins.dat");
+    private ClipPins Pins => _pins ??= ClipPins.Parse(Dpapi.Load(PinFile));
+
+    private void SavePins()
+    {
+        try
+        {
+            if (Pins.Count == 0) { if (File.Exists(PinFile)) File.Delete(PinFile); }
+            else Dpapi.Save(PinFile, Pins.Serialize());
+        }
+        catch (Exception ex) { App.Log("保存剪贴板置顶: " + ex.Message); }
+    }
+
+    private void TogglePin(ClipItem c)
+    {
+        if (c.Pinned || Pins.Contains(c.Text)) Pins.Unpin(c.Text);
+        else if (!Pins.Pin(c.Text)) return;
+        SavePins();
+        RebuildExpanded();
+    }
     private readonly Dictionary<ClipItem, string> _translated = new();
     private readonly HashSet<ClipItem> _translating = new();
     private readonly List<ClipItem> _clips = new();
@@ -82,6 +104,7 @@ public sealed partial class IslandWindow
                 if (sc.Count > 0) Clipboard.SetFileDropList(sc);
             }
             else { _selfCopy = c.Text; Clipboard.SetText(c.Text); }
+            if (c.Pinned) { _copiedFlash = DateTime.Now; RebuildExpanded(); return; }
             _clips.Remove(c);
             var moved = c with { At = DateTime.Now };
             if (_translated.Remove(c, out var tr)) _translated[moved] = tr;
@@ -100,7 +123,7 @@ public sealed partial class IslandWindow
         var tt = Txt(13, FontWeights.SemiBold, Theme.Primary); tt.Text = "剪贴板"; tt.Margin = new Thickness(7, 0, 0, 0);
         title.Children.Add(tt);
         var n = Txt(12, FontWeights.Normal, Theme.Tertiary);
-        n.Text = DateTime.Now - _copiedFlash < TimeSpan.FromSeconds(2) ? "  已复制，去粘贴吧" : _clips.Count > 0 ? $"  {_clips.Count} 条 · 点一下重新复制" : "";
+        n.Text = DateTime.Now - _copiedFlash < TimeSpan.FromSeconds(2) ? "  已复制，去粘贴吧" : _clips.Count + Pins.Count > 0 ? $"  {_clips.Count} 条{(Pins.Count > 0 ? $" · 置顶 {Pins.Count}" : "")} · 点一下重新复制" : "";
         title.Children.Add(n);
         head.Children.Add(title);
         if (_clips.Count > 0)
@@ -112,17 +135,19 @@ public sealed partial class IslandWindow
         }
         stack.Children.Add(head);
 
-        if (_clips.Count == 0)
+        if (_clips.Count == 0 && Pins.Count == 0)
         {
             var empty = Txt(12.5, FontWeights.Normal, Theme.Tertiary);
-            empty.Text = "复制过的文字、文件和图片会出现在这里\n只保存在内存里，退出就清空";
+            empty.Text = "复制过的文字、文件和图片会出现在这里\n只保存在内存里，退出就清空；钉住的文字加密保存在本机";
             empty.TextAlignment = TextAlignment.Center;
             empty.HorizontalAlignment = HorizontalAlignment.Center; empty.Margin = new Thickness(0, 18, 0, 16);
             stack.Children.Add(empty);
             return;
         }
         var list = new StackPanel();
-        foreach (var c in _clips.Take(8))
+        var rows = Pins.Items.Select(t => new ClipItem(t, null, DateTime.MinValue, null, true))
+            .Concat(_clips.Where(c => c.Image != null || c.Files != null || !Pins.Contains(c.Text)).Take(8));
+        foreach (var c in rows)
         {
             list.Children.Add(ClipRow(c));
             if (_translated.TryGetValue(c, out var tr)) list.Children.Add(TranslationRow(tr));
@@ -161,9 +186,17 @@ public sealed partial class IslandWindow
         Grid.SetColumn(tx, 1);
         g.Children.Add(tx);
         var ago = Txt(11.5, FontWeights.Normal, Theme.Tertiary);
-        ago.Text = Ago(c.At); ago.VerticalAlignment = VerticalAlignment.Center; ago.Margin = new Thickness(10, 0, 8, 0);
+        ago.Text = c.Pinned ? "" : Ago(c.At); ago.VerticalAlignment = VerticalAlignment.Center; ago.Margin = new Thickness(10, 0, 8, 0);
         var right = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         right.Children.Add(ago);
+        if (c.Image == null && c.Files == null && ClipPins.CanPin(c.Text))
+        {
+            var pb = RoundIcon(c.Pinned ? "\uE77A" : "\uE718", 22, () => TogglePin(c), c.Pinned ? Theme.Orange : Theme.Secondary, c.Pinned ? "取消置顶" : "置顶（加密保存在本机）");
+            pb.Margin = new Thickness(0, 0, 4, 0);
+            pb.Opacity = c.Pinned ? 1 : 0;
+            if (!c.Pinned) { g.MouseEnter += (_, _) => pb.Opacity = 1; g.MouseLeave += (_, _) => pb.Opacity = 0; }
+            right.Children.Add(pb);
+        }
         if (c.Image == null && c.Files == null && !LooksLikeUrl(c.Text) && c.Text.Trim().Length is > 0 and <= 2000)
         {
             var busy = _translating.Contains(c);
@@ -179,7 +212,7 @@ public sealed partial class IslandWindow
         g.Children.Add(right);
         AddHover(g);
         g.MouseLeftButtonUp += (_, e) => { e.Handled = true; CopyBack(c); };
-        g.MouseRightButtonUp += (_, e) => { e.Handled = true; _clips.Remove(c); _translated.Remove(c); RebuildExpanded(); };
+        g.MouseRightButtonUp += (_, e) => { e.Handled = true; if (c.Pinned) { TogglePin(c); return; } _clips.Remove(c); _translated.Remove(c); RebuildExpanded(); };
         return g;
     }
 

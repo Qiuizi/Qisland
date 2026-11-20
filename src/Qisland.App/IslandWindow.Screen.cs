@@ -177,6 +177,23 @@ public sealed partial class IslandWindow
         ApplyFrame();
     }
 
+    // ───────────── OLED 防烧屏（默认关） ─────────────
+    // 岛常驻屏幕顶部同一位置，OLED 屏久了会留影。打开后每 3 分钟在 0 → 1 → 2 → 1 → 0 → -1 → -2 → -1 像素间挪一格，
+    // 只在收起且静止时挪（不打断动画和悬停）。参考小糖岛仔（MIT）的像素位移。
+    private static readonly int[] OledCycle = [0, 1, 2, 1, 0, -1, -2, -1];
+    private int _oledStep, _oledOffset;
+
+    private void OledTick(DateTime now)
+    {
+        if (now.Second != 30 || now.Minute % 3 != 0) return;
+        var on = Features.On(Features.OledShift);
+        if (!on && _oledOffset == 0) return;
+        if (_mode == Mode.Expanded || _animating || _hoverSince != DateTime.MaxValue) return;
+        _oledStep = on ? (_oledStep + 1) % OledCycle.Length : 0;
+        _oledOffset = OledCycle[_oledStep];
+        MoveTo(_monitor);
+    }
+
     private void MoveTo(IntPtr mon)
     {
         if (_hwnd == IntPtr.Zero || mon == IntPtr.Zero) return;
@@ -185,7 +202,7 @@ public sealed partial class IslandWindow
         if (GetDpiForMonitor(mon, 0, out var dx, out _) != 0) dx = 96;
         var widthPx = (int)Math.Round(WinW * dx / 96.0);
         var m = info.rcMonitor; var w = info.rcWork;
-        var x = m.Left + (m.Right - m.Left - widthPx) / 2;
+        var x = m.Left + (m.Right - m.Left - widthPx) / 2 + (int)Math.Round(_oledOffset * dx / 96.0);
         var y = w.Top > m.Top + 1 ? w.Top : m.Top;   // 任务栏在顶部时让开它
         _monitor = mon;
         _monRect = m; _winAtTop = y == m.Top;
