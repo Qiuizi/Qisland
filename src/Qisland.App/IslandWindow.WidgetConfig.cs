@@ -156,6 +156,7 @@ public sealed partial class IslandWindow
     private void BuildWidgets(StackPanel stack)
     {
         _wxTabs.Clear();
+        _wxIcons.Clear();
         _cpuT = _memT = _batT = null; _netT = null; _calHost = null; _timerCard = null; _sun = null; _sunHint = null; _wxBody = null;
         _wView = null;
         if (_widgetEdit) { BuildWidgetEditor(stack); return; }

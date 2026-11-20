@@ -535,33 +535,39 @@ public sealed partial class App : Application
     {
         while (true)
         {
-            var wait = TimeSpan.FromMinutes(20);
+            var wait = TimeSpan.FromMinutes(15);   // Open-Meteo 的实况每 15 分钟更新一次
             var ok = false;
-            var place = LoadWeatherPlace();
+            var city = WeatherCityList.Current;
+            var place = city != null ? new WeatherPlace(city.Label, city.Query) : LoadWeatherPlace();
+            _weatherWake = new TaskCompletionSource();
+            WeatherDetail? wttr = null;
             try
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
-                var d = WttrParser.Parse(await Http.GetStringAsync(place.WttrUrl, cts.Token), DateTime.Now);
-                if (d != null)
-                {
-                    WeatherLabel = place.Display.Length > 0 ? place.Display : d.Area;
-                    if (d.Lat is { } la && d.Lon is { } lo) _lastCoords = (la, lo);
-                    _window?.SetWeather(d.Now, d); ok = true;
-                }
+                wttr = WttrParser.Parse(await Http.GetStringAsync(place.WttrUrl, cts.Token), DateTime.Now);
+                if (wttr?.Lat is { } la && wttr.Lon is { } lo && city == null) _lastCoords = (la, lo);
             }
             catch (Exception ex) { Log("wttr: " + ex.Message); }
-            if (!ok && (place.Coordinates ?? _lastCoords) is { } c)
+            var label = place.Display.Length > 0 ? place.Display : wttr?.Area ?? "";
+            var coords = city != null ? (city.Lat, city.Lon) : place.Coordinates ?? _lastCoords;
+            if (coords is { } c)
             {
                 try
                 {
-                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
-                    var w = WeatherParser.ParseForecast(await Http.GetStringAsync(WeatherPlace.OpenMeteoUrl(c.Lat, c.Lon), cts.Token));
-                    if (w != null) { if (place.Display.Length > 0) WeatherLabel = place.Display; _window?.SetWeather(w, null); ok = true; }
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                    var f = OpenMeteo.Parse(await Http.GetStringAsync(OpenMeteo.ForecastUrl(c.Lat, c.Lon), cts.Token), DateTime.Now);
+                    if (f != null)
+                    {
+                        var d = WeatherDetail.FromForecast(f, wttr, DateTime.Now);
+                        ShowWeather(label, d.Now, d);
+                        ok = true;
+                    }
                 }
                 catch (Exception ex) { Log("Open-Meteo: " + ex.Message); }
             }
+            if (!ok && wttr != null) { ShowWeather(label, wttr.Now, wttr); ok = true; }
             if (!ok) wait = TimeSpan.FromMinutes(3);
-            await Nap(wait);
+            await Task.WhenAny(Nap(wait), _weatherWake.Task);
         }
     }
 
@@ -627,6 +633,7 @@ public sealed partial class App : Application
             hwRefresh.Text = last is { } t ? $"立即刷新作业（上次 {t:HH:mm}）" : "立即刷新作业";
         };
         menu.Items.Add(hwMenu);
+        menu.Items.Add(WeatherMenu());
         var calMenu = new System.Windows.Forms.ToolStripMenuItem("日历订阅");
         calMenu.DropDownItems.Add("…");
         calMenu.DropDownOpening += (_, _) => CalendarMenu(calMenu);
@@ -641,6 +648,10 @@ public sealed partial class App : Application
             (Features.Bluetooth, "蓝牙耳机连接和电量", "蓝牙耳机 / 音箱连上、断开时提示，能读到电量就显示，低电量提醒"),
             (Features.Network, "网络断开 / 恢复和代理", "断网、恢复、换 Wi-Fi、校园网要网页认证、系统代理开关时提示"),
             (Features.LockKeys, "大写 / 数字锁定提示", "按 Caps Lock / Num Lock 时岛上显示开还是关（只看按键，不改按键）"),
+            (Features.WeatherAlerts, "天气提醒", "按预报推算：快下雨、雷阵雨、下雪、大风、高温、严寒、明天大降温，同一件事一天只提醒一次"),
+            (Features.Water, "喝水提醒（默认关）", "9:00–22:00 间隔 45 分钟没记喝水就提醒一次，午休 12:00–13:30 不打扰；点提醒记一杯"),
+            (Features.Sit, "久坐提醒（默认关）", "连续用电脑 60 分钟提醒起来活动；离开 5 分钟算休息过"),
+            (Features.OledShift, "OLED 防烧屏（默认关）", "收起时岛每隔几分钟左右挪 1–3 像素，避免 OLED 屏留下残影"),
         })
         {
             var it = new System.Windows.Forms.ToolStripMenuItem(label) { CheckOnClick = true, Checked = Features.On(key), ToolTipText = tip };

@@ -24,6 +24,21 @@ public sealed partial class IslandWindow
     private int _timerPick = 25;  // 专注卡片上选中的时长
     private Border? _wxBody, _calHost, _timerCard;
     private readonly List<Border> _wxTabs = [];
+    /// <summary>天气卡片上的图标：翻到组件页 / 鼠标移上卡片时播 6 秒动效，然后停住。</summary>
+    private readonly List<WeatherIcon> _wxIcons = [];
+
+    private void CollectIcons(DependencyObject root)
+    {
+        if (root is WeatherIcon wi) { _wxIcons.Add(wi); return; }
+        foreach (var c in LogicalTreeHelper.GetChildren(root)) if (c is DependencyObject d) CollectIcons(d);
+    }
+
+    private void PlayWeather()
+    {
+        if (ReducedMotion || _page != Page.Widgets) return;
+        _wxIcons.RemoveAll(i => !i.IsLoaded && i.Parent == null);
+        foreach (var i in _wxIcons) i.Play(6);
+    }
     private SunArc? _sun;
     private TextBlock? _sunHint;
     private (RingArc ring, TextBlock value, TextBlock sub)? _cpuT, _memT, _batT;
@@ -111,7 +126,7 @@ public sealed partial class IslandWindow
         }
         // 圆环等页面滑稳了再长：和翻页同时动会让整页位图缓存每帧失效
         foreach (var r in new[] { _cpuT?.ring, _memT?.ring, _batT?.ring }) r?.AnimateTo(0, 1, 0);
-        _afterSettle = () => { if (_page == Page.Widgets) Rings(); };
+        _afterSettle = () => { if (_page == Page.Widgets) { Rings(); PlayWeather(); } };
         Kick(); // 保证会有一次“停稳”来触发它
         RefreshWidgets(sample: false);
     }
@@ -149,10 +164,27 @@ public sealed partial class IslandWindow
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         top.ColumnDefinitions.Add(new ColumnDefinition());
         var left = new StackPanel();
-        var place = new StackPanel { Orientation = Orientation.Horizontal };
+        var place = new StackPanel { Orientation = Orientation.Horizontal, Background = Brushes.Transparent, Cursor = Cursors.Hand };
+        var cities = App.WeatherCityList;
         place.Children.Add(T(App.WeatherLabel.Length > 0 ? App.WeatherLabel : "本地", 14, FontWeights.SemiBold, W1));
-        var loc = Glyph("\uE707", 10, W2); loc.Margin = new Thickness(4, 2, 0, 0);
+        var loc = Glyph(cities.Current == null ? "\uE707" : "\uE76C", 10, W2); loc.Margin = new Thickness(4, 2, 0, 0);
         place.Children.Add(loc);
+        if (cities.Saved.Count > 0)
+        {
+            var dots = T($"{cities.Active + 2}/{cities.Saved.Count + 1}", 9.5, FontWeights.SemiBold, W3); dots.Margin = new Thickness(5, 3, 0, 0);
+            place.Children.Add(dots);
+        }
+        place.ToolTip = cities.Saved.Count > 0 ? "点一下换下一个城市，右键管理城市" : "右键添加城市";
+        // 和岛仔一样能在岛上直接切城市：左键轮换（自动定位 → 已存城市…），右键打开城市管理
+        place.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            var list = App.WeatherCityList;
+            if (list.Saved.Count == 0) { (Application.Current as App)?.OpenWeatherCities(); return; }
+            var next = list.Active + 1 >= list.Saved.Count ? -1 : list.Active + 1;
+            (Application.Current as App)?.SwitchWeatherCity(next);
+        };
+        place.MouseRightButtonUp += (_, e) => { e.Handled = true; (Application.Current as App)?.OpenWeatherCities(); };
         left.Children.Add(place);
         var line = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(-2, -4, 0, 0) };
         line.Children.Add(T($"{w.Temperature:0}°", 46, FontWeights.Light, W1, display: true));
@@ -183,16 +215,32 @@ public sealed partial class IslandWindow
             UpdateSun();
         }
         sp.Children.Add(top);
-        if (x == null) return card;
+        card.MouseEnter += (_, _) => PlayWeather();
+        if (x == null) { CollectIcons(sp); return card; }
+
+        // 天气提醒横条（本地按预报推算，最多两条）
+        foreach (var a in x.Alerts.Take(2))
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal };
+            var ig = Glyph(a.Severe ? "\uE7BA" : "\uE946", 11, a.Severe ? Theme.Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0xB0, 0x40))) : W1); ig.Margin = new Thickness(0, 1, 6, 0);
+            row.Children.Add(ig);
+            row.Children.Add(T(a.Title, 11.5, FontWeights.SemiBold, W1));
+            var body = T("  " + a.Body, 11, FontWeights.Medium, W2); body.TextTrimming = TextTrimming.CharacterEllipsis; body.MaxWidth = 250;
+            row.Children.Add(body);
+            sp.Children.Add(new Border { Background = WFill, BorderBrush = WRim, BorderThickness = new Thickness(0.6), CornerRadius = new CornerRadius(10), Padding = new Thickness(9, 4, 9, 4), Margin = new Thickness(0, 10, 0, 0), Child = row });
+        }
 
         // 视图切换：分段控件
         var bar = new Grid { Margin = new Thickness(0, 12, 0, 8) };
-        var upd = T($"{x.Fetched:HH:mm} 更新", 10.5, FontWeights.Medium, W3); upd.VerticalAlignment = VerticalAlignment.Center;
+        // 连着两次没刷新上（超过 40 分钟）就标出来，免得把旧数据当现在（岛仔是变灰）
+        var stale = (DateTime.Now - x.Fetched).TotalMinutes > 40;
+        var upd = T(stale ? $"{x.Fetched:HH:mm} 的数据 · 暂时刷新不了" : $"{x.Fetched:HH:mm} 更新 · {x.Source}", 10.5, FontWeights.Medium, W3);
+        if (stale) upd.Opacity = 0.7; upd.VerticalAlignment = VerticalAlignment.Center;
         bar.Children.Add(upd);
         var seg = new Border { Background = WFill, BorderBrush = WRim, BorderThickness = new Thickness(0.6), CornerRadius = new CornerRadius(10), Padding = new Thickness(2), HorizontalAlignment = HorizontalAlignment.Right };
         var tabs = new StackPanel { Orientation = Orientation.Horizontal };
         seg.Child = tabs;
-        string[] names = ["逐时", "详情", "三天"];
+        string[] names = ["逐时", "详情", x.Days.Count > 3 ? $"{Math.Min(7, x.Days.Count)} 天" : "三天"];
         for (var i = 0; i < names.Length; i++)
         {
             var idx = i;
@@ -207,6 +255,7 @@ public sealed partial class IslandWindow
         _wxBody = new Border { Height = 78, Child = WxView(_wxView) };
         sp.Children.Add(_wxBody);
         PaintTabs();
+        CollectIcons(sp);
         return card;
     }
 
@@ -230,6 +279,8 @@ public sealed partial class IslandWindow
         next.RenderTransform = tt;
         next.Opacity = 0;
         _wxBody.Child = next;
+        CollectIcons(next);
+        if (_wxIcons.Any(i => i.Playing)) PlayWeather();
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
         next.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(220)) { EasingFunction = ease });
         tt.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(dir * 18, 0, TimeSpan.FromMilliseconds(340)) { EasingFunction = ease });
@@ -290,6 +341,27 @@ public sealed partial class IslandWindow
             }
             case 2:
             {
+                if (x.Days.Count > 3)
+                {
+                    // 一周：竖排小格，和逐时一样高（星期 · 图标 · 降水 · 最高 / 最低）
+                    var week = new UniformGrid { Rows = 1 };
+                    var wd = x.Days.Take(7).ToList();
+                    for (var i = 0; i < wd.Count; i++)
+                    {
+                        var d = wd[i];
+                        var c = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 1, 0, 1) };
+                        var l = T(i == 0 ? "今天" : "周" + "日一二三四五六"[(int)d.Date.DayOfWeek], 11, i == 0 ? FontWeights.Bold : FontWeights.Medium, i == 0 ? W1 : W2); l.HorizontalAlignment = HorizontalAlignment.Center;
+                        c.Children.Add(l);
+                        c.Children.Add(new WeatherIcon { Code = d.Code, Width = 20, Height = 20, Margin = new Thickness(0, 2, 0, 0) });
+                        var r = T(d.Rain >= 30 ? $"{d.Rain}%" : " ", 9, FontWeights.Bold, RainBlue); r.HorizontalAlignment = HorizontalAlignment.Center; r.Margin = new Thickness(0, -1, 0, -1);
+                        c.Children.Add(r);
+                        var hi = T($"{d.High:0}°", 12, FontWeights.SemiBold, W1); hi.HorizontalAlignment = HorizontalAlignment.Center;
+                        var lo = T($"{d.Low:0}°", 10.5, FontWeights.Medium, W3); lo.HorizontalAlignment = HorizontalAlignment.Center; lo.Margin = new Thickness(0, -2, 0, 0);
+                        c.Children.Add(hi); c.Children.Add(lo);
+                        week.Children.Add(c);
+                    }
+                    return week;
+                }
                 var sp = new StackPanel { Margin = new Thickness(0, 2, 0, 0) };
                 var days = x.Days.Take(3).ToList();
                 if (days.Count == 0) return sp;
@@ -320,7 +392,9 @@ public sealed partial class IslandWindow
             {
                 var cells = new UniformGrid { Rows = 1 };
                 cells.Children.Add(SkyCell("现在", w.Code, $"{w.Temperature:0}°", x.RainChance, Theme.IsNight(DateTime.Now), true));
-                foreach (var h in x.Hours.Take(7))
+                // 逐小时数据（Open-Meteo）隔一小时取一格，7 格看到 14 小时；wttr.in 本来就是 3 小时一格
+                var step = x.Hours.Count > 1 && (x.Hours[1].At - x.Hours[0].At).TotalMinutes <= 60 ? 2 : 1;
+                foreach (var h in x.Hours.Where((_, i) => i % step == 0).Take(7))
                     cells.Children.Add(SkyCell(h.At.Hour == 0 ? "明天" : h.At.ToString("H时"), h.Code, $"{h.Temp:0}°", h.Rain, Theme.IsNight(h.At), false));
                 return cells;
             }

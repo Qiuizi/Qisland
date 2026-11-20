@@ -20,6 +20,38 @@ public sealed record WeatherDetail(
     public string Area { get; init; } = "";
     public double? Lat { get; init; }
     public double? Lon { get; init; }
+    /// <summary>Open-Meteo 的原始逐时 / 逐日数据（推算天气提醒用）；只有 wttr.in 时为空。</summary>
+    public IReadOnlyList<HourWx> RawHours { get; init; } = [];
+    public IReadOnlyList<DayWx> RawDays { get; init; } = [];
+    public IReadOnlyList<WeatherAlert> Alerts { get; init; } = [];
+    /// <summary>数据来源，显示在卡片角上（Open-Meteo 要求注明出处）。</summary>
+    public string Source { get; init; } = "wttr.in";
+
+    /// <summary>
+    /// 以 Open-Meteo 的 7 天 / 48 小时预报为主，wttr.in 只补月相、地名和坐标（它给的预报只有 3 天）。
+    /// </summary>
+    public static WeatherDetail FromForecast(Forecast f, WeatherDetail? wttr, DateTime now)
+    {
+        var hours = OpenMeteo.Upcoming(f.Hours, now, 24).Select(h => new HourSlot(h.At, h.Temp, h.Code, h.Rain)).ToList();
+        var cur = f.Hours.Where(h => h.At <= now).LastOrDefault();
+        var today = f.Today;
+        var tm = f.Tomorrow;
+        return new WeatherDetail(f.Now, cur?.Rain ?? today?.Rain ?? 0, today?.Uv ?? 0, OpenMeteo.WindDir(f.WindDirDeg),
+            f.Visibility > 0 ? f.Visibility : wttr?.Visibility ?? 0,
+            today?.Sunrise is { Length: > 0 } sr ? sr : wttr?.Sunrise ?? "", today?.Sunset is { Length: > 0 } ss ? ss : wttr?.Sunset ?? "",
+            hours, tm?.High ?? 0, tm?.Low ?? 0, tm?.Code ?? f.Now.Code, tm?.Rain ?? 0)
+        {
+            Days = f.Days.Select(d => new DaySlot(d.Date, d.Code, d.High, d.Low, d.Rain)).ToList(),
+            Pressure = f.Pressure > 0 ? f.Pressure : wttr?.Pressure ?? 0,
+            MoonPhase = wttr?.MoonPhase ?? "",
+            MoonIllum = wttr?.MoonIllum ?? 0,
+            Area = wttr?.Area ?? "",
+            Lat = wttr?.Lat, Lon = wttr?.Lon,
+            RawHours = f.Hours, RawDays = f.Days,
+            Alerts = WeatherAlerts.Evaluate(f.Now, f.Hours, f.Days, now),
+            Source = "Open-Meteo",
+        };
+    }
 }
 
 public static class WttrParser

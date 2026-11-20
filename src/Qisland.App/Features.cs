@@ -10,13 +10,17 @@ namespace Qisland.App;
 public static class Features
 {
     public const string Privacy = "privacy", Calendar = "calendar", Calls = "calls", Focus = "focus",
-        Bluetooth = "bluetooth", Network = "network", LockKeys = "lockkeys";
+        Bluetooth = "bluetooth", Network = "network", LockKeys = "lockkeys",
+        WeatherAlerts = "weather-alerts", Water = "water", Sit = "sit", OledShift = "oled-shift";
+
+    /// <summary>默认关、要自己打开的（文件是 &lt;键&gt;.on）：喝水 / 久坐提醒会主动打扰，OLED 防烧屏会挪动岛。</summary>
+    private static readonly HashSet<string> OptIn = [Water, Sit, OledShift];
 
     private static readonly ConcurrentDictionary<string, bool> Cache = new();
     private static string Dir => Path.Combine(App.DataDir, "features");
     public static event Action<string>? Changed;
 
-    public static bool On(string key) => Cache.GetOrAdd(key, k => !File.Exists(Path.Combine(Dir, k + ".off")));
+    public static bool On(string key) => Cache.GetOrAdd(key, k => OptIn.Contains(k) ? File.Exists(Path.Combine(Dir, k + ".on")) : !File.Exists(Path.Combine(Dir, k + ".off")));
 
     public static void Set(string key, bool on)
     {
@@ -24,8 +28,16 @@ public static class Features
         try
         {
             Directory.CreateDirectory(Dir);
-            var f = Path.Combine(Dir, key + ".off");
-            if (on) File.Delete(f); else File.WriteAllText(f, "");
+            if (OptIn.Contains(key))
+            {
+                var f = Path.Combine(Dir, key + ".on");
+                if (on) File.WriteAllText(f, ""); else File.Delete(f);
+            }
+            else
+            {
+                var f = Path.Combine(Dir, key + ".off");
+                if (on) File.Delete(f); else File.WriteAllText(f, "");
+            }
         }
         catch (Exception ex) { App.Log($"开关 {key}: {ex.Message}"); }
         App.Log($"开关 {key} → {(on ? "开" : "关")}");

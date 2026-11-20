@@ -201,6 +201,30 @@ public sealed class WeatherIcon : FrameworkElement
     public int Code { get; set; }
     public bool Night { get; set; }
 
+    /// <summary>
+    /// 动画相位（秒）。0 = 静止画法；Play() 让它在几秒内走完然后停住（HoldEnd，不再出帧），
+    /// 所以不看天气卡片时没有任何渲染循环。思路参考小糖岛仔（MIT）的天气动效：太阳转、云飘、雨雪落、闪电闪。
+    /// </summary>
+    public static readonly DependencyProperty PhaseProperty = DependencyProperty.Register(nameof(Phase), typeof(double), typeof(WeatherIcon),
+        new FrameworkPropertyMetadata(0.0, FrameworkPropertyMetadataOptions.AffectsRender));
+    public double Phase { get => (double)GetValue(PhaseProperty); set => SetValue(PhaseProperty, value); }
+
+    public bool Playing { get; private set; }
+
+    /// <summary>播放 seconds 秒（30 帧）后停在最后一帧。</summary>
+    public void Play(double seconds = 6)
+    {
+        if (Playing) return;
+        Playing = true;
+        var start = Phase;
+        var a = new System.Windows.Media.Animation.DoubleAnimation(start, start + seconds, TimeSpan.FromSeconds(seconds)) { FillBehavior = System.Windows.Media.Animation.FillBehavior.HoldEnd };
+        System.Windows.Media.Animation.Timeline.SetDesiredFrameRate(a, 30);
+        a.Completed += (_, _) => Playing = false;
+        BeginAnimation(PhaseProperty, a);
+    }
+
+    private static double Frac(double v) => v - Math.Floor(v);
+
     private static Brush F(Brush b) { b.Freeze(); return b; }
     private static readonly Brush SunCore = F(new RadialGradientBrush(Color.FromRgb(0xFF, 0xEB, 0x8A), Color.FromRgb(0xFF, 0xA8, 0x1F)) { GradientOrigin = new Point(0.35, 0.3) });
     private static readonly Brush SunRay = F(new SolidColorBrush(Color.FromRgb(0xFF, 0xC2, 0x3D)));
@@ -219,22 +243,49 @@ public sealed class WeatherIcon : FrameworkElement
         var ox = (ActualWidth - s) / 2; var oy = (ActualHeight - s) / 2;
         dc.PushTransform(new TranslateTransform(ox, oy));
         var c = Code;
+        var p = Phase;
+        var moving = p > 0;
+        // 云左右慢飘（±3%），前后两朵反向
+        var drift = moving ? Math.Sin(p * 1.1) * s * 0.03 : 0;
         if (c is 0) Celestial(dc, s * 0.5, s * 0.5, s * 0.25, rays: true);
-        else if (c is 1 or 2) { Celestial(dc, s * 0.36, s * 0.36, s * 0.19, rays: c == 1 || !Night); Cloud(dc, s * 0.22, s * 0.40, s * 0.74, CloudLight); }
-        else if (c is 3) { Cloud(dc, s * 0.30, s * 0.18, s * 0.62, CloudBack); Cloud(dc, s * 0.08, s * 0.36, s * 0.78, CloudLight); }
+        else if (c is 1 or 2) { Celestial(dc, s * 0.36, s * 0.36, s * 0.19, rays: c == 1 || !Night); Cloud(dc, s * 0.22 + drift, s * 0.40, s * 0.74, CloudLight); }
+        else if (c is 3) { Cloud(dc, s * 0.30 - drift, s * 0.18, s * 0.62, CloudBack); Cloud(dc, s * 0.08 + drift, s * 0.36, s * 0.78, CloudLight); }
         else if (c is 45 or 48)
         {
-            Cloud(dc, s * 0.12, s * 0.14, s * 0.76, CloudLight);
-            for (var i = 0; i < 3; i++) Line(dc, Fog, s * (0.16 + i * 0.06), s * (0.70 + i * 0.1), s * (0.84 - i * 0.06), s * (0.70 + i * 0.1), s * 0.055);
+            Cloud(dc, s * 0.12 + drift * 0.5, s * 0.14, s * 0.76, CloudLight);
+            for (var i = 0; i < 3; i++)
+            {
+                var dx = moving ? Math.Sin(p * 0.9 + i * 1.7) * s * 0.06 : 0;
+                Line(dc, Fog, s * (0.16 + i * 0.06) + dx, s * (0.70 + i * 0.1), s * (0.84 - i * 0.06) + dx, s * (0.70 + i * 0.1), s * 0.055);
+            }
         }
         else if (c is >= 71 and <= 77 or 85 or 86)
         {
-            Cloud(dc, s * 0.12, s * 0.10, s * 0.76, CloudLight);
-            foreach (var (x, y) in new[] { (0.32, 0.74), (0.52, 0.84), (0.70, 0.72), (0.42, 0.95) }) dc.DrawEllipse(Brushes.White, null, new Point(s * x, s * y), s * 0.045, s * 0.045);
+            Cloud(dc, s * 0.12 + drift, s * 0.10, s * 0.76, CloudLight);
+            var flakes = new[] { (0.32, 0.74), (0.52, 0.84), (0.70, 0.72), (0.42, 0.95) };
+            for (var i = 0; i < flakes.Length; i++)
+            {
+                var (x, y) = flakes[i];
+                if (moving)
+                {
+                    // 从云底飘到底边，左右轻摆；靠近底边淡出
+                    var t = Frac(p * 0.42 + i * 0.27);
+                    y = 0.66 + t * 0.32;
+                    x += Math.Sin(p * 2.2 + i) * 0.04;
+                    dc.PushOpacity(t > 0.8 ? (1 - t) / 0.2 : 1);
+                    dc.DrawEllipse(Brushes.White, null, new Point(s * x, s * y), s * 0.045, s * 0.045);
+                    dc.Pop();
+                }
+                else dc.DrawEllipse(Brushes.White, null, new Point(s * x, s * y), s * 0.045, s * 0.045);
+            }
         }
         else if (c >= 95)
         {
-            Cloud(dc, s * 0.12, s * 0.08, s * 0.76, CloudDark);
+            Cloud(dc, s * 0.12 + drift, s * 0.08, s * 0.76, CloudDark);
+            // 闪电：每 2.2 秒闪两下
+            var k = moving ? p % 2.2 : 1;
+            var flash = k < 0.08 || k is > 0.18 and < 0.24;
+            if (flash) dc.PushOpacity(0.25);
             var g = new StreamGeometry();
             using (var x = g.Open())
             {
@@ -243,16 +294,26 @@ public sealed class WeatherIcon : FrameworkElement
             }
             g.Freeze();
             dc.DrawGeometry(Bolt, null, g);
+            if (flash) dc.Pop();
         }
         else
         {
             var heavy = c is 63 or 65 or 81 or 82 or 67;
-            Cloud(dc, s * 0.12, s * 0.08, s * 0.76, CloudDark);
+            Cloud(dc, s * 0.12 + drift, s * 0.08, s * 0.76, CloudDark);
             var n = heavy ? 4 : 3;
             for (var i = 0; i < n; i++)
             {
                 var x = s * (0.30 + i * (0.42 / (n - 1)));
-                Line(dc, Drop, x, s * 0.66, x - s * 0.07, s * 0.86, s * 0.06);
+                if (moving)
+                {
+                    // 雨滴落下：短线从云底滑到底边再从头来，错开相位
+                    var t = Frac(p * (heavy ? 1.5 : 1.1) + i * 0.37);
+                    var y0 = 0.64 + t * 0.24;
+                    dc.PushOpacity(t > 0.75 ? (1 - t) / 0.25 : 1);
+                    Line(dc, Drop, x - s * 0.035 * t, s * y0, x - s * 0.035 * t - s * 0.05, s * (y0 + 0.14), s * 0.06);
+                    dc.Pop();
+                }
+                else Line(dc, Drop, x, s * 0.66, x - s * 0.07, s * 0.86, s * 0.06);
             }
         }
         dc.Pop();
@@ -271,11 +332,16 @@ public sealed class WeatherIcon : FrameworkElement
             return;
         }
         if (rays)
+        {
+            // 太阳光芒慢转 + 轻微呼吸
+            var spin = Phase * 0.35;
+            var len = Phase > 0 ? 1.75 + Math.Sin(Phase * 2.4) * 0.08 : 1.75;
             for (var i = 0; i < 8; i++)
             {
-                var a = i * Math.PI / 4;
-                Line(dc, SunRay, cx + Math.Cos(a) * r * 1.38, cy + Math.Sin(a) * r * 1.38, cx + Math.Cos(a) * r * 1.75, cy + Math.Sin(a) * r * 1.75, r * 0.26);
+                var a = i * Math.PI / 4 + spin;
+                Line(dc, SunRay, cx + Math.Cos(a) * r * 1.38, cy + Math.Sin(a) * r * 1.38, cx + Math.Cos(a) * r * len, cy + Math.Sin(a) * r * len, r * 0.26);
             }
+        }
         dc.DrawEllipse(SunCore, null, new Point(cx, cy), r, r);
     }
 
