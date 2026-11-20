@@ -24,7 +24,8 @@ public sealed class MediaWatcher
     private readonly Dispatcher _ui;
     private GlobalSystemMediaTransportControlsSessionManager? _mgr;
     private GlobalSystemMediaTransportControlsSession? _session;
-    private string? _pinnedId;                       // 用户手动切到的来源（会话 AUMID，或网易云日志伪来源 MediaSources.NcmLog）
+    private string? _pinnedId;                       // 用户手动切到的来源：候选键（MediaSources.Keys，同程序第 n 个会话是 id#n），或网易云日志伪来源
+    private GlobalSystemMediaTransportControlsSession? _pinnedSession;   // 手动切到的那个会话本身（同 id 的会话靠它区分）
     // 每个会话挂一个播放状态监听；会话关掉（浏览器标签页、播放器退出）就摘掉，不让它们越攒越多
     private readonly Dictionary<GlobalSystemMediaTransportControlsSession, Windows.Foundation.TypedEventHandler<GlobalSystemMediaTransportControlsSession, PlaybackInfoChangedEventArgs>> _hooked = [];
     private TimeSpan _start;
@@ -220,7 +221,8 @@ public sealed class MediaWatcher
     private bool CurrentIsNcm => Current is { AppSource: "music", SongId: not null, FromSmtc: false } && _ncmCur != null;
     /// <summary>网易云只在日志里（没开 SMTC）：它是系统会话之外的一个可切换来源。</summary>
     private bool NcmLogOnly => _ncmCur != null && !_ncmSmtc;
-    private List<string> SessionIds() => All().Select(x => x.SourceAppUserModelId ?? "").ToList();
+    private List<string> SessionIds() => Ids(All());
+    private static List<string> Ids(List<GlobalSystemMediaTransportControlsSession> all) => all.Select(x => x.SourceAppUserModelId ?? "").ToList();
     /// <summary>切换按钮的计数和轮换用同一份候选（规则在 Core 的 MediaSources）。</summary>
     private int SourceCount() => MediaSources.Count(SessionIds(), NcmLogOnly);
 
@@ -313,9 +315,11 @@ public sealed class MediaWatcher
             var all = All();
             if (_pinnedId != null && _pinnedId != MediaSources.NcmLog)   // 切到网易云日志时系统会话照常挑，显示由 Choose 决定
             {
-                var pinned = all.FirstOrDefault(x => x.SourceAppUserModelId == _pinnedId);
-                if (pinned != null) return pinned;
-                _pinnedId = null;
+                // 先认会话本身（同 id 的会话顺序变了也不会认错），再按候选键找
+                if (_pinnedSession != null && all.Contains(_pinnedSession)) return _pinnedSession;
+                var i = MediaSources.Resolve(Ids(all), _pinnedId);
+                if (i >= 0) return _pinnedSession = all[i];
+                _pinnedId = null; _pinnedSession = null;
             }
             var playing = all.Where(x => x.GetPlaybackInfo()?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing).ToList();
             if (_session != null && playing.Contains(_session)) return _session; // 正在播的不被别人抢
@@ -328,10 +332,15 @@ public sealed class MediaWatcher
     /// <summary>同时有多个来源时（比如网易云 + 浏览器视频），在它们之间轮换；网易云只在日志里时也算一个来源。</summary>
     public void Cycle()
     {
-        var candidates = MediaSources.Candidates(SessionIds(), NcmLogOnly);
-        var current = CurrentIsNcm && NcmLogOnly ? MediaSources.NcmLog : _session?.SourceAppUserModelId;
+        // 计数、轮换、选中都用 MediaSources 的候选键：同一个程序的两个会话（来源 id 相同）也能切过去
+        var all = All();
+        var ids = Ids(all);
+        var candidates = MediaSources.Candidates(ids, NcmLogOnly);
+        var at = _session == null ? -1 : all.IndexOf(_session);
+        var current = CurrentIsNcm && NcmLogOnly ? MediaSources.NcmLog : at >= 0 ? MediaSources.KeyAt(ids, at) : null;
         if (MediaSources.Next(candidates, current) is not { } next) return;
         _pinnedId = next;
+        _pinnedSession = MediaSources.Resolve(ids, next) is var j and >= 0 ? all[j] : null;
         Attach();
     }
 
@@ -368,7 +377,7 @@ public sealed class MediaWatcher
     private MediaState? Choose(MediaState? smtc)
     {
         var n = _ncmCur;
-        var manual = _pinnedId != null && _session?.SourceAppUserModelId == _pinnedId;
+        var manual = _pinnedSession != null && ReferenceEquals(_session, _pinnedSession);
         var manualNcm = _pinnedId == MediaSources.NcmLog;
         var pick = MediaPick.Choose(smtc is null ? null : new MediaCandidate(smtc.Playing, smtc.AppSource == "music"),
             n is null ? null : new MediaCandidate(n.Playing, true), _ncmSmtc, manual, manualNcm);
