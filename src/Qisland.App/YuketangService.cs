@@ -48,8 +48,8 @@ public sealed class YuketangService
 
     private readonly HomeworkHub _hub;
     private readonly ActivityStore _store;
-    private readonly object _ckLock = new();
-    private CookieSet _cookies = new();
+    // Cookie + 会话代数：退出登录 / 换账号换一代，旧一代的请求回来什么都不能改（Cookie、登录状态、作业、DPAPI 文件）
+    private readonly SessionJar _jar = new();
     private readonly SessionHealth _health = new();
     private DateTime _next = DateTime.MinValue;
     private DateTime _lastExtendLog = DateTime.MinValue;
@@ -57,7 +57,7 @@ public sealed class YuketangService
     private bool _loggedCookieNames;
     private int _okButFailing;
     public string? UserName { get; private set; }
-    public bool LoggedIn { get { lock (_ckLock) return _cookies["sessionid"] != null; } }
+    public bool LoggedIn => _jar["sessionid"] != null;
     public bool Expired { get; private set; }
     public DateTime? LastOk { get; private set; }
     /// <summary>sessionid 当前的过期时间（随服务器续期更新；滑动窗口，只要还在用就会往后推）。</summary>
@@ -81,7 +81,7 @@ public sealed class YuketangService
                             set.Set(n, v, c["e"]?.GetValue<long>() is { } e and > 0 ? DateTimeOffset.FromUnixTimeSeconds(e) : null);
                 if (set["sessionid"] == null && o["sessionid"]?.GetValue<string>() is { Length: > 0 } sid)   // v3 及以前只存了 sessionid
                     set.Set("sessionid", sid, o["expires"]?.GetValue<long>() is { } ex and > 0 ? DateTimeOffset.FromUnixTimeSeconds(ex) : null);
-                _cookies = set;
+                _jar.Replace(set);
                 ExpiresAt = set.ExpiresOf("sessionid")?.LocalDateTime;
             }
             catch { }
@@ -89,11 +89,19 @@ public sealed class YuketangService
         _next = DateTime.Now.AddSeconds(20);
     }
 
-    private void Save()
+    /// <summary>加密存登录状态；gen 已经不是当前会话（期间退出 / 换号）就不写。</summary>
+    private void Save(long gen)
     {
         try
         {
-            CookieSet c; lock (_ckLock) c = _cookies;
+            if (!_jar.TryPersist(gen, c => Write(c))) App.Log("雨课堂: 会话已切换，丢弃旧会话的保存");
+        }
+        catch (Exception ex) { App.Log("雨课堂: 保存登录状态失败 " + ex.Message); }
+    }
+
+    private void Write(CookieSet c)
+    {
+        {
             var arr = new JsonArray();
             foreach (var (n, e) in c.All)
                 arr.Add(new JsonObject { ["n"] = n, ["v"] = e.Value, ["e"] = e.Expires is { } x ? x.ToUnixTimeSeconds() : 0 });
@@ -105,7 +113,6 @@ public sealed class YuketangService
             };
             Dpapi.Save(CredPath, o.ToJsonString());
         }
-        catch (Exception ex) { App.Log("雨课堂: 保存登录状态失败 " + ex.Message); }
     }
 
     private static HttpClient NewHttp(CookieContainer? jar = null)
@@ -153,12 +160,12 @@ public sealed class YuketangService
                         if (!ck.Expired && ck.Value.Length > 0)
                             set.Set(ck.Name, ck.Value, ck.Expires > DateTime.Now ? new DateTimeOffset(ck.Expires.ToUniversalTime(), TimeSpan.Zero) : null);
                     if (string.IsNullOrEmpty(set["sessionid"])) throw new IOException("登录成功但没拿到会话");
-                    lock (_ckLock) _cookies = set;
+                    var gen = _jar.Replace(set);   // 新登录 / 换账号：开新的一代，之前在途的请求全部作废
                     ExpiresAt = set.ExpiresOf("sessionid")?.LocalDateTime;
                     UserName = d["Name"]?.ToString() ?? "";
                     Expired = false;
                     _health.Reset(); _okButFailing = 0;
-                    Save();
+                    Save(gen);
                     App.Log($"雨课堂: 已登录 {UserName}（Cookie：{string.Join(", ", set.All.Keys)}；sessionid 到 {ExpiresAt:MM-dd HH:mm}）");
                     _next = DateTime.Now;
                     Changed?.Invoke();
@@ -173,9 +180,9 @@ public sealed class YuketangService
 
     public void Logout()
     {
-        lock (_ckLock) _cookies = new CookieSet();
+        // 先换代（在途请求回来后不能再合并 Cookie / 写盘），再删凭据文件（排在正在进行的保存之后）
+        _jar.Clear(() => { try { File.Delete(CredPath); } catch { } });
         UserName = null; Expired = false; ExpiresAt = null; _health.Reset(); _okButFailing = 0;
-        try { File.Delete(CredPath); } catch { }
         _hub.Clear(Platform);
         _store.Remove("ykt:expired");
         Changed?.Invoke();
@@ -190,7 +197,7 @@ public sealed class YuketangService
         HomeworkHub.WarnExpiring(_store, "ykt:expiring", "雨课堂", null);
         if (!LoggedIn || _busy || DateTime.Now < _next) return;
         // 本机存的会话 Cookie 已经过期 / 缺失：不发请求（空 Cookie 头会直接抛错，也没意义），直接按登录过期提示扫码
-        bool usable; lock (_ckLock) usable = _cookies.CanAuthenticate("sessionid", DateTimeOffset.UtcNow);
+        var usable = _jar.CanAuthenticate("sessionid", DateTimeOffset.UtcNow);
         if (!usable)
         {
             _next = DateTime.Now.AddMinutes(30);
@@ -210,20 +217,23 @@ public sealed class YuketangService
     {
         _busy = true;
         _next = DateTime.Now.AddMinutes(20);
+        var gen = _jar.Generation;
         try
         {
-            var items = await Task.Run(Fetch);
-            if (items == null) return;
+            var items = await Task.Run(() => Fetch(gen));
+            if (items == null || !_jar.IsCurrent(gen)) return;   // 期间退出 / 换号：旧结果不进作业列表
             LastOk = DateTime.Now;
             _okButFailing = 0;
             _health.Report(AuthVerdict.Ok, DateTime.Now);
             _hub.Update(Platform, items);
             App.Log($"雨课堂: {items.Count(i => !i.Done)} 项未完成");
         }
-        catch (AuthProblem ap)
+        catch (StaleSession) { App.Log("雨课堂: 会话已切换，丢弃这次拉取"); }
+        catch (AuthProblem ap) when (_jar.IsCurrent(gen))
         {
             App.Log($"雨课堂: 接口说可能没登录（{ap.Message}），用户信息接口确认一下");
-            var confirm = await Task.Run(Confirm);
+            var confirm = await Task.Run(() => Confirm(gen));
+            if (!_jar.IsCurrent(gen)) return;
             var v = confirm == AuthVerdict.Transient ? ap.Verdict : confirm; // 确认接口自己也说不准时，按原来的结论记一笔（仍要两次才判过期）
             if (confirm == AuthVerdict.Ok && ++_okButFailing >= 4)
             {
@@ -234,18 +244,23 @@ public sealed class YuketangService
             else if (_health.Report(v, DateTime.Now)) MarkExpired($"连续 {_health.Strikes} 次确认未登录（{ap.Message}；确认接口：{confirm}）");
             else { App.Log($"雨课堂: 疑似掉线（第 {_health.Strikes} 次，{confirm}），2 分钟后再确认，先不提示"); _next = DateTime.Now.AddMinutes(2); }
         }
-        catch (Exception ex) { App.Log("雨课堂: 网络或服务器临时问题，5 分钟后重试 · " + ex.Message); _next = DateTime.Now.AddMinutes(5); }
+        catch (Exception ex) when (_jar.IsCurrent(gen)) { App.Log("雨课堂: 网络或服务器临时问题，5 分钟后重试 · " + ex.Message); _next = DateTime.Now.AddMinutes(5); }
+        catch (Exception) { App.Log("雨课堂: 会话已切换，丢弃这次拉取的结果"); }
         finally { _busy = false; Changed?.Invoke(); }
     }
+
+    /// <summary>请求所属的会话已经换代（退出登录 / 换账号）。</summary>
+    private sealed class StaleSession() : OperationCanceledException("会话已切换");
 
     /// <summary>已经判了过期：每 30 分钟用只读的用户信息接口确认一次，误判就自己恢复。</summary>
     private async Task RecheckExpiredAsync()
     {
         _busy = true;
         _next = DateTime.Now.AddMinutes(30);
+        var gen = _jar.Generation;
         try
         {
-            if (await Task.Run(Confirm) == AuthVerdict.Ok)
+            if (await Task.Run(() => Confirm(gen)) == AuthVerdict.Ok && _jar.IsCurrent(gen))
             {
                 App.Log("雨课堂: 登录其实还在（之前是误判），已恢复");
                 Expired = false;
@@ -259,30 +274,31 @@ public sealed class YuketangService
     }
 
     /// <summary>只读的「我是谁」接口，用来确认登录是不是真的失效。网络异常算 Transient。</summary>
-    private async Task<AuthVerdict> Confirm()
+    private async Task<AuthVerdict> Confirm(long gen)
     {
         try
         {
             using var h = NewHttp();
-            var (_, v, _) = await Send(h, ConfirmPath, null);
+            var (_, v, _) = await Send(h, gen, ConfirmPath, null);
             return v;
         }
-        catch (Exception ex) when (ex is not AuthProblem) { App.Log("雨课堂: 确认接口网络问题 " + ex.Message); return AuthVerdict.Transient; }
+        catch (Exception ex) when (ex is not AuthProblem and not StaleSession) { App.Log("雨课堂: 确认接口网络问题 " + ex.Message); return AuthVerdict.Transient; }
     }
 
     private sealed class AuthProblem(AuthVerdict v, string msg) : Exception(msg) { public AuthVerdict Verdict { get; } = v; }
 
     /// <summary>请求一个接口：带上全部 Cookie，收下 Set-Cookie，并给出这次响应对登录状态的判断。</summary>
-    private async Task<(JsonNode? body, AuthVerdict verdict, string detail)> Send(HttpClient h, string path, string? classroom)
+    private async Task<(JsonNode? body, AuthVerdict verdict, string detail)> Send(HttpClient h, long gen, string path, string? classroom)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, $"https://{Host}{path}");
         if (classroom != null) req.Headers.Add("classroom-id", classroom);
-        string cookieHeader; lock (_ckLock) cookieHeader = _cookies.Header(DateTimeOffset.UtcNow);
+        if (!_jar.TryHeader(gen, DateTimeOffset.UtcNow, out var cookieHeader)) throw new StaleSession();
         if (cookieHeader.Length == 0) throw new AuthProblem(AuthVerdict.Rejected, "本机没有可用的会话 Cookie");
         req.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
         req.Headers.Add("xtbz", "ykt");
         using var res = await h.SendAsync(req);
-        var deleted = AbsorbCookies(res);
+        if (!_jar.IsCurrent(gen)) throw new StaleSession();   // 等响应期间退出 / 换号了：Set-Cookie 不收、结论不算
+        var deleted = AbsorbCookies(res, gen);
         var text = await res.Content.ReadAsStringAsync();
         JsonNode? o = null;
         var isJson = false;
@@ -299,30 +315,18 @@ public sealed class YuketangService
     private static string Short(string s) => s.Length > 40 ? s[..40] + "…" : s;
 
     /// <summary>合并响应里的 Set-Cookie；sessionid 被续期 / 换号时加密存回去。返回服务器是否删除了 sessionid。</summary>
-    private bool AbsorbCookies(HttpResponseMessage res)
+    private bool AbsorbCookies(HttpResponseMessage res, long gen)
     {
         if (!res.Headers.TryGetValues("Set-Cookie", out var values)) return false;
-        bool changed = false, deleted = false, rotated = false;
-        var names = new List<string>();
-        lock (_ckLock)
-        {
-            var before = _cookies["sessionid"];
-            foreach (var v in values)
-            {
-                var (c, d) = _cookies.Apply(v, DateTimeOffset.UtcNow);
-                var n = v.Split('=', 2)[0].Trim();
-                names.Add(n);
-                changed |= c;
-                if (n == "sessionid") deleted |= d;
-            }
-            rotated = before != null && _cookies["sessionid"] is { } after && after != before;
-            ExpiresAt = _cookies.ExpiresOf("sessionid")?.LocalDateTime;
-        }
+        var r = _jar.Absorb(gen, values, DateTimeOffset.UtcNow);
+        if (r.Stale) throw new StaleSession();
+        var (changed, deleted, rotated, names) = (r.Changed, r.Deleted, r.Rotated, r.Names);
+        ExpiresAt = r.Expires?.LocalDateTime;
         if (!_loggedCookieNames) { _loggedCookieNames = true; App.Log($"雨课堂: 服务器回的 Set-Cookie：{string.Join(", ", names.Distinct())}（只记名字）"); }
         if (deleted) return true;
         if (changed)
         {
-            Save();
+            Save(gen);
             if (rotated) App.Log($"雨课堂: 服务器换了新的 sessionid，已加密保存（到 {ExpiresAt:MM-dd HH:mm}）");
             else if (DateTime.Now - _lastExtendLog > TimeSpan.FromHours(2)) { _lastExtendLog = DateTime.Now; App.Log($"雨课堂: 会话已续期到 {ExpiresAt:MM-dd HH:mm}"); }
         }
@@ -330,9 +334,9 @@ public sealed class YuketangService
     }
 
     /// <summary>业务接口：正常返回 JSON；可能没登录时抛 AuthProblem（由 RefreshAsync 去确认）；临时问题抛 IOException。</summary>
-    private async Task<JsonNode> Get(HttpClient h, string path, string? classroom = null)
+    private async Task<JsonNode> Get(HttpClient h, long gen, string path, string? classroom = null)
     {
-        var (o, v, detail) = await Send(h, path, classroom);
+        var (o, v, detail) = await Send(h, gen, path, classroom);
         return v switch
         {
             AuthVerdict.Ok => o!,
@@ -342,10 +346,10 @@ public sealed class YuketangService
     }
 
     /// <summary>可选接口（成绩页）：出错就当没有数据，不影响整次拉取。</summary>
-    private async Task<JsonNode?> TryGet(HttpClient h, string path, string? classroom = null)
+    private async Task<JsonNode?> TryGet(HttpClient h, long gen, string path, string? classroom = null)
     {
-        try { return await Get(h, path, classroom); }
-        catch (Exception ex) { App.Log("雨课堂: 跳过 " + ex.Message); return null; }
+        try { return await Get(h, gen, path, classroom); }
+        catch (Exception ex) when (ex is not StaleSession) { App.Log("雨课堂: 跳过 " + ex.Message); return null; }
     }
 
     private void MarkExpired(string why)
@@ -362,10 +366,10 @@ public sealed class YuketangService
         });
     }
 
-    private async Task<List<HomeworkItem>?> Fetch()
+    private async Task<List<HomeworkItem>?> Fetch(long gen)
     {
         using var h = NewHttp();
-        var courses = await Get(h, "/v2/api/web/courses/list?identity=2");
+        var courses = await Get(h, gen, "/v2/api/web/courses/list?identity=2");
         Dump("courses", courses);
         var list = courses["data"]?["list"]?.AsArray() ?? [];
         // 只看当前学期：term 取最大的那一批
@@ -381,7 +385,7 @@ public sealed class YuketangService
             var course = c["course"]?["name"]?.ToString() ?? c["name"]?.ToString() ?? "";
             await Task.Delay(500);
             JsonNode log;
-            try { log = await Get(h, $"/v2/api/web/logs/learn/{cid}?actype=-1&page=0&offset=50&sort=-1"); }
+            try { log = await Get(h, gen, $"/v2/api/web/logs/learn/{cid}?actype=-1&page=0&offset=50&sort=-1"); }
             catch (Exception ex) when (ex is IOException || ex is AuthProblem { Verdict: AuthVerdict.Suspect })
             {
                 // 课程列表刚刚正常返回，说明登录是好的：单门课的 50000 / 业务错误只跳过这门课，沿用它上次的数据
@@ -400,7 +404,7 @@ public sealed class YuketangService
                 if (sched != null) return sched;
                 sched = new();
                 await Task.Delay(500);
-                var sd = await TryGet(h, $"/c27/online_courseware/schedule/score_detail/single/{sku}/0/", cid);
+                var sd = await TryGet(h, gen, $"/c27/online_courseware/schedule/score_detail/single/{sku}/0/", cid);
                 Dump("schedule-" + cid, sd ?? new JsonObject());
                 foreach (var l in sd?["data"]?["leaf_level_infos"]?.AsArray() ?? [])
                     if (l?["id"]?.ToString() is { Length: > 0 } id) sched[id] = (Num(l["schedule"]), Num(l["no_corrected_subj_count"]) > 0);
