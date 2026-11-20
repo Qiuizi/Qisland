@@ -179,3 +179,31 @@ public static class HotkeyText
         return sb.ToString();
     }
 }
+
+/// <summary>快捷键被别的程序占了时，按顺序换着试的候选。</summary>
+public static class HotkeyFallback
+{
+    public static readonly string[] TranslateExtras = ["Ctrl+Alt+Y", "Ctrl+Alt+Shift+Y"];
+    public static readonly string[] AskExtras = ["Ctrl+Alt+J", "Ctrl+Alt+Shift+J"];
+
+    /// <summary>
+    /// 先用设置里的；再试「同一组合加 Shift」；再试备用组合。去重、去掉格式不对的、去掉另一个功能已经占用的。
+    /// 设置里填的格式不对时，候选从备用组合开始。
+    /// </summary>
+    public static List<string> Candidates(string? configured, IEnumerable<string> extras, IEnumerable<string>? taken = null)
+    {
+        var seen = new HashSet<(uint, uint)>();
+        foreach (var t in taken ?? [])
+            if (HotkeyText.TryParse(t, out var tm, out var tv)) seen.Add((tm, tv));
+        var list = new List<string>();
+        void Add(uint m, uint v) { if (seen.Add((m, v))) list.Add(HotkeyText.Format(m, v)); }
+        if (HotkeyText.TryParse(configured, out var mods, out var vk))
+        {
+            Add(mods, vk);
+            if ((mods & HotkeyText.Shift) == 0) Add(mods | HotkeyText.Shift, vk);
+        }
+        foreach (var e in extras)
+            if (HotkeyText.TryParse(e, out var m, out var v)) Add(m, v);
+        return list;
+    }
+}

@@ -29,20 +29,61 @@ public sealed partial class IslandWindow
     }
     private AiCard? _ai;
 
-    /// <summary>按设置注册 / 注销两个快捷键；返回注册不上的那些（被别的程序占了）。</summary>
+    /// <summary>实际注册上的组合（被占用时可能是备用的那个）；没注册上为 null。</summary>
+    public string? ActiveTranslateHotkey { get; private set; }
+    public string? ActiveAskHotkey { get; private set; }
+
+    /// <summary>
+    /// 按设置注册 / 注销两个快捷键；设置里的被别的程序占了，就按顺序换备用组合（加 Shift、Ctrl+Alt+Y / J…），
+    /// 用第一个注册得上的，并在岛上提示一次实际生效的组合。返回一个都注册不上的那些。
+    /// （Windows 没有公开接口能查出是哪个程序占了某个热键，所以日志里只记「被占用」。）
+    /// </summary>
     public List<string> ApplyAiHotkeys()
     {
         var failed = new List<string>();
         if (SnapshotMode || _hwnd == IntPtr.Zero) return failed;
         UnregHotKey(_hwnd, TranslateHotkeyId);
         UnregHotKey(_hwnd, AskHotkeyId);
+        ActiveTranslateHotkey = ActiveAskHotkey = null;
         if (!Ai.TranslateOn) return failed;
-        foreach (var (id, text) in new[] { (TranslateHotkeyId, Ai.TranslateHotkey), (AskHotkeyId, Ai.AskHotkey) })
+        var taken = new List<string>();
+        foreach (var (id, text, extras, label) in new[]
+                 {
+                     (TranslateHotkeyId, Ai.TranslateHotkey, HotkeyFallback.TranslateExtras, "划词翻译"),
+                     (AskHotkeyId, Ai.AskHotkey, HotkeyFallback.AskExtras, "问 AI"),
+                 })
         {
-            if (!HotkeyText.TryParse(text, out var mods, out var vk)) { if (!string.IsNullOrWhiteSpace(text)) failed.Add(text); continue; }
-            if (!RegHotKey(_hwnd, id, mods | 0x4000 /*NOREPEAT*/, vk)) { failed.Add(text); App.Log($"热键 {text} 被占用"); }
+            string? got = null;
+            foreach (var c in HotkeyFallback.Candidates(text, extras, taken))
+            {
+                if (!HotkeyText.TryParse(c, out var mods, out var vk)) continue;
+                if (RegHotKey(_hwnd, id, mods | 0x4000 /*NOREPEAT*/, vk)) { got = c; break; }
+                App.Log($"热键 {c} 被占用（{label}）");
+            }
+            if (got == null) { failed.Add(string.IsNullOrWhiteSpace(text) ? label : text); App.Log($"热键: {label} 所有候选都被占用，没有注册"); continue; }
+            taken.Add(got);
+            if (id == TranslateHotkeyId) ActiveTranslateHotkey = got; else ActiveAskHotkey = got;
+            var configuredOk = HotkeyText.TryParse(text, out var cm, out var cv) && HotkeyText.Format(cm, cv) == got;
+            App.Log(configuredOk ? $"热键 {got} 已注册（{label}）" : $"热键 {label}: {text} 用不了，改用备用 {got}");
+            if (!configuredOk) NoteHotkeyFallback(label, text, got);
         }
         return failed;
+    }
+
+    /// <summary>备用组合生效时在岛上提示一次；同一组合以后不再提示（记在 %APPDATA%\Qisland\hotkey-notice.txt）。</summary>
+    private void NoteHotkeyFallback(string label, string configured, string active)
+    {
+        var key = $"{label}={active}";
+        var file = System.IO.Path.Combine(App.DataDir, "hotkey-notice.txt");
+        try
+        {
+            var seen = System.IO.File.Exists(file) ? System.IO.File.ReadAllLines(file) : [];
+            if (seen.Contains(key)) return;
+            System.IO.File.AppendAllLines(file, [key]);
+        }
+        catch { }
+        _store.Upsert(new IslandActivity("ai:hotkey:" + label, "translate", $"{label}快捷键：{active}",
+            $"{configured} 被别的程序占用了，已自动换成 {active}", ActivityKind.Info, 45, DurationSeconds: 8, ResetTtl: true));
     }
 
     private async void OnAiHotkey(bool ask)
