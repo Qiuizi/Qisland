@@ -595,6 +595,18 @@ public sealed partial class App : Application
             foreach (System.Windows.Forms.ToolStripMenuItem i in look.DropDownItems) i.Checked = i.Text == Theme.LookName(Theme.Current);
         };
         menu.Items.Add(look);
+        var motion = new System.Windows.Forms.ToolStripMenuItem("动效");
+        foreach (var (p, label) in new[] { (IslandWindow.MotionPref.Full, "完整（默认）"), (IslandWindow.MotionPref.System, "跟随系统"), (IslandWindow.MotionPref.Reduced, "精简") })
+        {
+            var item = new System.Windows.Forms.ToolStripMenuItem(label) { Tag = p };
+            item.Click += (_, _) => Dispatcher.BeginInvoke(() => _window?.SetMotionPref(p));
+            motion.DropDownItems.Add(item);
+        }
+        motion.DropDownOpening += (_, _) =>
+        {
+            foreach (System.Windows.Forms.ToolStripMenuItem i in motion.DropDownItems) i.Checked = (IslandWindow.MotionPref)i.Tag! == IslandWindow.MotionMode;
+        };
+        menu.Items.Add(motion);
         menu.Items.Add("导入课表（.ics）…", null, (_, _) => Dispatcher.BeginInvoke(ImportTimetable));
         var hwMenu = new System.Windows.Forms.ToolStripMenuItem("作业 DDL");
         var yktLogin = new System.Windows.Forms.ToolStripMenuItem("雨课堂：扫码登录…");

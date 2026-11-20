@@ -17,25 +17,63 @@ namespace Qisland.App;
 /// </summary>
 public sealed partial class IslandWindow
 {
-    // ───────────── 系统「动画效果」 ─────────────
+    // ───────────── 动效档位 ─────────────
 
-    private static bool _reducedMotion = !SystemParameters.ClientAreaAnimation;
-    /// <summary>设置 → 辅助功能 → 视觉效果 → 动画效果 关掉时为 true：弹簧改临界阻尼且更快，不胀大、不模糊、不逐行弹出，翻页只交叉淡入淡出。</summary>
+    /// <summary>
+    /// 完整（默认）：弹簧、胀大、模糊、摇铃全开，不管 Windows 的「动画效果」开关；
+    /// 跟随系统：Windows 关了动画效果就走精简；精简：临界阻尼且更快，不胀大、不模糊、不逐行弹出，翻页只交叉淡化。
+    /// 存在 %APPDATA%\Qisland\motion.txt。
+    /// </summary>
+    public enum MotionPref { Full, System, Reduced }
+
+    internal static MotionPref MotionMode { get; private set; } = MotionPref.Full;
+    private static bool _reducedMotion;
     internal static bool ReducedMotion => _reducedMotion;
+    private static string MotionFile => System.IO.Path.Combine(App.DataDir, "motion.txt");
+
+    public static string MotionName(MotionPref p) => p switch { MotionPref.System => "跟随系统", MotionPref.Reduced => "精简", _ => "完整" };
+
+    private static MotionPref LoadMotionPref()
+    {
+        try { return System.IO.File.Exists(MotionFile) && Enum.TryParse<MotionPref>(System.IO.File.ReadAllText(MotionFile).Trim(), out var p) ? p : MotionPref.Full; }
+        catch { return MotionPref.Full; }
+    }
+
+    private static void RecomputeReduced() => _reducedMotion = MotionMode switch
+    {
+        MotionPref.Reduced => true,
+        MotionPref.System => !SystemParameters.ClientAreaAnimation,
+        _ => false,
+    };
+
+    private static string MotionStatus() =>
+        $"动效：{MotionName(MotionMode)}（系统动画效果 {(SystemParameters.ClientAreaAnimation ? "开" : "关")}{(MotionMode == MotionPref.Full && !SystemParameters.ClientAreaAnimation ? "，已忽略" : "")}）→ {(_reducedMotion ? "精简" : "完整弹簧动效")}";
+
+    /// <summary>托盘里切档位。</summary>
+    public void SetMotionPref(MotionPref p)
+    {
+        MotionMode = p;
+        RecomputeReduced();
+        try { System.IO.File.WriteAllText(MotionFile, p.ToString()); } catch (Exception ex) { App.Log("动效设置保存失败: " + ex.Message); }
+        App.Log(MotionStatus());
+        SetMode(_mode);
+    }
 
     private void SetupMotion()
     {
+        MotionMode = LoadMotionPref();
+        RecomputeReduced();
+        App.Log(MotionStatus());
         // WPF 收到 WM_SETTINGCHANGE 会刷新 SystemParameters 并发这个事件，不用自己挂 WndProc
         SystemParameters.StaticPropertyChanged += (_, e) =>
         {
-            if (e.PropertyName != nameof(SystemParameters.ClientAreaAnimation)) return;
-            var r = !SystemParameters.ClientAreaAnimation;
-            if (r == _reducedMotion) return;
-            _reducedMotion = r;
-            App.Log($"系统动画效果 {(r ? "关" : "开")}");
+            if (e.PropertyName != nameof(SystemParameters.ClientAreaAnimation) || MotionMode != MotionPref.System) return;
+            var was = _reducedMotion;
+            RecomputeReduced();
+            if (was == _reducedMotion) return;
+            App.Log(MotionStatus());
             Dispatcher.BeginInvoke(() => SetMode(_mode));
         };
-        if (_reducedMotion) App.Log("系统动画效果已关：动效改为快速淡入淡出");
     }
 
     private static void TuneP(Spring s, (double response, double zeta) p)
