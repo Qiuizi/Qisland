@@ -366,6 +366,15 @@ public sealed partial class IslandWindow : Window
         if (_mode == Mode.Expanded && (!_animating || _page == Page.Todo) && _page is Page.Todo or Page.Widgets or Page.Home) RebuildExpanded();
     }
 
+    /// <summary>切到还没有数据的城市：先空着，不显示上一个城市的天气。</summary>
+    public void ClearWeather()
+    {
+        _weather = null;
+        _wx = null;
+        RebuildIdle();
+        _expDirty = true;
+    }
+
     public void SetWeather(WeatherSnapshot w, WeatherDetail? detail)
     {
         _weather = w;

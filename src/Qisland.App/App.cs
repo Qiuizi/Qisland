@@ -560,6 +560,7 @@ public sealed partial class App : Application
             var wait = TimeSpan.FromMinutes(15);   // Open-Meteo 的实况每 15 分钟更新一次
             var ok = false;
             var city = WeatherCityList.Current;
+            var cityKey = CityKey(city);   // 记下发请求时的城市，结果按它入缓存
             var place = city != null ? new WeatherPlace(city.Label, city.Query) : LoadWeatherPlace();
             _weatherWake = new TaskCompletionSource();
             WeatherDetail? wttr = null;
@@ -567,7 +568,7 @@ public sealed partial class App : Application
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
                 wttr = WttrParser.Parse(await Http.GetStringAsync(place.WttrUrl, cts.Token), DateTime.Now);
-                if (wttr?.Lat is { } la && wttr.Lon is { } lo && city == null) _lastCoords = (la, lo);
+                if (wttr?.Lat is { } la && wttr.Lon is { } lo && city == null && WeatherCityList.Current == null) _lastCoords = (la, lo);
             }
             catch (Exception ex) { Log("wttr: " + ex.Message); }
             var label = place.Display.Length > 0 ? place.Display : wttr?.Area ?? "";
@@ -581,13 +582,13 @@ public sealed partial class App : Application
                     if (f != null)
                     {
                         var d = WeatherDetail.FromForecast(f, wttr, DateTime.Now);
-                        ShowWeather(label, d.Now, d);
+                        ShowWeather(cityKey, label, d.Now, d);
                         ok = true;
                     }
                 }
                 catch (Exception ex) { Log("Open-Meteo: " + ex.Message); }
             }
-            if (!ok && wttr != null) { ShowWeather(label, wttr.Now, wttr); ok = true; }
+            if (!ok && wttr != null) { ShowWeather(cityKey, label, wttr.Now, wttr); ok = true; }
             if (!ok) wait = TimeSpan.FromMinutes(3);
             await Task.WhenAny(Nap(wait), _weatherWake.Task);
         }

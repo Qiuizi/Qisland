@@ -15,8 +15,13 @@ public sealed partial class App
     private static WeatherCities? _cities;
     public static WeatherCities WeatherCityList => _cities ??= WeatherCities.FromJson(File.Exists(CitiesFile) ? SafeRead(CitiesFile) : null);
     private TaskCompletionSource _weatherWake = new();
-    /// <summary>每个城市最近一份天气：切城市时先显示缓存，再联网刷新。键 = 城市标签（自动定位用空串）。</summary>
-    private readonly Dictionary<string, (WeatherSnapshot Now, WeatherDetail Detail, string Label)> _wxCache = [];
+    /// <summary>
+    /// 每个城市最近一份天气：切城市时先显示缓存，再联网刷新。键 = 城市标签（自动定位用空串）。
+    /// 结果按「请求发出时的城市」入缓存，只有那个城市仍是当前选中时才更新界面 / 发提醒。
+    /// </summary>
+    private readonly CityResults<WeatherShown> _wx = new();
+    private sealed record WeatherShown(WeatherSnapshot Now, WeatherDetail Detail, string Label);
+    private static string CityKey(WeatherCity? c) => c?.Label ?? "";
     private readonly HashSet<string> _alerted = [];
 
     private static string SafeRead(string f) { try { return File.ReadAllText(f); } catch { return ""; } }
@@ -27,10 +32,12 @@ public sealed partial class App
         catch (Exception ex) { Log("保存天气城市: " + ex.Message); }
     }
 
-    private void ShowWeather(string label, WeatherSnapshot now, WeatherDetail d)
+    /// <param name="cityKey">请求发出时选中的城市（不是现在的）。</param>
+    private void ShowWeather(string cityKey, string label, WeatherSnapshot now, WeatherDetail d)
     {
+        _wx.Select(CityKey(WeatherCityList.Current));
+        if (!_wx.Commit(cityKey, new WeatherShown(now, d, label))) return;   // 期间换了城市：只进缓存，不改界面、不发提醒
         WeatherLabel = label;
-        _wxCache[WeatherCityList.Current?.Label ?? ""] = (now, d, label);
         _window?.SetWeather(now, d);
         AnnounceWeatherAlerts(d);
     }
@@ -41,9 +48,14 @@ public sealed partial class App
         var list = WeatherCityList;
         list.Active = index >= 0 && index < list.Saved.Count ? index : -1;
         SaveCities();
-        var key = list.Current?.Label ?? "";
-        if (_wxCache.TryGetValue(key, out var c)) { WeatherLabel = c.Label; _window?.SetWeather(c.Now, c.Detail); }
-        else if (list.Current is { } city) WeatherLabel = city.Label;
+        _wx.Select(CityKey(list.Current));
+        if (_wx.Shown is { } c) { WeatherLabel = c.Label; _window?.SetWeather(c.Now, c.Detail); }
+        else
+        {
+            // 新城市还没有数据：清掉上一个城市的天气，不拿它冒充（刷新失败也不会一直显示错的）
+            WeatherLabel = list.Current?.Label ?? "";
+            _window?.ClearWeather();
+        }
         Log($"天气城市 → {(list.Current == null ? "自动定位" : "已保存城市 #" + (list.Active + 1))}");  // 不把地名写进日志
         RefreshWeatherNow();
     }
