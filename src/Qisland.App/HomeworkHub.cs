@@ -13,7 +13,7 @@ public sealed class HomeworkHub
     public const string Source = "homework";
     private static string CachePath => Path.Combine(App.DataDir, "homework-cache.json");
     private readonly ActivityStore _store;
-    private readonly Dictionary<string, List<HomeworkItem>> _byPlatform = [];
+    private HomeworkBook _book = new();
     private readonly HashSet<string> _live = [];
     public event Action? Changed;
 
@@ -22,9 +22,7 @@ public sealed class HomeworkHub
         _store = store;
         if (load) try
         {
-            if (File.Exists(CachePath))
-                foreach (var g in (JsonSerializer.Deserialize<List<HomeworkItem>>(File.ReadAllText(CachePath)) ?? []).GroupBy(i => i.Platform))
-                    _byPlatform[g.Key] = g.ToList();
+            if (File.Exists(CachePath)) _book = HomeworkBook.FromJson(File.ReadAllText(CachePath));
         }
         catch { }
     }
@@ -33,18 +31,32 @@ public sealed class HomeworkHub
     public IReadOnlyList<HomeworkItem> Pending()
     {
         var now = DateTime.Now;
-        return _byPlatform.Values.SelectMany(x => x).Where(i => !i.Done && i.Deadline > now).OrderBy(i => i.Deadline).ToList();
+        return _book.All.Where(i => !i.Done && i.Deadline > now).OrderBy(i => i.Deadline).ToList();
     }
 
     /// <summary>某个平台上次拉到的全部条目（拉取时有课程失败，就沿用这些课程的旧数据）。</summary>
-    public IReadOnlyList<HomeworkItem> Previous(string platform) => _byPlatform.TryGetValue(platform, out var l) ? l.ToList() : [];
+    public IReadOnlyList<HomeworkItem> Previous(string platform) => _book.Items(platform);
 
     public void Update(string platform, IReadOnlyList<HomeworkItem> items)
     {
-        _byPlatform[platform] = items.ToList();
-        try { File.WriteAllText(CachePath, JsonSerializer.Serialize(_byPlatform.Values.SelectMany(x => x).ToList())); } catch { }
+        _book.Update(platform, items);
+        WriteCache(_book.ToJson());
+        Refreshed();
+    }
+
+    /// <summary>某个平台自己的提交流程（带会话代数，见 <see cref="HomeworkSync"/>）：共用这里的列表和缓存文件。</summary>
+    public HomeworkSync Sync() => new(_book, WriteCache);
+
+    /// <summary>列表变了（提交 / 退出登录之后）：重算提醒、通知界面。</summary>
+    public void Refreshed()
+    {
         Tick();
         Changed?.Invoke();
+    }
+
+    private static void WriteCache(string json)
+    {
+        if (!AtomicFile.TryWrite(CachePath, new System.Text.UTF8Encoding(false).GetBytes(json), out var err)) App.Log("作业缓存写入失败: " + err);
     }
 
     /// <summary>截图演示用：不写缓存、不上岛。</summary>
@@ -52,24 +64,24 @@ public sealed class HomeworkHub
     {
         var h = new HomeworkHub(store, load: false);
         var n = DateTime.Now;
-        h._byPlatform["雨课堂"] = [
+        h._book.Set("雨课堂", [
             new("雨课堂", "概率论与数理统计", "第 9 章 习题课后测", n.AddHours(2.4), false),
             new("雨课堂", "计算机组成原理", "实验三 报告提交", n.AddHours(20), false),
-        ];
-        h._byPlatform["学习通"] = [new("学习通", "形势与政策", "专题四 讨论作业", n.AddDays(3).AddHours(1), false)];
+        ]);
+        h._book.Set("学习通", [new("学习通", "形势与政策", "专题四 讨论作业", n.AddDays(3).AddHours(1), false)]);
         return h;
     }
 
     public void Clear(string platform)
     {
-        if (_byPlatform.Remove(platform)) Update(platform, []);
+        if (_book.Clear(platform)) { WriteCache(_book.ToJson()); Refreshed(); }
     }
 
     /// <summary>交了但老师还没批的（雨课堂主观题待批改、学习通「待批阅」），截止前后几天内的。</summary>
     public IReadOnlyList<HomeworkItem> Submitted()
     {
         var since = DateTime.Now.AddDays(-2);
-        return _byPlatform.Values.SelectMany(x => x).Where(i => i.Done && i.Ungraded && i.Deadline > since).OrderBy(i => i.Deadline).ToList();
+        return _book.All.Where(i => i.Done && i.Ungraded && i.Deadline > since).OrderBy(i => i.Deadline).ToList();
     }
 
     // 每项作业已经提醒到哪一档（24 / 3 / 1 小时），存盘，重启后不重复弹

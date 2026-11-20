@@ -90,3 +90,38 @@ public sealed class SessionJar
         }
     }
 }
+
+/// <summary>
+/// 会话代数（不带 Cookie 的版本，给 Cookie 放在 CookieContainer 里的平台用，比如学习通）。
+/// 退出登录 / 换账号 <see cref="Bump"/>；刷新开始时取 <see cref="Current"/>，提交时 <see cref="TryCommit"/> 检查还是不是这一代。
+/// 提交和退出登录的清理在同一把锁里排队：退出登录之后不会再有旧会话的写盘。
+/// </summary>
+public sealed class SessionEpoch
+{
+    private readonly object _lock = new();
+    private readonly object _disk = new();
+    private long _gen = 1;
+
+    public long Current { get { lock (_lock) return _gen; } }
+    public bool IsCurrent(long gen) { lock (_lock) return gen == _gen; }
+
+    /// <summary>换一代（在途的请求立刻作废），再在写盘锁里执行 wipe（排在正在进行的提交之后）。</summary>
+    public long Bump(Action? wipe = null)
+    {
+        long g;
+        lock (_lock) g = ++_gen;
+        if (wipe != null) lock (_disk) wipe();
+        return g;
+    }
+
+    /// <summary>gen 仍是当前代才执行 commit（在写盘锁里检查）。</summary>
+    public bool TryCommit(long gen, Action commit)
+    {
+        lock (_disk)
+        {
+            if (!IsCurrent(gen)) return false;
+            commit();
+            return true;
+        }
+    }
+}

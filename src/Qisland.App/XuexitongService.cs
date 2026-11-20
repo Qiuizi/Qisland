@@ -23,6 +23,8 @@ public sealed partial class XuexitongService
 
     private readonly HomeworkHub _hub;
     private readonly ActivityStore _store;
+    // 会话代数：退出登录 / 换账号换一代，旧一代的拉取结果不能写回作业列表、缓存、Cookie 和登录状态
+    private readonly HomeworkSync _sync;
     private CookieContainer? _jar;
     private DateTime _next;
     private bool _busy;
@@ -41,6 +43,7 @@ public sealed partial class XuexitongService
     public XuexitongService(HomeworkHub hub, ActivityStore store)
     {
         _hub = hub; _store = store;
+        _sync = hub.Sync();
         if (Dpapi.Load(CredPath) is { } json)
         {
             try
@@ -113,6 +116,7 @@ public sealed partial class XuexitongService
                     status("这个账号开了二次验证，Qisland 暂不支持");
                     return false;
                 }
+                _sync.NewSession();   // 新登录 / 换号：之前在途的拉取全部作废
                 _jar = qr.Jar;
                 Expired = false;
                 UserName = o.TryGetProperty("nickname", out var nn) ? nn.GetString() : null;
@@ -142,9 +146,10 @@ public sealed partial class XuexitongService
 
     public void Logout()
     {
+        // 先换代（在途的拉取回来后什么都不能改），再删凭据、清作业缓存（排在正在进行的提交之后）
+        _sync.Logout(Platform, () => { try { File.Delete(CredPath); } catch { } });
         _jar = null; UserName = null; Expired = false; ExpiresAt = null;
-        try { File.Delete(CredPath); } catch { }
-        _hub.Clear(Platform);
+        _hub.Refreshed();
         _store.Remove("xxt:expired");
         Changed?.Invoke();
     }
@@ -164,35 +169,43 @@ public sealed partial class XuexitongService
     {
         _busy = true;
         _next = DateTime.Now.AddMinutes(30);
+        var ticket = _sync.Begin();
+        var jar = _jar!;
         try
         {
-            var items = await Task.Run(Fetch);
+            var items = await Task.Run(() => Fetch(jar, ticket));
             if (items == null) return;
+            // 会话没变才提交：存 Cookie（服务器可能续期了）、更新作业列表、写缓存；退出 / 换号后的旧结果直接丢掉
+            if (!_sync.Commit(ticket, Platform, items, Persist)) { App.Log("学习通: 会话已切换，丢弃这次拉取的结果"); return; }
             LastOk = DateTime.Now;
-            Persist(); // 服务器可能续期了 Cookie
-            _hub.Update(Platform, items);
+            _hub.Refreshed();
             App.Log($"学习通: {items.Count} 项未交");
         }
-        catch (AntiSpiderException) { App.Log("学习通: 触发了验证页，2 小时后再试"); _next = DateTime.Now.AddHours(2); }
-        catch (Exception ex) { App.Log("学习通: " + ex.Message); _next = DateTime.Now.AddMinutes(10); }
+        catch (StaleSession) { App.Log("学习通: 会话已切换，丢弃这次拉取"); }
+        catch (AntiSpiderException) when (_sync.IsCurrent(ticket)) { App.Log("学习通: 触发了验证页，2 小时后再试"); _next = DateTime.Now.AddHours(2); }
+        catch (Exception ex) when (_sync.IsCurrent(ticket)) { App.Log("学习通: " + ex.Message); _next = DateTime.Now.AddMinutes(10); }
+        catch (Exception) { App.Log("学习通: 会话已切换，丢弃这次拉取的结果"); }
         finally { _busy = false; Changed?.Invoke(); }
     }
 
     private sealed class AntiSpiderException : Exception;
+    private sealed class StaleSession : Exception;
 
-    private async Task<string?> Get(HttpClient h, string url)
+    private async Task<string?> Get(HttpClient h, long ticket, string url)
     {
+        if (!_sync.IsCurrent(ticket)) throw new StaleSession();   // 已经退出 / 换号：不再发后面的请求
         using var res = await h.GetAsync(url);
+        if (!_sync.IsCurrent(ticket)) throw new StaleSession();
         var final = res.RequestMessage?.RequestUri?.ToString() ?? "";
         var text = await res.Content.ReadAsStringAsync();
         if (final.Contains("antispider", StringComparison.OrdinalIgnoreCase) || text.Contains("antispiderShowVerify")) throw new AntiSpiderException();
-        if (final.Contains("passport2.chaoxing.com/login") || text.Contains("<title>用户登录</title>")) { MarkExpired(); return null; }
+        if (final.Contains("passport2.chaoxing.com/login") || text.Contains("<title>用户登录</title>")) { MarkExpired(ticket); return null; }
         return text;
     }
 
-    private void MarkExpired()
+    private void MarkExpired(long ticket)
     {
-        if (Expired) return;
+        if (Expired || !_sync.IsCurrent(ticket)) return;
         Expired = true;
         App.Current.Dispatcher.BeginInvoke(() =>
         {
@@ -205,15 +218,15 @@ public sealed partial class XuexitongService
 
     private sealed record Course(string Name, string Id, string Clazz, string Cpi);
 
-    private async Task<List<HomeworkItem>?> Fetch()
+    private async Task<List<HomeworkItem>?> Fetch(CookieContainer jar, long ticket)
     {
-        using var h = NewHttp(_jar!);
-        var basePage = await Get(h, "https://i.chaoxing.com/base");
+        using var h = NewHttp(jar);
+        var basePage = await Get(h, ticket, "https://i.chaoxing.com/base");
         if (basePage == null) return null;
         var fm = Regex.Match(basePage, "\"fid\"\\s*:\\s*\"?(\\d+)\"?");
         if (!fm.Success) fm = Regex.Match(basePage, "var fid = '(\\d+)'");
         var fid = fm.Success ? fm.Groups[1].Value : "0";
-        var list = await Get(h, $"https://mooc2-ans.chaoxing.com/mooc2-ans/visit/courselistdata?courseType=1&courseFid={fid}&courseTeacherid=0&courseOrderBy=0");
+        var list = await Get(h, ticket, $"https://mooc2-ans.chaoxing.com/mooc2-ans/visit/courselistdata?courseType=1&courseFid={fid}&courseTeacherid=0&courseOrderBy=0");
         if (list == null) return null;
         Dump("courses.html", list);
         var courses = ParseCourses(list).Take(20).ToList();
@@ -223,13 +236,13 @@ public sealed partial class XuexitongService
         foreach (var c in courses)
         {
             await Task.Delay(700);
-            var mid = await Get(h, $"https://mooc1.chaoxing.com/visit/stucoursemiddle?courseid={c.Id}&clazzid={c.Clazz}&cpi={c.Cpi}&ismooc2=1&v=2");
+            var mid = await Get(h, ticket, $"https://mooc1.chaoxing.com/visit/stucoursemiddle?courseid={c.Id}&clazzid={c.Clazz}&cpi={c.Cpi}&ismooc2=1&v=2");
             if (mid == null) return null;
             var workEnc = Hidden(mid, "workEnc");
             if (workEnc.Length == 0) continue; // 这门课没开作业
             var t = DateTimeOffset.Now.ToUnixTimeMilliseconds();
             await Task.Delay(400);
-            var wl = await Get(h, $"https://mooc1.chaoxing.com/mooc2/work/list?courseId={c.Id}&classId={c.Clazz}&cpi={c.Cpi}&ut=s&openc={Hidden(mid, "openc")}&enc={workEnc}&t={t}&stuenc={Hidden(mid, "enc")}&isdisplaytable=2");
+            var wl = await Get(h, ticket, $"https://mooc1.chaoxing.com/mooc2/work/list?courseId={c.Id}&classId={c.Clazz}&cpi={c.Cpi}&ut=s&openc={Hidden(mid, "openc")}&enc={workEnc}&t={t}&stuenc={Hidden(mid, "enc")}&isdisplaytable=2");
             if (wl == null) return null;
             if (dumped++ < 2) Dump($"work-{c.Id}.html", wl);
             foreach (Match m in WorkItem().Matches(wl))
@@ -252,7 +265,7 @@ public sealed partial class XuexitongService
                     if (!_deadlineCache.TryGetValue(url, out dl))
                     {
                         await Task.Delay(500);
-                        var detail = await Get(h, url);
+                        var detail = await Get(h, ticket, url);
                         if (detail == null) return null;
                         dl = ParseDeadline(detail, now);
                         _deadlineCache[url] = dl;
