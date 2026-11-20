@@ -3,5 +3,5 @@ $ErrorActionPreference = "Stop"
 $push = Join-Path $PSScriptRoot "..\qisland-push.ps1"
 $raw = [Console]::In.ReadToEnd()
 if ([string]::IsNullOrWhiteSpace($raw) -and $args.Count -gt 0) { $raw = $args -join " " }
-& $push -Body $raw
+& $push -Body $raw -Type hook
 exit $LASTEXITCODE

@@ -110,7 +110,8 @@ public enum PayloadRoute { Auto, Push, Ingest }
 
 /// <summary>
 /// 收件箱和 HTTP 接口共用的唯一入口：JSON 只解析一次，按顶层字段选解析器，结果格式相同，两条路不会走岔。
-/// 自动判定：顶层是数组，或顶层对象有 kind / activities 属性 → 接入格式（QislandIngest）；否则 → 普通推送。
+/// 消息顶层的 <c>$type</c> 是明确类别：push / ingest / hook 优先于入口和自动判定。
+/// 没有类别时，和 <see cref="QislandIngest.Recognizes"/> 用同一份识别规则；普通卡片走推送解析，保住进度和明确时长。
 /// 只看顶层属性名，不看正文：标题、正文里出现 "kind" 不影响。
 /// </summary>
 public static class IslandPayload
@@ -124,12 +125,7 @@ public static class IslandPayload
         using (doc)
         {
             var root = doc.RootElement;
-            var ingest = route switch
-            {
-                PayloadRoute.Ingest => true,
-                PayloadRoute.Push => false,
-                _ => IsIngest(root),
-            };
+            var ingest = Resolve(root, route) == PayloadRoute.Ingest;
             if (ingest)
                 return QislandIngest.TryParse(root, out var drafts, out var err)
                     ? new(true, drafts.Select(d => (d, (double?)null)).ToList(), null)
@@ -140,8 +136,21 @@ public static class IslandPayload
         }
     }
 
-    /// <summary>按顶层结构判定是不是接入格式。</summary>
-    public static bool IsIngest(JsonElement root) =>
-        root.ValueKind == JsonValueKind.Array
-        || (root.ValueKind == JsonValueKind.Object && (root.TryGetProperty("kind", out _) || root.TryGetProperty("activities", out _)));
+    /// <summary>明确类别优先；没有就按内容自动判定。两个 HTTP 入口和收件箱都走这一条。</summary>
+    private static PayloadRoute Resolve(JsonElement root, PayloadRoute route)
+    {
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("$type", out var type) && type.ValueKind == JsonValueKind.String)
+        {
+            switch ((type.GetString() ?? "").Trim().ToLowerInvariant())
+            {
+                case "push": return PayloadRoute.Push;
+                case "ingest":
+                case "hook": return PayloadRoute.Ingest;
+            }
+        }
+        return IsIngest(root) ? PayloadRoute.Ingest : PayloadRoute.Push;
+    }
+
+    /// <summary>按顶层结构判定是不是接入格式（和 QislandIngest 共用识别规则）。</summary>
+    public static bool IsIngest(JsonElement root) => QislandIngest.Recognizes(root);
 }

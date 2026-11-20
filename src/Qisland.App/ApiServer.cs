@@ -130,7 +130,7 @@ public sealed class ApiServer : IDisposable
 
         if (method == "POST" && path == "/v1/qisland/ingest")
         {
-            // 和收件箱同一个入口（IslandPayload），同一份数据两条路结果一致
+            // 和收件箱同一个入口（IslandPayload）：没有类别时按内容判定，有 $type 时照它走
             var r = IslandPayload.Decode(body, PayloadRoute.Ingest);
             if (!r.Ok) return (400, $"{{\"ok\":false,\"error\":{JsonSerializer.Serialize(r.Error)}}}");
             var drafts = r.Cards;
@@ -168,12 +168,13 @@ public sealed class ApiServer : IDisposable
 
         if (method == "POST" && (path is "/v1/island/push" or "/v3/island/push" or "/push"))
         {
+            // 老入口保留：普通推送、原始 hook 或接入消息都可以进来，解析规则和收件箱一致
             var r = IslandPayload.Decode(body, PayloadRoute.Push);
-            if (!r.Ok || r.Cards.Count == 0)
-                return (400, $"{{\"ok\":false,\"error\":{JsonSerializer.Serialize(r.Error ?? "需要 title")}}}");
-            var (d, progress) = r.Cards[0];
-            _post(() => _store.Upsert(d, progress));
-            return (200, $"{{\"ok\":true,\"id\":{JsonSerializer.Serialize(d.Id)}}}");
+            if (!r.Ok) return (400, $"{{\"ok\":false,\"error\":{JsonSerializer.Serialize(r.Error)}}}");
+            var drafts = r.Cards;
+            _post(() => { foreach (var (d, progress) in drafts) _store.Upsert(d, progress); });
+            var id = drafts.Count == 1 ? JsonSerializer.Serialize(drafts[0].Draft.Id) : "null";
+            return (200, $"{{\"ok\":true,\"accepted\":{drafts.Count},\"id\":{id}}}");
         }
 
         if (method == "POST" && path.StartsWith("/v1/agent/", StringComparison.Ordinal))

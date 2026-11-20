@@ -7,5 +7,5 @@ if ([string]::IsNullOrWhiteSpace($raw) -or -not $raw.TrimStart().StartsWith("{")
     $stdin = [Console]::In.ReadToEnd()
     if (-not [string]::IsNullOrWhiteSpace($stdin)) { $raw = $stdin }
 }
-& $push -Body $raw
+& $push -Body $raw -Type ingest
 exit $LASTEXITCODE

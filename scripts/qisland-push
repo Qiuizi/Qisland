@@ -2,12 +2,29 @@
 # 从标准输入读 JSON，推到 Windows 上的 Qisland。
 # 镜像网络：127.0.0.1 即可。
 # NAT：再试 resolv.conf 的 nameserver；仍失败就把文件写到 Windows 收件箱。
+# 只投一个入口；消息带上 $type，由 Qisland 按类别解析，脚本不再自己挑接口。
 set -u
 PORT="${QISLAND_PORT:-9840}"
 TOKEN="${QISLAND_TOKEN:-}"
+TYPE="${QISLAND_TYPE:-push}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --type=*) TYPE="${1#*=}"; shift ;;
+    --type) TYPE="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "$TYPE" in
+  push|ingest|hook) ;;
+  *) TYPE="push" ;;
+esac
 BODY="$(cat)"
 if [ -z "$BODY" ]; then
   exit 0
+fi
+BODY="$(printf '%s' "$BODY" | sed -e 's/^[[:space:]]*//')"
+if [ "${BODY#\{}" != "$BODY" ] && ! printf '%s' "$BODY" | grep -q '"\$type"[[:space:]]*:'; then
+  BODY="{\"\$type\":\"${TYPE}\",${BODY:1}"
 fi
 
 post() {
@@ -24,11 +41,7 @@ post() {
   fi
 }
 
-# 有 title 且不是 hook 原文时走通用推送，否则走 ingest。
 PATH_SUFFIX="/v1/qisland/ingest"
-if printf '%s' "$BODY" | grep -q '"title"' && ! printf '%s' "$BODY" | grep -Eq '"hook_event_name"|"source"|"kind"'; then
-  PATH_SUFFIX="/v3/island/push"
-fi
 
 if post "http://127.0.0.1:${PORT}${PATH_SUFFIX}" >/dev/null; then
   exit 0

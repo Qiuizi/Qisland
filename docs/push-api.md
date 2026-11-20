@@ -2,6 +2,16 @@
 
 任何本机程序都可以把一条活动推到 Qisland。服务只听 `127.0.0.1`，默认端口 `9840`。设置里如果填了 Token，请求要带 `X-Qisland-Token` 或原来的 `X-WinIslands-Token`。
 
+消息可以带一个顶层 `$type` 说明自己是什么：
+
+| `$type` | 含义 |
+|---|---|
+| `push` | 已经排好版的卡片（`title` / `body` / `progress` / `duration_seconds`…） |
+| `ingest` | 来源自己的事件 JSON（Claude / Codex / 规范化会话 / JARVIS / 课程快照…） |
+| `hook` | 原始 hook JSON（`hook_event_name` 等） |
+
+有 `$type` 就照它解析，投到哪个入口都一样。没有 `$type` 的旧消息按 JSON 顶层字段自动判定；收件箱和 HTTP 用的是同一套规则。标题或正文里出现 `kind`、`activities` 不会让一张普通卡片被当成接入消息。
+
 ## 直接推一张卡片
 
 `POST /v1/island/push` 和 `POST /v3/island/push` 是 WinIslands 原来的接口，字段没有改。
@@ -147,7 +157,7 @@ urllib.request.urlopen(req).read()
 
 ## WSL2
 
-`scripts/qisland-push` 从标准输入读 JSON。
+`scripts/qisland-push` 从标准输入读 JSON，默认按普通卡片（`push`）处理。发原始 hook 时加 `--type hook`，发接入消息时加 `--type ingest`。脚本总是投 `/v1/qisland/ingest`，由 Qisland 按 `$type` 解析，不再自己判断入口。
 
 镜像网络（`networkingMode=mirrored`）：WSL 里的 `127.0.0.1` 就是 Windows，直接打到 `9840`。
 
@@ -160,7 +170,7 @@ Qisland 每几秒读一次这个目录，读完就删。所以两种模式都能
 ```bash
 # 在 WSL 里
 export WIN_USER=你的Windows用户名   # 认不出用户名时再设
-echo '{"hook_event_name":"Stop","session_id":"wsl-1"}' | bash /mnt/c/path/to/scripts/qisland-push
+echo '{"hook_event_name":"Stop","session_id":"wsl-1"}' | bash /mnt/c/path/to/scripts/qisland-push --type hook
 ```
 
 Claude 如果装在 WSL 里，把 hook 命令写成这个脚本，而不是 Windows 的 PowerShell。
