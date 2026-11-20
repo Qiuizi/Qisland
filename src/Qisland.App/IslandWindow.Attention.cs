@@ -88,7 +88,7 @@ public sealed partial class IslandWindow
         var wasHidden = _hidden;
         _benchShowUntil = DateTime.Now.AddSeconds(Perf.Has("pages") ? 9 : 10);
         if (_hidden) { _hidden = false; _show.Snap(1); ApplyFrame(); if (_glass.Host.Visibility == System.Windows.Visibility.Visible) _glass.Refresh(); }
-        App.Log($"bench flags: {Perf.Text} · hidden={wasHidden} glass={_glass.Host.Visibility} dpi={System.Windows.Media.VisualTreeHelper.GetDpi(this).DpiScaleX} hz={App.Hz}/{PerfGuard.Hz}");
+        App.Log($"bench flags: {Perf.Text} · hidden={wasHidden} glass={_glassRender} dpi={System.Windows.Media.VisualTreeHelper.GetDpi(this).DpiScaleX} hz={App.Hz}/{PerfGuard.Hz}");
         var i = 0;
         if (Perf.Has("noaff"))
         {

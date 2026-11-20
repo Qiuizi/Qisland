@@ -163,6 +163,10 @@ public sealed partial class IslandWindow : Window
         SetupMotion();
         Loaded += (_, _) => { App.Log($"render tier {RenderCapability.Tier >> 16}, layered={_layered}"); PlaceOnScreen(); OnSecond(); RebuildIdle(); ApplyFrame(); _poll.Start(); _tick.Start(); };
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) => Dispatcher.BeginInvoke(PlaceOnScreen);
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged += (_, e) => { if (e.Category is Microsoft.Win32.UserPreferenceCategory.General or Microsoft.Win32.UserPreferenceCategory.Color or Microsoft.Win32.UserPreferenceCategory.VisualStyle) Dispatcher.BeginInvoke(OnSystemLookChanged); };
+        LocationChanged += (_, _) => _sys?.Follow();
+        SizeChanged += (_, _) => _sys?.Follow();
+        Closed += (_, _) => _sys?.Dispose();
     }
 
     // ───────────────────────────── 外壳 ─────────────────────────────
@@ -532,6 +536,11 @@ public sealed partial class IslandWindow : Window
         _root.Opacity = show;
         (_rootShift.X, _rootShift.Y) = IslandLayout.HideShift(Dock, show, w, h, TopGap);
         UpdateHitRegion(left, w, h, r, bo, show);
+        if (_sysOn && _sys != null)
+        {
+            var s = VisualTreeHelper.GetDpi(this).DpiScaleX;
+            _sys.Update(left * s, top * s, w * s, h * s, r * s, show, _rootShift.X * s, _rootShift.Y * s);
+        }
     }
 
     // ───────────────────────────── 外观 ─────────────────────────────
@@ -568,7 +577,49 @@ public sealed partial class IslandWindow : Window
     // 所以玻璃外观不用系统模糊，只用半透明白 + 高光描边 + 顶部反光，窗口始终保持透明扩展。
     private GlassBackdrop _glass = null!;
     private Action? _afterSettle;
-    private void SetGlass(bool on) { if (!_layered && !SnapshotMode) _glass.Enable(_hwnd, on); }
+    // 玻璃背景：默认系统合成模糊（SystemGlass 底板窗口），Win10 / 合成不可用 / 用户选了截屏时退回 GlassBackdrop 截屏模糊
+    internal static GlassMode GlassModePref = GlassMode.System;
+    private SystemGlass? _sys;
+    private bool _sysOn;
+    private GlassRender _glassRender = GlassRender.None;
+    internal GlassRender GlassState => _glassRender;
+
+    private void SetGlass(bool on)
+    {
+        if (_layered || SnapshotMode || _hwnd == IntPtr.Zero) return;
+        var want = on ? GlassPref.Resolve(GlassModePref, Environment.OSVersion.Version.Build, SystemLook.TransparencyOn) : GlassRender.None;
+        var sys = want is GlassRender.SystemBlur or GlassRender.SystemSolid;
+        if (sys)
+        {
+            _sys ??= new SystemGlass(_hwnd);
+            if (!_sys.Create()) { want = SystemLook.TransparencyOn ? GlassRender.Capture : GlassRender.None; sys = false; }
+            else _sys.SetSolid(want == GlassRender.SystemSolid, !SystemLook.AppsLight);
+        }
+        if (!sys) _sys?.Show(false);
+        if (sys && !_sysOn) _lastRgn = (-1, -1, -1, -1, -1, -1); // 下一帧把窗口形状也抄给底板
+        _sysOn = sys;
+        _glass.Enable(_hwnd, want == GlassRender.Capture);
+        if (want != _glassRender) App.Log($"玻璃背景: {want}（设置 {GlassPref.Serialize(GlassModePref)}，系统 {Environment.OSVersion.Version.Build}，透明效果 {(SystemLook.TransparencyOn ? "开" : "关")}）");
+        _glassRender = want;
+    }
+
+    /// <summary>托盘 / 设置里换玻璃背景做法。</summary>
+    public void SetGlassMode(GlassMode m)
+    {
+        GlassModePref = m;
+        App.SaveGlass(m);
+        SetGlass(Theme.IsGlass);
+        ApplyFrame();
+    }
+
+    /// <summary>系统「透明效果」或深浅色改了：重新决定玻璃背景。</summary>
+    private void OnSystemLookChanged()
+    {
+        SystemLook.Refresh();
+        if (!Theme.IsGlass) return;
+        SetGlass(true);
+        ApplyFrame();
+    }
 
     /// <summary>要截的那块：当前尺寸和弹簧目标尺寸里更大的那个，再外扩一点，动画途中边缘也有底。</summary>
     private Rect? GlassArea()
@@ -637,6 +688,7 @@ public sealed partial class IslandWindow : Window
                 Native.DeleteObject(b);
             }
         }
+        if (_sysOn && _sys != null) { var copy = Native.CreateRectRgn(0, 0, 0, 0); Native.CombineRgn(copy, rgn, IntPtr.Zero, 5 /*RGN_COPY*/); _sys.SetRegion(copy); }
         Native.SetWindowRgn(_hwnd, rgn, false); // 系统接管 rgn，不用 DeleteObject
     }
 

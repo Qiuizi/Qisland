@@ -186,3 +186,30 @@ public class FrameStatsTests
         Assert.Equal(0, FrameStats.Percentile(Array.Empty<double>(), 0.95));
     }
 }
+
+public class GlassPrefTests
+{
+    [Theory]
+    [InlineData(null, GlassMode.System)]
+    [InlineData("", GlassMode.System)]
+    [InlineData(" Capture \r\n", GlassMode.Capture)]
+    [InlineData("off", GlassMode.Off)]
+    [InlineData("weird", GlassMode.System)]
+    public void Parses(string? text, GlassMode want) => Assert.Equal(want, GlassPref.Parse(text));
+
+    [Fact]
+    public void RoundTrips()
+    {
+        foreach (var m in Enum.GetValues<GlassMode>()) Assert.Equal(m, GlassPref.Parse(GlassPref.Serialize(m)));
+    }
+
+    [Theory]
+    [InlineData(GlassMode.System, 26100, true, GlassRender.SystemBlur)]
+    [InlineData(GlassMode.System, 26100, false, GlassRender.SystemSolid)]
+    [InlineData(GlassMode.System, 19045, true, GlassRender.Capture)]
+    [InlineData(GlassMode.System, 19045, false, GlassRender.None)]
+    [InlineData(GlassMode.Capture, 26100, true, GlassRender.Capture)]
+    [InlineData(GlassMode.Capture, 26100, false, GlassRender.None)]
+    [InlineData(GlassMode.Off, 26100, true, GlassRender.None)]
+    public void Resolves(GlassMode mode, int build, bool transparency, GlassRender want) => Assert.Equal(want, GlassPref.Resolve(mode, build, transparency));
+}

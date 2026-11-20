@@ -114,6 +114,7 @@ public sealed partial class App : Application
         Log($"屏幕刷新率 {Hz} Hz");
 
         LoadLayout();
+        IslandWindow.GlassModePref = LoadGlass();
         try
         {
             var ps = Path.Combine(DataDir, "perf-start.txt");
@@ -588,6 +589,9 @@ public sealed partial class App : Application
         catch { return Theme.Look.Dark; }
     }
     private static void SaveLook(Theme.Look l) { try { File.WriteAllText(LookFile, l.ToString()); } catch { } }
+    private static string GlassFile => Path.Combine(DataDir, "glass.txt");
+    private static GlassMode LoadGlass() { try { return File.Exists(GlassFile) ? GlassPref.Parse(File.ReadAllText(GlassFile)) : GlassMode.System; } catch { return GlassMode.System; } }
+    internal static void SaveGlass(GlassMode m) { try { File.WriteAllText(GlassFile, GlassPref.Serialize(m)); } catch { } }
 
     private void SetupTray()
     {
@@ -608,9 +612,19 @@ public sealed partial class App : Application
             item.Click += (_, _) => Dispatcher.BeginInvoke(() => { _window?.ApplyLook(l); SaveLook(l); });
             look.DropDownItems.Add(item);
         }
+        // 液态玻璃的背景做法（只对液态玻璃外观生效）
+        look.DropDownItems.Add(new System.Windows.Forms.ToolStripSeparator());
+        foreach (var g in new[] { GlassMode.System, GlassMode.Capture, GlassMode.Off })
+        {
+            var item = new System.Windows.Forms.ToolStripMenuItem("玻璃背景：" + GlassPref.Name(g)) { Tag = g };
+            item.Click += (_, _) => Dispatcher.BeginInvoke(() => _window?.SetGlassMode(g));
+            look.DropDownItems.Add(item);
+        }
         look.DropDownOpening += (_, _) =>
         {
-            foreach (System.Windows.Forms.ToolStripMenuItem i in look.DropDownItems) i.Checked = i.Text == Theme.LookName(Theme.Current);
+            foreach (var o in look.DropDownItems)
+                if (o is System.Windows.Forms.ToolStripMenuItem i)
+                    i.Checked = i.Tag is GlassMode g ? g == IslandWindow.GlassModePref : i.Text == Theme.LookName(Theme.Current);
         };
         menu.Items.Add(look);
         var motion = new System.Windows.Forms.ToolStripMenuItem("动效");

@@ -158,6 +158,7 @@ public sealed partial class IslandWindow
     private void GuardTopmost()
     {
         if (_hwnd == IntPtr.Zero || SnapshotMode) return;
+        _sys?.Below(); // 系统模糊底板：别的置顶窗口插到岛和底板之间时压回来（已经紧贴就什么都不做）
         if (((long)Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE) & 0x8 /*WS_EX_TOPMOST*/) != 0) return;
         _topLost++;
         if (_topLost <= 3 || _topLost % 50 == 0) App.Log($"置顶被别的程序摘掉了，补回（第 {_topLost} 次）");
@@ -168,6 +169,7 @@ public sealed partial class IslandWindow
     {
         if (_hwnd == IntPtr.Zero || SnapshotMode) return;
         SetWindowPos(_hwnd, new IntPtr(-1) /*HWND_TOPMOST*/, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0200 /*NOSIZE|NOMOVE|NOACTIVATE|NOOWNERZORDER*/);
+        _sys?.Below();
     }
 
     /// <summary>睡眠唤醒、解锁、远程桌面连回、改时区之后：重新摆位置、补置顶、刷新时钟和毛玻璃底。</summary>
