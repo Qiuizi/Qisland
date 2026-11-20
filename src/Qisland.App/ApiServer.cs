@@ -21,6 +21,7 @@ public sealed class ApiServer : IDisposable
     public Action<double, string?>? Peek;
     private readonly Action<Action> _post;
     private readonly ActivityStore _store;
+    private readonly string? _approvalKey;
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _slots;
     private readonly object _handlersGate = new();
@@ -34,17 +35,24 @@ public sealed class ApiServer : IDisposable
     /// <summary>每条 Agent 事件（已经在 UI 线程上），给 AI 页的多会话列表用。</summary>
     public Action<IslandActivity>? AgentEvent { get; set; }
 
-    public ApiServer(int port, ActivityStore store, Action<Action> postToUi)
-        : this(port, store, postToUi, TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(2), 128)
+    public ApiServer(int port, ActivityStore store, Action<Action> postToUi, string? approvalKey = null)
+        : this(port, store, postToUi, approvalKey, TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(2), 128)
     {
     }
 
     internal ApiServer(int port, ActivityStore store, Action<Action> postToUi,
         TimeSpan receiveTimeout, TimeSpan approvalTimeout, int maxConnections)
+        : this(port, store, postToUi, null, receiveTimeout, approvalTimeout, maxConnections)
+    {
+    }
+
+    internal ApiServer(int port, ActivityStore store, Action<Action> postToUi, string? approvalKey,
+        TimeSpan receiveTimeout, TimeSpan approvalTimeout, int maxConnections)
     {
         _listener = new TcpListener(IPAddress.Loopback, port);
         _store = store;
         _post = postToUi;
+        _approvalKey = approvalKey;
         _receiveTimeout = receiveTimeout;
         _approvalTimeout = approvalTimeout;
         _slots = new SemaphoreSlim(maxConnections, maxConnections);
@@ -93,24 +101,15 @@ public sealed class ApiServer : IDisposable
                 var stream = client.GetStream();
                 using var receive = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
                 receive.CancelAfter(_receiveTimeout);
-                var (method, path, body) = await ReadRequest(stream, receive.Token);
+                var (method, path, body, headers) = await ReadRequest(stream, receive.Token);
                 var clean = path.Split('?')[0].TrimEnd('/');
-                (int code, string json) result;
-                if (method == "POST" && clean.StartsWith("/v1/approval/", StringComparison.Ordinal) && Approval != null)
-                {
-                    try
-                    {
-                        var decision = await Approval(clean["/v1/approval/".Length..], body)
-                            .WaitAsync(_approvalTimeout, _cts.Token);
-                        result = (200, $"{{\"decision\":{JsonSerializer.Serialize(decision)}}}");
-                    }
-                    catch (TimeoutException) { result = (504, "{\"ok\":false,\"error\":\"审批等待超时\"}"); }
-                    catch { result = (500, "{\"ok\":false,\"error\":\"审批处理失败\"}"); }
-                }
-                else result = SafeRoute(method, path, body);
-                var payload = Encoding.UTF8.GetBytes(result.json);
-                var reason = result.code switch { 200 => "OK", 500 => "Internal Server Error", 503 => "Service Unavailable", 504 => "Gateway Timeout", _ => "Error" };
-                var head = $"HTTP/1.1 {result.code} {reason}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {payload.Length}\r\nConnection: close\r\n\r\n";
+                var (code, json) = method == "POST" && IsApprovalPath(clean)
+                    ? await ApprovalRoute(clean, headers, body)
+                    : SafeRoute(method, path, body);
+                var payload = code == 204 ? [] : Encoding.UTF8.GetBytes(json);
+                var type = payload.Length > 0 ? "Content-Type: application/json; charset=utf-8\r\n" : "";
+                var reason = code switch { 200 => "OK", 204 => "No Content", 401 => "Unauthorized", 403 => "Forbidden", 404 => "Not Found", 500 => "Internal Server Error", 503 => "Service Unavailable", 504 => "Gateway Timeout", _ => "Error" };
+                var head = $"HTTP/1.1 {code} {reason}\r\n{type}Content-Length: {payload.Length}\r\nConnection: close\r\n\r\n";
                 using var write = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
                 write.CancelAfter(TimeSpan.FromSeconds(5));
                 await stream.WriteAsync(Encoding.ASCII.GetBytes(head), write.Token);
@@ -137,7 +136,7 @@ public sealed class ApiServer : IDisposable
         catch { }
     }
 
-    private static async Task<(string, string, string)> ReadRequest(NetworkStream s, CancellationToken ct)
+    private static async Task<(string Method, string Path, string Body, Dictionary<string, string> Headers)> ReadRequest(NetworkStream s, CancellationToken ct)
     {
         var buf = new byte[64 * 1024];
         var total = 0;
@@ -149,14 +148,20 @@ public sealed class ApiServer : IDisposable
             total += n;
             headerEnd = IndexOf(buf, total, "\r\n\r\n"u8);
         }
-        if (headerEnd < 0) return ("", "", "");
+        if (headerEnd < 0) return ("", "", "", new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
         var header = Encoding.ASCII.GetString(buf, 0, headerEnd);
         var lines = header.Split("\r\n");
         var first = lines[0].Split(' ');
         var len = 0;
-        foreach (var l in lines)
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var l in lines.Skip(1))
+        {
+            var colon = l.IndexOf(':');
+            if (colon > 0)
+                headers[l[..colon].Trim()] = l[(colon + 1)..].Trim();
             if (l.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
                 int.TryParse(l[15..].Trim(), out len);
+        }
         len = Math.Clamp(len, 0, 1024 * 1024);
         var bodyBytes = new byte[len];
         var have = Math.Min(total - headerEnd - 4, len);
@@ -167,13 +172,44 @@ public sealed class ApiServer : IDisposable
             if (n == 0) break;
             have += n;
         }
-        return (first[0].ToUpperInvariant(), first.Length > 1 ? first[1] : "/", Encoding.UTF8.GetString(bodyBytes, 0, have));
+        return (first[0].ToUpperInvariant(), first.Length > 1 ? first[1] : "/",
+            Encoding.UTF8.GetString(bodyBytes, 0, have), headers);
     }
 
     private static int IndexOf(byte[] b, int len, ReadOnlySpan<byte> pat)
     {
         var i = b.AsSpan(0, len).IndexOf(pat);
         return i;
+    }
+
+    private static bool IsApprovalPath(string path)
+    {
+        const string prefix = "/v1/approval/";
+        return path.StartsWith(prefix, StringComparison.Ordinal)
+               && path.Length > prefix.Length
+               && !path[prefix.Length..].Contains('/');
+    }
+
+    private async Task<(int, string)> ApprovalRoute(
+        string path, Dictionary<string, string> headers, string body)
+    {
+        if (_approvalKey == null || Approval == null)
+            return (503, "{\"ok\":false,\"error\":\"审批接口未启用\"}");
+        if (!ApprovalProtocol.VerifyRequest(_approvalKey, "POST", path, headers, body,
+                out var requestId, out var nonce))
+            return (403, "{\"ok\":false,\"error\":\"unauthorized\"}");
+
+        var source = Uri.UnescapeDataString(path["/v1/approval/".Length..]);
+        if (!AgentPolicy.CanApproveOnIsland(source)) return (204, "");
+
+        string decision;
+        try { decision = await Approval(source, body).WaitAsync(_approvalTimeout, _cts.Token); }
+        catch (TimeoutException) { return (504, "{\"ok\":false,\"error\":\"审批等待超时\"}"); }
+        catch { return (500, "{\"ok\":false,\"error\":\"审批处理失败\"}"); }
+        if (decision is not ("allow" or "deny")) return (204, "");
+
+        try { return (200, ApprovalProtocol.BuildResponse(_approvalKey, requestId, nonce, decision)); }
+        catch { return (500, "{\"ok\":false,\"error\":\"审批响应失败\"}"); }
     }
 
     /// <summary>请求内容不合要求时回 400，不让异常把连接直接断掉。</summary>

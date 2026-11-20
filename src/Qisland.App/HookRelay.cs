@@ -27,9 +27,19 @@ public static class HookRelay
         {
             // 没拿到决定就什么都不输出，Codex 回到终端里正常问你
             output = "";
-            var resp = Post($"/v1/approval/{source}", body, (int)ApprovalBroker.Wait.TotalMilliseconds + 8000);
-            var d = resp.Contains("\"allow\"") ? "allow" : resp.Contains("\"deny\"") ? "deny" : "";
-            output = ApprovalBroker.CodexOutput(d);
+            var secret = ApprovalKeyFile.Read(App.DataDir);
+            if (secret != null)
+            {
+                var answer = ApprovalClient.AskAsync(
+                    secret, source, HookPort(), body,
+                    ApprovalBroker.Wait + TimeSpan.FromSeconds(8)).GetAwaiter().GetResult();
+                output = ApprovalBroker.CodexOutput(answer switch
+                {
+                    ApprovalAnswer.Allow => "allow",
+                    ApprovalAnswer.Deny => "deny",
+                    _ => "",
+                });
+            }
         }
         else if (body.Length > 0) Post($"/v1/agent/{source}", body, 800);
 
@@ -58,4 +68,10 @@ public static class HookRelay
         }
         catch { return ""; }
     }
+
+    private static int HookPort()
+        => int.TryParse(Environment.GetEnvironmentVariable("QISLAND_PORT"), out var port)
+           && port is > 0 and <= 65535
+            ? port
+            : App.Port;
 }

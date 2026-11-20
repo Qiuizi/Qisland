@@ -127,9 +127,11 @@ public sealed partial class App : Application
         _window = new IslandWindow(_store) { Ai = _ai };
         _window.Show();
 
+        var approvalKey = ApprovalKeyFile.Rotate(DataDir, out var keyError);
+        if (approvalKey == null) Log("审批密钥: " + keyError);
         try
         {
-            _api = new ApiServer(Port, _store, a => Dispatcher.BeginInvoke(a));
+            _api = new ApiServer(Port, _store, a => Dispatcher.BeginInvoke(a), approvalKey);
             _api.Start();
         }
         catch (Exception ex) { Log("API 端口占用: " + ex.Message); }
