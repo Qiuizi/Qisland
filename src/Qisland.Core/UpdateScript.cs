@@ -1,52 +1,110 @@
+using System.Diagnostics;
+using System.Text;
+
 namespace Qisland.Core;
 
 /// <summary>
-/// 自动更新的替换脚本（cmd）。岛退出后由它把新版本复制进安装目录：
-/// 1. 先把安装目录整份镜像备份；备份失败就不动安装目录，直接启动旧版并报错；
+/// 自动更新的替换脚本（PowerShell，-EncodedCommand 传入，不再经过 cmd 的代码页）：
+/// 1. 等旧进程退出后，先把安装目录整份镜像备份；备份失败就不动安装目录，直接启动旧版并报错；
 /// 2. robocopy 新版本过去，退出码 ≥ 8 视为失败（有文件被锁、没复制完，新旧混装）；
 /// 3. 失败时用备份 /MIR 还原成旧版，启动旧版（--update-failed），结果写进 result 文件给旧版读出来提示。
-/// 纯文本生成，可在 Linux 上单测。
+/// 脚本内容用 UTF-16LE Base64 编码，中文路径不会受 cmd 代码页影响。
 /// </summary>
 public static class UpdateScript
 {
     /// <summary>robocopy 退出码：0–7 是成功的各种组合（1 复制了文件、2 有多余文件…），8 及以上表示有文件没复制成功。</summary>
     public static bool RobocopyFailed(int code) => code >= 8;
 
-    private const string Quiet = "/NFL /NDL /NJH /NJS /NP";
+    private static string Ps(string text) => "'" + text.Replace("'", "''") + "'";
 
+    /// <summary>生成可交给 powershell.exe -EncodedCommand 的脚本；路径作为 PowerShell 单引号字面量写入。</summary>
     public static string Build(int pid, string from, string appDir, string backupDir, string resultFile, string exe = "Qisland.exe")
     {
-        appDir = appDir.TrimEnd('\\'); from = from.TrimEnd('\\'); backupDir = backupDir.TrimEnd('\\');
-        var nl = "\r\n";
-        // 注意：结果用「> 文件 echo …」前置重定向，免得「rolled-back 9>」里的 9> 被当成句柄 9 的重定向
-        return
-            "@echo off" + nl +
-            "setlocal" + nl +
-            ":wait" + nl +
-            $"tasklist /fi \"PID eq {pid}\" 2>nul | find \"{pid}\" >nul && (timeout /t 1 /nobreak >nul & goto wait)" + nl +
-            $"if exist \"{backupDir}\" rmdir /s /q \"{backupDir}\"" + nl +
-            $"robocopy \"{appDir}\" \"{backupDir}\" /MIR /R:2 /W:1 {Quiet} >nul" + nl +
-            "if errorlevel 8 goto nobackup" + nl +
-            $"robocopy \"{from}\" \"{appDir}\" /E /R:5 /W:1 {Quiet} >nul" + nl +
-            "if errorlevel 8 goto rollback" + nl +
-            $"> \"{resultFile}\" echo ok" + nl +
-            $"start \"\" \"{appDir}\\{exe}\" --updated" + nl +
-            "exit /b 0" + nl +
-            ":nobackup" + nl +
-            "set RC=%errorlevel%" + nl +
-            $"> \"{resultFile}\" echo backup-failed %RC%" + nl +
-            "goto startold" + nl +
-            ":rollback" + nl +
-            "set RC=%errorlevel%" + nl +
-            $"robocopy \"{backupDir}\" \"{appDir}\" /MIR /R:10 /W:1 {Quiet} >nul" + nl +
-            "if errorlevel 8 goto rbfail" + nl +
-            $"> \"{resultFile}\" echo rolled-back %RC%" + nl +
-            "goto startold" + nl +
-            ":rbfail" + nl +
-            $"> \"{resultFile}\" echo rollback-failed %RC% %errorlevel%" + nl +
-            ":startold" + nl +
-            $"start \"\" \"{appDir}\\{exe}\" --update-failed" + nl +
-            "exit /b 1" + nl;
+        from = from.TrimEnd('\\');
+        appDir = appDir.TrimEnd('\\');
+        backupDir = backupDir.TrimEnd('\\');
+        return $$"""
+$ErrorActionPreference = 'Stop'
+$pidToWait = {{pid}}
+$from = {{Ps(from)}}
+$appDir = {{Ps(appDir)}}
+$backupDir = {{Ps(backupDir)}}
+$resultFile = {{Ps(resultFile)}}
+$exeName = {{Ps(exe)}}
+$common = @('/NFL', '/NDL', '/NJH', '/NJS', '/NP')
+
+function Write-Result([string]$text) {
+    try { [IO.File]::WriteAllText($resultFile, $text, [Text.UTF8Encoding]::new($false)) } catch { }
+}
+function Start-Old {
+    try { Start-Process -FilePath (Join-Path $appDir $exeName) -ArgumentList '--update-failed' -WorkingDirectory $appDir | Out-Null } catch { }
+}
+function Start-New {
+    try { Start-Process -FilePath (Join-Path $appDir $exeName) -ArgumentList '--updated' -WorkingDirectory $appDir | Out-Null } catch { }
+}
+function Invoke-Robocopy([string]$source, [string]$destination, [string[]]$options) {
+    try {
+        & robocopy $source $destination @options | Out-Null
+        return $LASTEXITCODE
+    } catch {
+        return 16
+    }
+}
+
+try {
+    $old = [Diagnostics.Process]::GetProcessById($pidToWait)
+    $null = $old.WaitForExit(60000)
+} catch { }
+
+try {
+    if (Test-Path -LiteralPath $backupDir) { Remove-Item -LiteralPath $backupDir -Recurse -Force }
+} catch {
+    Write-Result 'backup-failed remove'
+    Start-Old
+    exit 1
+}
+
+$backupCode = Invoke-Robocopy $appDir $backupDir (@('/MIR', '/R:2', '/W:1') + $common)
+if ($backupCode -ge 8) {
+    Write-Result "backup-failed $backupCode"
+    Start-Old
+    exit 1
+}
+
+$copyCode = Invoke-Robocopy $from $appDir (@('/E', '/R:5', '/W:1') + $common)
+if ($copyCode -ge 8) {
+    $restoreCode = Invoke-Robocopy $backupDir $appDir (@('/MIR', '/R:10', '/W:1') + $common)
+    if ($restoreCode -ge 8) { Write-Result "rollback-failed $copyCode $restoreCode" }
+    else { Write-Result "rolled-back $copyCode" }
+    Start-Old
+    exit 1
+}
+
+Write-Result 'ok'
+Start-New
+exit 0
+""";
+    }
+
+    /// <summary>Windows PowerShell 的 -EncodedCommand 要 UTF-16LE Base64；脚本里的中文路径因此不受代码页影响。</summary>
+    public static string Encode(string script) => Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+
+    /// <summary>启动更新器；脚本内容走 -EncodedCommand，参数列表由 ProcessStartInfo.ArgumentList 传递。</summary>
+    public static Process Start(int pid, string from, string appDir, string backupDir, string resultFile, string exe = "Qisland.exe")
+    {
+        var psi = new ProcessStartInfo("powershell.exe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+        };
+        psi.ArgumentList.Add("-NoProfile");
+        psi.ArgumentList.Add("-NonInteractive");
+        psi.ArgumentList.Add("-ExecutionPolicy");
+        psi.ArgumentList.Add("Bypass");
+        psi.ArgumentList.Add("-EncodedCommand");
+        psi.ArgumentList.Add(Encode(Build(pid, from, appDir, backupDir, resultFile, exe)));
+        return Process.Start(psi)!;
     }
 
     public readonly record struct Result(bool Ok, string State, string Detail);

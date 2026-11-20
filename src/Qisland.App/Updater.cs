@@ -4,7 +4,6 @@ using System.IO.Compression;
 using System.Net.Http;
 using System.Reflection;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Qisland.Core;
 using ActivityKind = Qisland.Core.ActivityKind;
@@ -226,12 +225,10 @@ public sealed class Updater
             var from = Path.GetDirectoryName(exe)!;
             var appDir = AppContext.BaseDirectory.TrimEnd('\\');
 
-            var script = Path.Combine(tmp, "apply.cmd");
             var pid = Environment.ProcessId;
-            // 先备份旧版；robocopy 退出码 ≥ 8（文件被锁等）就用备份还原并启动旧版，结果写进 result.txt 给旧版提示
-            File.WriteAllText(script, UpdateScript.Build(pid, from, appDir, Path.Combine(tmp, "backup"), ResultFile), new UTF8Encoding(false));
             App.Log($"更新 {Current} → {r.Tag}，覆盖 {appDir}");
-            Process.Start(new ProcessStartInfo("cmd.exe", $"/c \"{script}\"") { CreateNoWindow = true, UseShellExecute = false, WindowStyle = ProcessWindowStyle.Hidden });
+            using var updater = UpdateScript.Start(pid, from, appDir, Path.Combine(tmp, "backup"), ResultFile);
+            App.Log($"更新器已启动（PID {updater.Id}）");
             Progress(1, "马上重启…");
             await Task.Delay(600);
             App.Current.Dispatcher.Invoke(_quit);
