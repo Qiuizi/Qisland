@@ -358,19 +358,24 @@ public sealed class MediaWatcher
     private volatile bool _again;
 
     // 系统会话在播就用它；否则网易云日志里有歌就用网易云（播放中优先，暂停时也比没有强）
+    // 用户手动切到的会话（不是网易云、还在）优先，网易云日志不能把它抢回去（规则在 Core 的 MediaPick）
     private MediaState? Choose(MediaState? smtc)
     {
         var n = _ncmCur;
+        var manual = _pinnedId != null && _session?.SourceAppUserModelId == _pinnedId;
+        var pick = MediaPick.Choose(smtc is null ? null : new MediaCandidate(smtc.Playing, smtc.AppSource == "music"),
+            n is null ? null : new MediaCandidate(n.Playing, true), _ncmSmtc, manual);
+        if (pick == MediaPickResult.None) return null;
         if (n == null) return smtc;
         if (_ncmSmtc)
         {
             // 网易云自己在报 SMTC：界面以 SMTC 为准，只从日志补 songId（歌词按 id 取）和时长；SMTC 一时读不到才用日志
-            if (smtc == null) return n;
+            if (pick == MediaPickResult.Ncm) return n;
             if (smtc is { AppSource: "music" } && Lrc.Norm(smtc.Title) is var a && Lrc.Norm(n.Title) is var b && a.Length > 0 && (a == b || a.Contains(b) || b.Contains(a)))
                 return smtc with { SongId = n.SongId, Duration = smtc.Duration > TimeSpan.Zero ? smtc.Duration : n.Duration };
             return smtc;
         }
-        if (smtc is { Playing: true } && !n.Playing) return smtc with { Sessions = smtc.Sessions + 1 };
+        if (pick == MediaPickResult.Smtc) return smtc! with { Sessions = smtc.Sessions + 1 };
         return smtc == null ? n : n with { Sessions = smtc.Sessions + 1 }; // 都没在放时网易云优先（浏览器标签页常年挂着暂停的会话）
     }
 
