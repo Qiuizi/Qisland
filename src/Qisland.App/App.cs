@@ -509,20 +509,34 @@ public sealed partial class App : Application
     }
 
     // ───────────── 收件箱：给 WSL NAT 模式等连不上 localhost 的场景 ─────────────
-    // 一批最多 50 个，剩下的排到下一批（后台优先级），积压再多也会处理完、不卡界面
+    // 一批最多 50 个，剩下的排到下一批（后台优先级），积压再多也会处理完、不卡界面；
+    // 取不走的按 1s/2s/5s/10s/30s 退避重试，连续 8 次失败移到 inbox\failed\ 并记日志，不挡别的文件
     private InboxPump? _inbox;
 
     private void SetupInbox()
     {
         _inbox = new InboxPump(() => Directory.EnumerateFiles(InboxDir, "*.json"), TakeInboxFile,
-            run => Dispatcher.BeginInvoke(run, DispatcherPriority.Background));
+            run => Dispatcher.BeginInvoke(run, DispatcherPriority.Background), giveUp: GiveUpInboxFile);
         _inboxWatcher = new FileSystemWatcher(InboxDir, "*.json") { NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite, EnableRaisingEvents = true };
         _inboxWatcher.Created += (_, _) => Dispatcher.BeginInvoke(() => _inbox.Request(), DispatcherPriority.Background);
         _inboxWatcher.Renamed += (_, _) => Dispatcher.BeginInvoke(() => _inbox.Request(), DispatcherPriority.Background);
         _inbox.Request();
     }
 
-    /// <summary>取走一个收件箱文件；还没写完 / 被占用返回 false（下次再取）。</summary>
+    /// <summary>一直取不走的收件箱文件：移到 inbox\failed\（移不动就留着，等下次重新计数），记日志。</summary>
+    private static void GiveUpInboxFile(string f, int attempts)
+    {
+        var name = Path.GetFileName(f);
+        try
+        {
+            var dir = Directory.CreateDirectory(Path.Combine(InboxDir, "failed")).FullName;
+            File.Move(f, Path.Combine(dir, $"{DateTime.Now:yyyyMMdd-HHmmss}-{name}"), overwrite: true);
+            Log($"收件箱: {name} 连续 {attempts} 次读取失败，已移到 inbox\\failed");
+        }
+        catch (Exception ex) { Log($"收件箱: {name} 连续 {attempts} 次读取失败，移到 failed 也失败（{ex.GetType().Name}），先跳过"); }
+    }
+
+    /// <summary>取走一个收件箱文件；还没写完 / 被占用返回 false（按退避稍后重试）。</summary>
     private bool TakeInboxFile(string f)
     {
         string text;
