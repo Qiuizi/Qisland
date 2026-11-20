@@ -532,6 +532,7 @@ public sealed partial class IslandWindow
         }
         head.Children.Add(title);
         var nav = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        if (Calendar != null) nav.Children.Add(RoundIcon("\uE710", 20, () => new CalendarEventWindow(Calendar).Show(), tip: "新建日程（也可以双击某一天）"));
         nav.Children.Add(RoundIcon("\uE76B", 20, () => FlipMonth(-1)));
         nav.Children.Add(RoundIcon("\uE76C", 20, () => FlipMonth(1)));
         head.Children.Add(nav);
@@ -586,6 +587,14 @@ public sealed partial class IslandWindow
                     cell.ToolTip = string.Join("\n", dayEv.Take(5).Select(e => e.AllDay ? "全天  " + e.Title : $"{e.Start:HH:mm}  {e.Title}")) + (dayEv.Count > 5 ? $"\n…共 {dayEv.Count} 个" : "") + "\n" + cell.ToolTip;
                 }
             }
+            // 双击某一天：在这天新建本机日程
+            cell.MouseLeftButtonDown += (_, ev) =>
+            {
+                if (ev.ClickCount != 2 || Calendar == null) return;
+                ev.Handled = true;
+                new CalendarEventWindow(Calendar, day: date).Show();
+            };
+            cell.ToolTip = (cell.ToolTip as string ?? lunarTip) + "\n双击添加日程";
             grid.Children.Add(cell);
         }
         sp.Children.Add(grid);

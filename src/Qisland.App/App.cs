@@ -369,6 +369,7 @@ public sealed partial class App : Application
     {
         m.DropDownItems.Clear();
         if (_cal == null) { m.DropDownItems.Add(new System.Windows.Forms.ToolStripMenuItem("日历没启动") { Enabled = false }); return; }
+        m.DropDownItems.Add("新建本机日程…", null, (_, _) => Dispatcher.BeginInvoke(() => new CalendarEventWindow(_cal).Show()));
         m.DropDownItems.Add("添加 .ics 订阅链接…", null, (_, _) => Dispatcher.BeginInvoke(() => new CalendarAddWindow(_cal).Show()));
         var refresh = new System.Windows.Forms.ToolStripMenuItem(_cal.LastOk is { } t ? $"立即刷新（上次 {t:HH:mm}）" : "立即刷新") { Enabled = _cal.Feeds.Count > 0 };
         refresh.Click += (_, _) => Dispatcher.BeginInvoke(_cal.RefreshNow);
@@ -635,7 +636,7 @@ public sealed partial class App : Application
         };
         menu.Items.Add(hwMenu);
         menu.Items.Add(WeatherMenu());
-        var calMenu = new System.Windows.Forms.ToolStripMenuItem("日历订阅");
+        var calMenu = new System.Windows.Forms.ToolStripMenuItem("日历");
         calMenu.DropDownItems.Add("…");
         calMenu.DropDownOpening += (_, _) => CalendarMenu(calMenu);
         menu.Items.Add(calMenu);

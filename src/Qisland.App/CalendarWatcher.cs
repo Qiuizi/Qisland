@@ -15,6 +15,11 @@ public sealed class CalendarWatcher
     public const string Source = "calendar", ListSource = "agenda";
     private static string FeedsPath => Path.Combine(App.DataDir, "calendars.dat");
     private static string CachePath => Path.Combine(App.DataDir, "calendars-cache.dat");
+    private static string LocalPath => Path.Combine(App.DataDir, "local-calendar.dat");
+    private LocalCalendar _local = new();
+    /// <summary>本机日程（不依赖订阅；DPAPI 加密存在 local-calendar.dat）。</summary>
+    public LocalCalendar Local => _local;
+    public bool HasAny => _feeds.Count > 0 || _local.Count > 0;
     private readonly ActivityStore _store;
     private readonly HttpClient _http;
     private readonly HashSet<string> _reminded = [];
@@ -32,7 +37,7 @@ public sealed class CalendarWatcher
     /// <summary>读加密的订阅和缓存（后台线程，不占启动时间）。</summary>
     private async Task LoadAsync()
     {
-        var (feeds, cache) = await Task.Run(() =>
+        var loaded = await Task.Run(() =>
         {
             var f = File.Exists(FeedsPath) ? (Dpapi.Load(FeedsPath) ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList() : [];
             var c = new Dictionary<string, string>();
@@ -47,11 +52,13 @@ public sealed class CalendarWatcher
                     }
             }
             catch { }
-            return (f, c);
+            return (f, c, LocalCalendar.FromJson(Dpapi.Load(LocalPath)));
         });
+        var (feeds, cache, local) = loaded;
+        if (_local.Count == 0) _local = local;
         foreach (var u in feeds) if (!_feeds.Contains(u)) _feeds.Add(u);
         foreach (var kv in cache) _cache.TryAdd(kv.Key, kv.Value);
-        if (_feeds.Count > 0) App.Log($"日历: {_feeds.Count} 个订阅，缓存 {_cache.Count} 个");
+        if (_feeds.Count > 0 || _local.Count > 0) App.Log($"日历: {_feeds.Count} 个订阅，缓存 {_cache.Count} 个，本机日程 {_local.Count} 个");
         await Rebuild();
     }
 
@@ -98,6 +105,31 @@ public sealed class CalendarWatcher
     }
 
     public void RefreshNow() => _kick.TrySetResult();
+
+    /// <summary>新增 / 修改本机日程；不合法返回 false。</summary>
+    public bool SaveLocal(LocalEvent e)
+    {
+        if (!_local.Upsert(e)) return false;
+        PersistLocal();
+        return true;
+    }
+
+    public void DeleteLocal(string id)
+    {
+        if (!_local.Delete(id)) return;
+        PersistLocal();
+    }
+
+    private void PersistLocal()
+    {
+        try
+        {
+            if (_local.Count == 0) { if (File.Exists(LocalPath)) File.Delete(LocalPath); }
+            else Dpapi.Save(LocalPath, _local.ToJson());
+        }
+        catch (Exception ex) { App.Log("本机日程保存: " + ex.Message); }
+        _ = Rebuild();
+    }
 
     private void Save()
     {
@@ -151,6 +183,7 @@ public sealed class CalendarWatcher
     {
         var sources = _cache.Values.ToList();
         var from = DateTime.Today.AddDays(-1);
+        var local = _local.Expand(from, DateTime.Today.AddDays(8)).ToList();
         var events = await Task.Run(() =>
         {
             var all = new List<CalEvent>();
@@ -159,6 +192,7 @@ public sealed class CalendarWatcher
                 try { all.AddRange(CalendarIcs.Expand(ics, from, DateTime.Today.AddDays(8))); }
                 catch (Exception ex) { App.Log("日历解析: " + ex.Message); }
             }
+            all.AddRange(local);
             return all.GroupBy(e => (e.Title, e.Start)).Select(g => g.First()).OrderBy(e => e.Start).ToList();
         });
         Events = events;
@@ -179,7 +213,7 @@ public sealed class CalendarWatcher
     public void Tick()
     {
         if (_day != DateTime.Today) { _day = DateTime.Today; _ = Rebuild(); return; }   // 过了零点：展开窗口往后挪一天
-        if (!Features.On(Features.Calendar) || _feeds.Count == 0)
+        if (!Features.On(Features.Calendar) || !HasAny)
         {
             _store.ReplaceSource(ListSource, []);
             return;

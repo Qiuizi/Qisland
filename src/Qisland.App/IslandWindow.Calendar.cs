@@ -21,6 +21,7 @@ public sealed partial class IslandWindow
     private FrameworkElement? AgendaCard()
     {
         if (Calendar == null || !Features.On(Features.Calendar)) return null;
+        var cal = Calendar;
         var list = Calendar.Upcoming(4);
         if (list.Count == 0) return null;
         var now = DateTime.Now;
@@ -65,6 +66,13 @@ public sealed partial class IslandWindow
                 loc.VerticalAlignment = VerticalAlignment.Center;
                 loc.Margin = new Thickness(8, 0, 0, 0);
                 Grid.SetColumn(loc, 3); g.Children.Add(loc);
+            }
+            // 本机日程：点一下改 / 删
+            if (LocalCalendar.IdFromUid(e.Uid) is { } lid && cal.Local.Find(lid) is { } le)
+            {
+                g.Cursor = Cursors.Hand;
+                g.MouseLeftButtonDown += (_, ev) => ev.Handled = true;
+                g.MouseLeftButtonUp += (_, ev) => { ev.Handled = true; new CalendarEventWindow(cal, le).Show(); };
             }
             g.ToolTip = string.Join("\n", new[] { e.Title, e.AllDay ? $"{e.Start:M/d} 全天" : $"{e.Start:M/d HH:mm}–{e.End:HH:mm}", e.Location, e.JoinApp ?? "" }.Where(x => x.Length > 0));
             sp.Children.Add(g);
