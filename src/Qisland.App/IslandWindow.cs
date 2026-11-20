@@ -279,7 +279,7 @@ public sealed partial class IslandWindow : Window
         (_w.Target, _h.Target, _r.Target) = m switch
         {
             Mode.Expanded => (ExpandedW, _expandedH, 30d),
-            Mode.Compact => (_compactW, CompactH, CompactH / 2),
+            Mode.Compact => SideCompact ? (IslandLayout.SideW, IslandLayout.SideH, IslandLayout.SideW / 2) : (_compactW, CompactH, CompactH / 2),
             _ => RestSize(),
         };
         // 展开时带一点过冲（宽 ζ0.72、高 ζ0.76），收起临界阻尼更干脆；悬停时先胀大一圈
@@ -693,6 +693,7 @@ public sealed partial class IslandWindow : Window
 
     private void RebuildCompact()
     {
+        RebuildSideCompact();
         _compactLyric = null;
         _compact.Children.Clear();
         _compact.ColumnDefinitions.Clear();

@@ -157,7 +157,7 @@ public sealed partial class IslandWindow
         if (!_morphing)
         {
             Fade(IdleLayer, _idleOp.Value);
-            Fade(_compact, _compactOp.Value);
+            Fade(CompactLayer, _compactOp.Value);
             Fade(_expanded, _expOp.Value);
             return;
         }
@@ -168,7 +168,7 @@ public sealed partial class IslandWindow
         var restVis = opening ? 1 - MotionMath.Smoothstep(0.06, 0.38, p) : 1 - MotionMath.Smoothstep(0.08, 0.4, p);
         var zoom = 1 + 0.10 * MotionMath.Smoothstep(0, 0.5, p);
         FadeScaled(IdleLayer, Math.Min(_idleOp.Value, restVis), zoom);
-        FadeScaled(_compact, Math.Min(_compactOp.Value, restVis), zoom);
+        FadeScaled(CompactLayer, Math.Min(_compactOp.Value, restVis), zoom);
         var reveal = IslandMotion.Reveal(p, opening);
         var e = Math.Clamp(Math.Min(_expOp.Value, reveal), 0, 1);
         FadeScaled(_expanded, e, 0.955 + 0.045 * e);

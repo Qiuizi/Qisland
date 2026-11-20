@@ -31,6 +31,45 @@ public sealed partial class IslandWindow
 
     private FrameworkElement IdleLayer => Side ? _idleV : _idle;
 
+    // 侧边停靠时的紧凑胶囊：竖向，和收起的竖胶囊同宽，只放来源图标 + 两个字（音量等 OSD 仍用横向，需要显示进度条）
+    private readonly Grid _compactV = new() { Width = IslandLayout.SideW, Height = IslandLayout.SideH };
+    private bool SideCompact => Side && !OsdActive;
+    private FrameworkElement CompactLayer => SideCompact ? _compactV : _compact;
+
+    private void RebuildSideCompact()
+    {
+        _compactV.Children.Clear();
+        if (_compactV.Parent == null)
+        {
+            Canvas.SetTop(_compactV, TopGap);
+            Place(_compactV, IslandLayout.SideW);
+            _compactV.RenderTransformOrigin = new Point(0.5, 0);
+            _compactV.RenderTransform = new ScaleTransform(1, 1);
+            _compactV.Opacity = 0; _compactV.Visibility = Visibility.Hidden; _compactV.IsHitTestVisible = false;
+            _content.Children.Add(_compactV);
+        }
+        var other = SideCompact ? _compact : _compactV;
+        if (other.Visibility == Visibility.Visible && !_animating) { other.Opacity = 0; other.Visibility = Visibility.Hidden; }
+        var ranked = _store.Pill();
+        string source, text;
+        if (ranked.Count > 0) { source = ranked[0].Source; text = string.IsNullOrWhiteSpace(ranked[0].Title) ? Theme.SourceName(source) : ranked[0].Title; }
+        else if (MusicPlaying) { source = "music"; text = "♪"; }
+        else return;
+        var sp = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
+        var tile = Tile(source, 24, 7); tile.HorizontalAlignment = HorizontalAlignment.Center;
+        sp.Children.Add(tile);
+        var e = System.Globalization.StringInfo.GetTextElementEnumerator(text.Trim());
+        var n = 0;
+        while (e.MoveNext() && n < 2)
+        {
+            var ch = (string)e.Current;
+            if (string.IsNullOrWhiteSpace(ch)) continue;
+            sp.Children.Add(new TextBlock { Text = ch, FontFamily = Theme.Text, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Theme.Primary, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, n == 0 ? 6 : -1, 0, 0) });
+            n++;
+        }
+        _compactV.Children.Add(sp);
+    }
+
     private void BuildSideIdle()
     {
         var sp = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
@@ -68,6 +107,8 @@ public sealed partial class IslandWindow
         App.SaveLayout(dock, minimal);
         App.Log($"停靠：{dock switch { DockSide.Left => "左侧", DockSide.Right => "右侧", _ => "顶部" }}{(minimal ? " · 极简" : "")}");
         foreach (var l in new FrameworkElement[] { _idle, _idleV }) if (l != IdleLayer) { l.Opacity = 0; l.Visibility = Visibility.Hidden; }
+        RebuildCompact();
+        foreach (var l in new FrameworkElement[] { _compact, _compactV }) if (l != CompactLayer) { l.Opacity = 0; l.Visibility = Visibility.Hidden; }
         if (sideChanged)
         {
             if (!SnapshotMode && !_layered) Height = WinH;   // 顶部收起时窗口高度会被收到岛那么高，侧边要整高
