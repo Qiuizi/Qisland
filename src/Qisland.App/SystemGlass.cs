@@ -11,6 +11,8 @@ namespace Qisland.App;
 /// 和岛窗口同位置同大小、z 序紧贴在岛下面；里面只有一块 Windows.UI.Composition 视觉，
 /// 用系统亚克力那支宿主背景画刷（实时模糊身后的桌面），按岛的圆角胶囊裁剪，跟着弹簧逐帧改形状。
 /// 模糊由 DWM 自己做：不截屏、不在本进程里算模糊、不往 WPF 里贴图；停稳后什么都不跑。
+/// 合成器跑在单独的后台线程（专用 DispatcherQueue）：每帧的合成提交不占 WPF 的 UI 线程，
+/// UI 线程只把最新的形状记下来、投递一次（没处理完的不重复投递）。
 /// 岛的着色、高光、描边和文字仍由上层 WPF 画。
 /// </summary>
 internal sealed class SystemGlass : IDisposable
@@ -28,7 +30,8 @@ internal sealed class SystemGlass : IDisposable
     private delegate int CreateTargetFn(IntPtr self, IntPtr hwnd, int topmost, out IntPtr target);
 
     private const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10, SWP_NOOWNERZORDER = 0x200;
-    private static IntPtr _dq;
+    private static IntPtr _dqc;
+    private static Windows.System.DispatcherQueue? _queue;
 
     private readonly IntPtr _island;
     private IntPtr _hwnd;
@@ -37,8 +40,12 @@ internal sealed class SystemGlass : IDisposable
     private ContainerVisual? _root;
     private SpriteVisual? _pill;
     private CompositionRoundedRectangleGeometry? _geo;
-    private bool _shown, _solid, _dark;
+    private bool _shown;
+    private volatile bool _solid, _dark;
     private (float x, float y, float w, float h, float r, float o, float sx, float sy) _last = (-1, -1, -1, -1, -1, -1, -1, -1);
+    private readonly object _gate = new();
+    private (float x, float y, float w, float h, float r, float o, float sx, float sy) _want;
+    private bool _pending;
     public bool Ok { get; private set; }
 
     public SystemGlass(IntPtr island) => _island = island;
@@ -49,32 +56,28 @@ internal sealed class SystemGlass : IDisposable
         if (Ok) return true;
         try
         {
-            if (_dq == IntPtr.Zero) Marshal.ThrowExceptionForHR(CreateDispatcherQueueController(new DQOptions { dwSize = 12, threadType = 2 /*当前线程*/, apartmentType = 0 }, out _dq));
-            _comp = new Compositor();
+            if (_queue == null)
+            {
+                // 专用线程（DQTYPE_THREAD_DEDICATED）+ STA；全进程共用一个，底板重建时复用
+                Marshal.ThrowExceptionForHR(CreateDispatcherQueueController(new DQOptions { dwSize = 12, threadType = 1, apartmentType = 2 }, out _dqc));
+                _queue = WinRT.MarshalInspectable<Windows.System.DispatcherQueueController>.FromAbi(_dqc).DispatcherQueue;
+            }
             // NOREDIRECTIONBITMAP | TOOLWINDOW | NOACTIVATE | TOPMOST | TRANSPARENT；STATIC 类对命中测试回 HTTRANSPARENT
             _hwnd = CreateWindowExW(0x00200000 | 0x80 | 0x08000000 | 0x8 | 0x20, "Static", "", 0x80000000 /*WS_POPUP*/, 0, 0, 1, 1, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
             if (_hwnd == IntPtr.Zero) return false;
             var on = 1;
             DwmSetWindowAttribute(_hwnd, 17 /*DWMWA_USE_HOSTBACKDROPBRUSH*/, ref on, 4);
             var noRound = 1; DwmSetWindowAttribute(_hwnd, 33 /*DWMWA_WINDOW_CORNER_PREFERENCE*/, ref noRound, 4);
-            var unk = ((WinRT.IWinRTObject)_comp).NativeObject.ThisPtr;
-            var iid = new Guid("29E691FA-4567-4DCA-B319-D0F207EB6807"); // ICompositorDesktopInterop
-            Marshal.ThrowExceptionForHR(Marshal.QueryInterface(unk, ref iid, out var interop));
-            try
+            Exception? err = null;
+            var hwnd = _hwnd;
+            using var done = new ManualResetEventSlim();
+            if (!_queue.TryEnqueue(() =>
             {
-                var create = Marshal.GetDelegateForFunctionPointer<CreateTargetFn>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(interop), 3 * IntPtr.Size));
-                Marshal.ThrowExceptionForHR(create(interop, _hwnd, 0, out var t));
-                _target = WinRT.MarshalInspectable<DesktopWindowTarget>.FromAbi(t);
-                Marshal.Release(t);
-            }
-            finally { Marshal.Release(interop); }
-            _root = _comp.CreateContainerVisual();
-            _target.Root = _root;
-            _pill = _comp.CreateSpriteVisual();
-            _geo = _comp.CreateRoundedRectangleGeometry();
-            _pill.Clip = _comp.CreateGeometricClip(_geo);
-            _root.Children.InsertAtTop(_pill);
-            ApplyBrush();
+                try { Build(hwnd); } catch (Exception e) { err = e; }
+                done.Set();
+            })) throw new InvalidOperationException("合成线程不可用");
+            if (!done.Wait(3000)) throw new TimeoutException("合成线程没响应");
+            if (err != null) throw err;
             Ok = true;
             Follow();
             return true;
@@ -87,13 +90,40 @@ internal sealed class SystemGlass : IDisposable
         }
     }
 
+    /// <summary>在合成线程上建合成器、窗口目标和裁成胶囊的模糊视觉。</summary>
+    private void Build(IntPtr hwnd)
+    {
+        _comp = new Compositor();
+        var unk = ((WinRT.IWinRTObject)_comp).NativeObject.ThisPtr;
+        var iid = new Guid("29E691FA-4567-4DCA-B319-D0F207EB6807"); // ICompositorDesktopInterop
+        Marshal.ThrowExceptionForHR(Marshal.QueryInterface(unk, ref iid, out var interop));
+        try
+        {
+            var create = Marshal.GetDelegateForFunctionPointer<CreateTargetFn>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(interop), 3 * IntPtr.Size));
+            Marshal.ThrowExceptionForHR(create(interop, hwnd, 0, out var t));
+            _target = WinRT.MarshalInspectable<DesktopWindowTarget>.FromAbi(t);
+            Marshal.Release(t);
+        }
+        finally { Marshal.Release(interop); }
+        _root = _comp.CreateContainerVisual();
+        _target.Root = _root;
+        _pill = _comp.CreateSpriteVisual();
+        _geo = _comp.CreateRoundedRectangleGeometry();
+        _pill.Clip = _comp.CreateGeometricClip(_geo);
+        _root.Children.InsertAtTop(_pill);
+        _root.Opacity = 0;
+        ApplyBrush();
+    }
+
     /// <summary>关了「透明效果」：画实色（和系统亚克力一样的退化），颜色按深浅色。</summary>
     public void SetSolid(bool solid, bool dark)
     {
-        if (solid == _solid && dark == _dark && _pill?.Brush != null) return;
-        _solid = solid; _dark = dark;
-        ApplyBrush();
+        if (!Ok || (solid == _solid && dark == _dark && _brushSet)) return;
+        _solid = solid; _dark = dark; _brushSet = true;
+        _queue?.TryEnqueue(ApplyBrush);
     }
+
+    private bool _brushSet;
 
     private void ApplyBrush()
     {
@@ -116,6 +146,21 @@ internal sealed class SystemGlass : IDisposable
         var k = ((float)x, (float)y, (float)w, (float)h, (float)r, (float)Math.Round(opacity, 3), (float)shiftX, (float)shiftY);
         if (k == _last) return;
         _last = k;
+        lock (_gate)
+        {
+            _want = k;
+            if (_pending) return; // 合成线程还没取走上一份：只换成最新的，不再投递
+            _pending = true;
+        }
+        _queue?.TryEnqueue(Apply);
+    }
+
+    /// <summary>合成线程：取最新形状写进视觉（同一批里提交给 DWM）。</summary>
+    private void Apply()
+    {
+        (float, float, float, float, float, float, float, float) k;
+        lock (_gate) { k = _want; _pending = false; }
+        if (_geo == null || _pill == null || _root == null) return;
         _geo.Offset = new Vector2(k.Item1, k.Item2);
         _geo.Size = new Vector2(k.Item3, k.Item4);
         _geo.CornerRadius = new Vector2(k.Item5, k.Item5);
@@ -147,20 +192,22 @@ internal sealed class SystemGlass : IDisposable
         SetWindowPos(_hwnd, _island, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
     }
 
-    /// <summary>窗口形状和岛一致（调用方传进来的是一份副本，系统接管）。底板本来就点不到，这只是让 DWM 少合成一块。</summary>
-    public void SetRegion(IntPtr rgn)
-    {
-        if (!Ok) { Native.DeleteObject(rgn); return; }
-        SetWindowRgn(_hwnd, rgn, false);
-    }
-
     public void Dispose()
     {
         Ok = false;
-        try { if (_target != null) { _target.Root = null; _target.Dispose(); } } catch { }
-        _target = null; _pill = null; _geo = null; _root = null;
-        try { _comp?.Dispose(); } catch { }
-        _comp = null;
+        void Free()
+        {
+            try { if (_target != null) { _target.Root = null; _target.Dispose(); } } catch { }
+            _target = null; _pill = null; _geo = null; _root = null;
+            try { _comp?.Dispose(); } catch { }
+            _comp = null;
+        }
+        if (_comp != null && _queue != null)
+        {
+            using var done = new ManualResetEventSlim();
+            if (_queue.TryEnqueue(() => { Free(); done.Set(); })) done.Wait(1000);
+        }
+        else Free();
         if (_hwnd != IntPtr.Zero) { DestroyWindow(_hwnd); _hwnd = IntPtr.Zero; }
         _shown = false;
     }

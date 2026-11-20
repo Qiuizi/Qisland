@@ -596,7 +596,6 @@ public sealed partial class IslandWindow : Window
             else _sys.SetSolid(want == GlassRender.SystemSolid, !SystemLook.AppsLight);
         }
         if (!sys) _sys?.Show(false);
-        if (sys && !_sysOn) _lastRgn = (-1, -1, -1, -1, -1, -1); // 下一帧把窗口形状也抄给底板
         _sysOn = sys;
         _glass.Enable(_hwnd, want == GlassRender.Capture);
         if (want != _glassRender) App.Log($"玻璃背景: {want}（设置 {GlassPref.Serialize(GlassModePref)}，系统 {Environment.OSVersion.Version.Build}，透明效果 {(SystemLook.TransparencyOn ? "开" : "关")}）");
@@ -688,7 +687,6 @@ public sealed partial class IslandWindow : Window
                 Native.DeleteObject(b);
             }
         }
-        if (_sysOn && _sys != null) { var copy = Native.CreateRectRgn(0, 0, 0, 0); Native.CombineRgn(copy, rgn, IntPtr.Zero, 5 /*RGN_COPY*/); _sys.SetRegion(copy); }
         Native.SetWindowRgn(_hwnd, rgn, false); // 系统接管 rgn，不用 DeleteObject
     }
 
