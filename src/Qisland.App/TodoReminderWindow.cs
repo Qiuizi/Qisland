@@ -7,7 +7,7 @@ namespace Qisland.App;
 /// <summary>给一条待办设提醒时间和每周重复（写回 todo.md 那一行的 ⏰ / 🔁）。</summary>
 public sealed class TodoReminderWindow : Window
 {
-    public TodoReminderWindow(TodoFile todo, TodoItem item)
+    public TodoReminderWindow(TodoFile todo, TodoFileItem item)
     {
         var meta = TodoMeta.Parse(item.Text);
         var now = DateTime.Now;

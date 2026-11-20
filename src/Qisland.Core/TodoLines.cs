@@ -1,7 +1,7 @@
 namespace Qisland.Core;
 
 /// <summary>todo.md 里的一条（Line = 读出来时的行号，只当线索用，写回前要重新定位）。</summary>
-public sealed record TodoItem(int Line, string Text, bool Done);
+public sealed record TodoFileItem(int Line, string Text, bool Done);
 
 public enum TodoEditResult { Ok, Conflict, WriteFailed }
 
@@ -23,16 +23,16 @@ public static class TodoLines
         return (text.Length > 0 && text != Sample, done, text);
     }
 
-    public static List<TodoItem> Items(IReadOnlyList<string> lines)
+    public static List<TodoFileItem> Items(IReadOnlyList<string> lines)
     {
-        var list = new List<TodoItem>();
+        var list = new List<TodoFileItem>();
         for (var i = 0; i < lines.Count; i++)
-            if (Parse(lines[i]) is { ok: true } p) list.Add(new TodoItem(i, p.text, p.done));
+            if (Parse(lines[i]) is { ok: true } p) list.Add(new TodoFileItem(i, p.text, p.done));
         return list;
     }
 
     /// <summary>重新定位这一条；找不到或不唯一返回 null。</summary>
-    public static int? Locate(IReadOnlyList<string> lines, TodoItem it)
+    public static int? Locate(IReadOnlyList<string> lines, TodoFileItem it)
     {
         bool Match(int i) => Parse(lines[i]) is { ok: true } p && p.text == it.Text && p.done == it.Done;
         if (it.Line >= 0 && it.Line < lines.Count && Match(it.Line)) return it.Line;
@@ -44,7 +44,7 @@ public static class TodoLines
 
     public static string Clean(string text) => text.Replace("\r", " ").Replace("\n", " ").Trim();
 
-    public static TodoEditResult SetText(List<string> lines, TodoItem it, string text)
+    public static TodoEditResult SetText(List<string> lines, TodoFileItem it, string text)
     {
         text = Clean(text);
         if (text.Length == 0 || Locate(lines, it) is not { } at) return TodoEditResult.Conflict;
@@ -52,7 +52,7 @@ public static class TodoLines
         return TodoEditResult.Ok;
     }
 
-    public static TodoEditResult Delete(List<string> lines, TodoItem it)
+    public static TodoEditResult Delete(List<string> lines, TodoFileItem it)
     {
         if (Locate(lines, it) is not { } at) return TodoEditResult.Conflict;
         lines.RemoveAt(at);
@@ -60,7 +60,7 @@ public static class TodoLines
     }
 
     /// <summary>勾选 / 取消。每周重复的勾掉 = 这次做完，⏰ 挪到下一次仍留在未完成里。</summary>
-    public static TodoEditResult SetDone(List<string> lines, TodoItem it, bool done, DateTime now)
+    public static TodoEditResult SetDone(List<string> lines, TodoFileItem it, bool done, DateTime now)
     {
         if (Locate(lines, it) is not { } at) return TodoEditResult.Conflict;
         if (done && TodoMeta.Parse(it.Text).Complete(now) is { } next) { lines[at] = "- [ ] " + next.ToText(); return TodoEditResult.Ok; }

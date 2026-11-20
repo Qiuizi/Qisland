@@ -196,7 +196,7 @@ public sealed partial class IslandWindow
         Native.SetExStyle(_hwnd, Native.WS_EX_NOACTIVATE, true);
     }
 
-    private FrameworkElement TodoRow(TodoItem it)
+    private FrameworkElement TodoRow(TodoFileItem it)
     {
         var g = new Grid { Height = 34, Background = Brushes.Transparent, Cursor = Cursors.Hand, Margin = new Thickness(6, 0, 6, 0) };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });

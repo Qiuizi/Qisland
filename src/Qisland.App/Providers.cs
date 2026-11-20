@@ -376,7 +376,7 @@ public sealed class TodoFile : IDisposable
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(400) };
     public static string PathName => System.IO.Path.Combine(App.DataDir, "todo.md");
     private const string Sample = TodoLines.Sample;
-    public IReadOnlyList<TodoItem> Items { get; private set; } = [];
+    public IReadOnlyList<TodoFileItem> Items { get; private set; } = [];
     /// <summary>未完成的标题（去掉 ⏰ / 🔁 标记），给首页和组件显示。</summary>
     public IReadOnlyList<string> Open => Items.Where(i => !i.Done).Select(i => TodoMeta.Parse(i.Text).Title).ToList();
     public event Action? Changed;
@@ -449,11 +449,11 @@ public sealed class TodoFile : IDisposable
     }
 
     /// <summary>改一条的文字（提醒时间 / 重复写在文字里）。返回 Ok / Conflict（那一条找不到或不唯一）/ WriteFailed。</summary>
-    public TodoEditResult SetText(TodoItem it, string text) => Edit(lines => TodoLines.SetText(lines, it, text));
+    public TodoEditResult SetText(TodoFileItem it, string text) => Edit(lines => TodoLines.SetText(lines, it, text));
 
-    public TodoEditResult SetDone(TodoItem it, bool done) => Edit(lines => TodoLines.SetDone(lines, it, done, DateTime.Now));
+    public TodoEditResult SetDone(TodoFileItem it, bool done) => Edit(lines => TodoLines.SetDone(lines, it, done, DateTime.Now));
 
-    public TodoEditResult Delete(TodoItem it) => Edit(lines => TodoLines.Delete(lines, it));
+    public TodoEditResult Delete(TodoFileItem it) => Edit(lines => TodoLines.Delete(lines, it));
 
     public void ClearDone() => Edit(lines => { lines.RemoveAll(l => Parse(l) is { ok: true, done: true }); return TodoEditResult.Ok; });
 
