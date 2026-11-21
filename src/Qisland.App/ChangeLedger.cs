@@ -13,8 +13,10 @@ public static class ChangeLedger
 {
     public sealed record Entry(string Id, string App, string Target, string What, DateTime At, bool Detected = false);
 
-    public static string PathName => Path.Combine(App.DataDir, "changes.json");
-    private static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    /// <summary>测试用：账本文件放到临时目录。</summary>
+    internal static string? PathOverride { get; set; }
+    public static string PathName => PathOverride ?? Path.Combine(App.DataDir, "changes.json");
+    private static string Home => Integrations.Home;
     public static string CodexHooks => Path.Combine(Home, ".codex", "hooks.json");
     public static string DshPackage => Path.Combine(Home, ".dsh", "profiles", "desktop", "package.json");
     private const string DshBridge = "dsh-qisland-bridge";
@@ -28,7 +30,11 @@ public static class ChangeLedger
 
     private static void Save(List<Entry> list)
     {
-        try { File.WriteAllText(PathName, JsonSerializer.Serialize(list, Pretty)); } catch (Exception ex) { App.Log("改动账本: " + ex.Message); }
+        try
+        {
+            if (!Qisland.Core.AtomicFile.TryWrite(PathName, System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(list, Pretty)), out var err)) App.Log("改动账本: " + err);
+        }
+        catch (Exception ex) { App.Log("改动账本: " + ex.Message); }
     }
 
     /// <summary>记一笔（同 id 覆盖成最新）。</summary>
@@ -86,25 +92,30 @@ public static class ChangeLedger
         catch { return []; }
     }
 
-    /// <summary>只删命令里带 Qisland.exe 的 hook；删空的组、删空的事件；其余原样写回。</summary>
+    /// <summary>只删命令里带 Qisland.exe 的 hook；删空的组、删空的事件；其余原样写回。按最新内容计算，核对版本后原子替换。</summary>
     private static string RestoreCodex()
     {
-        var root = JsonNode.Parse(File.ReadAllText(CodexHooks))!;
-        if (root["hooks"] is not JsonObject ev) return "hooks.json 里没有 hooks";
         var removed = 0;
-        foreach (var name in ev.Select(kv => kv.Key).ToList())
+        var ok = Qisland.Core.ConfigFile.Update(CodexHooks, text =>
         {
-            if (ev[name] is not JsonArray groups) continue;
-            foreach (var g in groups.ToList())
+            removed = 0;
+            if (text == null) return null;
+            var root = JsonNode.Parse(text)!;
+            if (root["hooks"] is not JsonObject ev) return text;
+            foreach (var name in ev.Select(kv => kv.Key).ToList())
             {
-                if (g?["hooks"] is not JsonArray hs) continue;
-                foreach (var h in hs.Where(Ours).ToList()) { hs.Remove(h); removed++; }
-                if (hs.Count == 0) groups.Remove(g);
+                if (ev[name] is not JsonArray groups) continue;
+                foreach (var g in groups.ToList())
+                {
+                    if (g?["hooks"] is not JsonArray hs) continue;
+                    foreach (var h in hs.Where(Ours).ToList()) { hs.Remove(h); removed++; }
+                    if (hs.Count == 0) groups.Remove(g);
+                }
+                if (groups.Count == 0) ev.Remove(name);
             }
-            if (groups.Count == 0) ev.Remove(name);
-        }
-        File.Copy(CodexHooks, CodexHooks + ".qisland-restore-bak", true);
-        File.WriteAllText(CodexHooks, root.ToJsonString(Pretty));
+            return removed == 0 ? text : root.ToJsonString(Pretty);
+        }, v => File.WriteAllText(CodexHooks + ".qisland-restore-bak", v.Text ?? ""), out var err);
+        if (!ok) throw new IOException("hooks.json 在写入时一直被别的程序改动：" + err);
         return $"Codex：删掉了 {removed} 条 Qisland hook，其余保留（备份 hooks.json.qisland-restore-bak）";
     }
 
@@ -122,25 +133,34 @@ public static class ChangeLedger
         catch { return false; }
     }
 
-    /// <summary>从 package.json 的依赖和 bundles 里去掉桥接插件，别的插件不动；重启 DSH 后生效。</summary>
+    /// <summary>从 package.json 的依赖和 bundles 里去掉桥接插件，别的插件不动；重启 DSH 后生效。按最新内容计算，核对版本后原子替换。</summary>
     private static string RestoreDsh()
     {
-        var root = JsonNode.Parse(File.ReadAllText(DshPackage))!;
-        (root["dependencies"] as JsonObject)?.Remove(DshBridge);
-        if (root["dsh"]?["profile"]?["bundles"] is JsonArray b)
-            foreach (var x in b.Where(x => x?.ToString() == DshBridge).ToList()) b.Remove(x);
-        File.Copy(DshPackage, DshPackage + ".qisland-restore-bak", true);
-        File.WriteAllText(DshPackage, root.ToJsonString(Pretty));
+        var ok = Qisland.Core.ConfigFile.Update(DshPackage, text =>
+        {
+            if (text == null) return null;
+            var root = JsonNode.Parse(text)!;
+            (root["dependencies"] as JsonObject)?.Remove(DshBridge);
+            if (root["dsh"]?["profile"]?["bundles"] is JsonArray b)
+                foreach (var x in b.Where(x => x?.ToString() == DshBridge).ToList()) b.Remove(x);
+            return root.ToJsonString(Pretty);
+        }, v => File.WriteAllText(DshPackage + ".qisland-restore-bak", v.Text ?? ""), out var err);
+        if (!ok) throw new IOException("package.json 在写入时一直被别的程序改动：" + err);
         return "DeepSeek Harness：去掉了 dsh-qisland-bridge（备份 package.json.qisland-restore-bak），重启 DSH 生效";
     }
 
-    /// <summary>一键还原全部，返回每一项的结果。</summary>
-    public static List<string> RestoreAll()
+    /// <summary>
+    /// 一键还原：只撤销你在确认框里看到并同意的那些条目，按条目身份（Id + 目标文件）逐条对上现状；
+    /// 确认之后才出现的新改动不碰，已经不在的跳过。返回每一项的结果。
+    /// </summary>
+    public static List<string> RestoreAll(IReadOnlyList<Entry> confirmed)
     {
         var results = new List<string>();
-        var list = Sync().ToList();
-        foreach (var e in list)
+        var current = Sync().ToList();
+        foreach (var e in confirmed)
         {
+            var now = current.FirstOrDefault(c => c.Id == e.Id && string.Equals(c.Target, e.Target, StringComparison.OrdinalIgnoreCase));
+            if (now == null) { results.Add($"{e.App}：这项改动已经不在了，跳过"); continue; }
             try
             {
                 var r = e.Id switch

@@ -507,7 +507,7 @@ public sealed partial class App : Application
         if (System.Windows.MessageBox.Show($"把 Qisland 对其他软件的改动全部还原：\n\n{text}\n\n只删 Qisland 自己加的条目，你自己的 hook 和插件原样保留，改前会备份。Codex 新开的会话、重启后的 DSH 生效。\n\n确定还原？",
                 "Qisland", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
         _approvals?.CancelAll();
-        var res = ChangeLedger.RestoreAll();
+        var res = ChangeLedger.RestoreAll(list);   // 只还原上面列给你确认过的这些条目
         System.Windows.MessageBox.Show(res.Count > 0 ? string.Join("\n", res) : "没有需要还原的改动。", "Qisland");
     }
 

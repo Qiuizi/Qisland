@@ -102,7 +102,7 @@ public sealed class ApprovalBroker
 /// </summary>
 public static class CodexApproveHook
 {
-    public static string HooksPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "hooks.json");
+    public static string HooksPath => ChangeLedger.CodexHooks;
 
     private static IEnumerable<JsonObject> OurEntries(JsonNode root)
     {
@@ -133,19 +133,22 @@ public static class CodexApproveHook
     {
         try
         {
-            var text = File.ReadAllText(HooksPath);
-            var root = JsonNode.Parse(text)!;
-            var list = OurEntries(root).ToList();
-            if (list.Count == 0) return false;
-            foreach (var o in list)
+            // 提交前核对文件版本；读完之后被别的程序改过就在最新内容上重新改
+            var ok = ConfigFile.Update(HooksPath, text =>
             {
-                var cmd = (o["command"]?.GetValue<string>() ?? "").Replace(" --approve", "");
-                o["command"] = on ? cmd + " --approve" : cmd;
-                o["async"] = !on;          // 要等你点，必须同步
-                o["timeout"] = on ? 120 : 5;
-            }
-            File.Copy(HooksPath, HooksPath + ".qisland-bak", true);
-            File.WriteAllText(HooksPath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+                var root = JsonNode.Parse(text ?? throw new FileNotFoundException(HooksPath))!;
+                var list = OurEntries(root).ToList();
+                if (list.Count == 0) throw new InvalidOperationException("没有 Qisland 的 PermissionRequest 条目");
+                foreach (var o in list)
+                {
+                    var cmd = (o["command"]?.GetValue<string>() ?? "").Replace(" --approve", "");
+                    o["command"] = on ? cmd + " --approve" : cmd;
+                    o["async"] = !on;          // 要等你点，必须同步
+                    o["timeout"] = on ? 120 : 5;
+                }
+                return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+            }, v => File.WriteAllText(HooksPath + ".qisland-bak", v.Text ?? ""), out var err);
+            if (!ok) { App.Log("Codex 审批开关: 没写入 · " + err); return false; }
             ChangeLedger.Record("codex-approve", "Codex", HooksPath, on ? "PermissionRequest 改为在岛上批准（同步，超时 120 秒）" : "PermissionRequest 改回只通知（异步）");
             return true;
         }
