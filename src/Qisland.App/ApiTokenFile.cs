@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text;
+using Qisland.Core;
 
 namespace Qisland.App;
 
@@ -10,8 +11,8 @@ namespace Qisland.App;
 /// </summary>
 public static class ApiTokenFile
 {
-    public const string FileName = "api-token.txt";
-    public const string PathOverrideVariable = "QISLAND_API_TOKEN_FILE";
+    public const string FileName = ApiTokenRule.FileName;
+    public const string PathOverrideVariable = ApiTokenRule.EnvFile;
 
     public static string PathFor(string dataDir)
     {
@@ -41,7 +42,7 @@ public static class ApiTokenFile
         catch (Exception ex) { return ApiTokenConfig.Invalid($"读不了 Token 文件 {path}（{ex.GetType().Name}）"); }
         var token = text.Trim();
         if (token.Length == 0) return ApiTokenConfig.Invalid($"Token 文件 {path} 是空的");
-        if (!token.All(c => c > ' ' && c < '\x7f'))
+        if (!ApiTokenRule.IsValid(token))
             return ApiTokenConfig.Invalid($"Token 文件 {path} 的内容无效：只能是一段不含空白的可见 ASCII 字符");
         return new ApiTokenConfig(ApiTokenState.Enabled, token, null);
     }
@@ -49,8 +50,9 @@ public static class ApiTokenFile
     /// <summary>调用方（Hook）用：环境变量 QISLAND_TOKEN 优先，其次是 Token 文件。</summary>
     public static string? ForClient(string dataDir)
     {
-        var env = Environment.GetEnvironmentVariable("QISLAND_TOKEN");
-        return string.IsNullOrWhiteSpace(env) ? Read(dataDir) : env.Trim();
+        var env = Environment.GetEnvironmentVariable(ApiTokenRule.EnvToken);
+        if (string.IsNullOrWhiteSpace(env)) return Read(dataDir);
+        return ApiTokenRule.IsValid(env.Trim()) ? env.Trim() : null;
     }
 }
 

@@ -8,7 +8,7 @@
 
 文件存在但读不了（被占用、没权限、路径是目录）、是空的、或内容不是一段不含空白的可见 ASCII，都算「配置了但无效」：Qisland 启动时记日志并在岛上报错，所有普通读写一律回 `503`（`{"ok":false,"error":"api token invalid","detail":"原因"}`），只有健康检查照常返回；不会退化成不校验。修好文件后重启 Qisland。
 
-仓库里的调用方会自己带上 Token：`scripts/qisland-push.ps1`、WSL 的 `scripts/qisland-push`、`Qisland.exe hook`、`docs/sdk-examples/` 和 DeepSeek Harness 插件都按「环境变量 `QISLAND_TOKEN` → `api-token.txt`」的顺序取 Token。审批接口 `/v1/approval/*` 用自己的 HMAC 签名，不看这个 Token。
+仓库里的调用方会自己带上 Token：`scripts/qisland-push.ps1`、WSL 的 `scripts/qisland-push`、`Qisland.exe hook`、`docs/sdk-examples/`、DeepSeek Harness 插件和 Qisland 生成的 OpenCode 插件都按「环境变量 `QISLAND_TOKEN` → `api-token.txt`」的顺序取 Token。审批接口 `/v1/approval/*` 用自己的 HMAC 签名，不看这个 Token。
 
 ## 外部活动的命名空间
 

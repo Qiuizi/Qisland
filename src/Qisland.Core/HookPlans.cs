@@ -117,7 +117,7 @@ public static class HookPlans
     /// <summary>给确认弹窗用的一句话：改哪个文件、加什么。</summary>
     public static string Describe(HookTarget t, string fullPath, string exe) => t.Style switch
     {
-        HookStyle.PluginFile => $"新建文件：{fullPath}\n内容：一个 OpenCode 插件，会话空闲 / 出错 / 等你确认 / 调用工具时，把来源、会话 id、事件名和项目文件夹名发到 http://127.0.0.1:9840（不发代码、不发对话）。",
+        HookStyle.PluginFile => $"新建文件：{fullPath}\n内容：一个 OpenCode 插件，会话空闲 / 出错 / 等你确认 / 调用工具时，把来源、会话 id、事件名和项目文件夹名发到 http://127.0.0.1:9840（不发代码、不发对话）；设了推送 Token 时按 QISLAND_TOKEN → api-token.txt 现读并带上，插件文件里不保存 Token。",
         _ => $"修改文件：{fullPath}\n改动：在 \"hooks\" 里给 {string.Join("、", t.Events)} 这 {t.Events.Length} 个事件各加一条命令：\n{Command(exe, t.Source)}\n别的配置不动；改前备份为同目录下的 .qisland-bak-时间 文件。",
     };
 
@@ -126,12 +126,29 @@ public static class HookPlans
     public static string OpenCodePlugin(int port) => $$"""
         // {{PluginMarker}} — 由 Qisland 在你同意后写入；删掉本文件即可卸载。
         // 只把会话状态（来源、会话 id、事件名、项目文件夹名）发给本机 127.0.0.1:{{port}}，不发代码和对话内容。
+        // Token 和其他内置接入同一规则：{{ApiTokenRule.EnvToken}} → {{ApiTokenRule.EnvFile}} → %APPDATA%\{{ApiTokenRule.DataFolder}}\{{ApiTokenRule.FileName}}；插件文件里不保存 Token。
+        import { readFileSync } from "node:fs";
+        import { join } from "node:path";
         const URL = "http://127.0.0.1:{{port}}/v1/agent/opencode";
+        {{ApiTokenRule.JsLookup}}
+        const warned = new Set();
+        const warn = (status) => {
+          if (warned.has(status)) return;
+          warned.add(status);
+          const why = status === 401 ? "Token 没带或不对（" + "{{ApiTokenRule.EnvToken}} / {{ApiTokenRule.FileName}}）"
+            : status === 503 ? "Qisland 的 Token 文件无效或忙" : "";
+          try { console.error("[Qisland] 上报被拒绝 HTTP " + status + (why ? "：" + why : "")); } catch {}
+        };
         const send = (hook, sessionID, cwd) => {
           try {
-            fetch(URL, { method: "POST", headers: { "content-type": "application/json" },
+            const headers = { "content-type": "application/json" };
+            const token = qislandToken();
+            if (token) headers["X-Qisland-Token"] = token;
+            fetch(URL, { method: "POST", headers,
               body: JSON.stringify({ source: "opencode", hook_event_name: hook, session_id: sessionID || "default", cwd: cwd || "" }),
-              signal: AbortSignal.timeout(800) }).catch(() => {});
+              signal: AbortSignal.timeout(800) })
+              .then((res) => { if (!res.ok) warn(res.status); })
+              .catch(() => {});
           } catch {}
         };
         export const QislandPlugin = async ({ directory }) => ({
