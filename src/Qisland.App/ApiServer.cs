@@ -165,7 +165,9 @@ public sealed class ApiServer : IDisposable
                     await Response(stream, 401, "{\"ok\":false,\"error\":\"unauthorized\"}").ConfigureAwait(false);
                     return;
                 }
-                var (normalCode, normalJson) = SafeRoute(method, path, body);
+                var (normalCode, normalJson) = method == "GET" && clean is "/v1/island/active" or "/v3/island/active"
+                    ? await ActiveRoute().ConfigureAwait(false)
+                    : SafeRoute(method, path, body);
                 await Response(stream, normalCode, normalJson).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -305,6 +307,38 @@ public sealed class ApiServer : IDisposable
         catch { return (500, "{\"ok\":false,\"error\":\"审批响应失败\"}"); }
     }
 
+    /// <summary>
+    /// GET /v1/island/active（/v3 同）：只读，列出当前的外部卡片（本机接口 / 收件箱推进来的），
+    /// Qisland 自己的条目（验证码、日程、待办……）不往外给。ActivityStore 只在 UI 线程上动，所以到 UI 线程上取快照。
+    /// </summary>
+    private async Task<(int, string)> ActiveRoute()
+    {
+        var done = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _post(() =>
+        {
+            try
+            {
+                var cards = _store.Ranked().Where(a => a.External).Select(a => new Dictionary<string, object?>
+                {
+                    ["id"] = a.Id,
+                    ["title"] = a.Title,
+                    ["body"] = a.Body,
+                    ["source"] = a.Source,
+                    ["type"] = a.Kind switch { Qisland.Core.ActivityKind.Error => "error", Qisland.Core.ActivityKind.Warning or Qisland.Core.ActivityKind.WaitingApproval => "warning", Qisland.Core.ActivityKind.Done => "success", _ => "info" },
+                    ["priority"] = a.Priority >= 70 ? "high" : a.Priority <= 15 ? "low" : "normal",
+                    ["progress"] = a.Progress,
+                    ["expires_at"] = a.Expires?.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture),
+                }).ToList();
+                done.TrySetResult(JsonSerializer.Serialize(cards));
+            }
+            catch (Exception ex) { done.TrySetException(ex); }
+        });
+        try { return (200, await done.Task.WaitAsync(TimeSpan.FromSeconds(3), _cts.Token).ConfigureAwait(false)); }
+        catch (TimeoutException) { return (503, "{\"ok\":false,\"error\":\"busy\"}"); }
+        catch (OperationCanceledException) { throw; }
+        catch { return (500, "{\"ok\":false,\"error\":\"读取失败\"}"); }
+    }
+
     /// <summary>请求内容不合要求时回 400，不让异常把连接直接断掉。</summary>
     private (int, string) SafeRoute(string method, string path, string body)
     {
@@ -318,8 +352,8 @@ public sealed class ApiServer : IDisposable
     private (int, string) Route(string method, string path, string body)
     {
         path = path.Split('?')[0].TrimEnd('/');
-        if (method == "GET" && (path is "" or "/v1/status" or "/health"))
-            return (200, "{\"ok\":true,\"app\":\"Qisland\"}");
+        if (method == "GET" && (path is "" or "/v1/status" or "/health" or "/v1/health"))
+            return (200, "{\"ok\":true,\"app\":\"Qisland\",\"product\":\"Qisland\"}");
 
         if (method == "POST" && path == "/v1/qisland/ingest")
         {

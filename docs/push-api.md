@@ -50,13 +50,12 @@
 
 | 方法 | 路径 | 作用 |
 |---|---|---|
-| PATCH | `/v3/island/push/{id}` | 只改写出的字段 |
-| DELETE | `/v1/island/push/{id}` | 去掉一条 |
-| GET | `/v1/island/active` | 当前卡片 |
-| GET | `/v3/ws` | WebSocket |
-| GET | `/v1/health` | 健康检查，返回里有 `product: Qisland` |
+| DELETE | `/v1/island/push/{id}` | 去掉一条（只能删外部卡片） |
+| GET | `/v1/island/active`（或 `/v3/island/active`） | 只读：当前外部卡片，JSON 数组，每项 `id` / `title` / `body` / `source` / `type` / `priority` / `progress` / `expires_at` |
+| GET | `/v1/health`（或 `/health`、`/v1/status`） | 健康检查，不要 Token，返回 `{"ok":true,"app":"Qisland","product":"Qisland"}` |
 
-完整字段仍以仓库里的 `docs/IslandAPI.md` 为准（上游原文）。
+上游 WinIslands 的 `PATCH /v3/island/push/{id}` 和 WebSocket `/v3/ws` Qisland 没有实现：更新就用同一个 `id` 再 POST。
+字段说明见 `docs/IslandAPI.md`（上游原文，已按 Qisland 的实际接口修订）。这几张路由表和 `docs/sdk-examples/` 由 `ApiContractTests` 对着真实 App 核对。
 
 ## 让 Qisland 自己认事件
 
