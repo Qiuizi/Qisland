@@ -26,6 +26,8 @@ public sealed partial class XuexitongService
     private readonly HomeworkHub _hub;
     private readonly ActivityStore _store;
     private readonly object _state = new();
+    private readonly Func<CookieContainer, HttpClient> _newHttp;
+    private readonly Func<int, Task> _delay;
     // 会话代数：退出登录 / 换账号换一代，旧一代的拉取结果不能写回作业列表、缓存、Cookie 和登录状态
     private readonly HomeworkSync _sync;
     private CookieContainer? _jar;
@@ -38,6 +40,7 @@ public sealed partial class XuexitongService
     public bool LoggedIn => _jar != null;
     public bool Expired { get; private set; }
     public DateTime? LastOk { get; private set; }
+    public string LastError { get; private set; } = "";
     public event Action? Changed;
 
     private sealed record Ck(string N, string V, string D, string P, long E = 0);
@@ -51,10 +54,17 @@ public sealed partial class XuexitongService
 
     public XuexitongService(HomeworkHub hub, ActivityStore store) : this(hub, store, Path.Combine(App.DataDir, "xuexitong.bin")) { }
 
-    internal XuexitongService(HomeworkHub hub, ActivityStore store, string credPath)
+    internal XuexitongService(
+        HomeworkHub hub,
+        ActivityStore store,
+        string credPath,
+        Func<CookieContainer, HttpClient>? httpFactory = null,
+        Func<int, Task>? delay = null)
     {
         _hub = hub; _store = store;
         _credPath = credPath;
+        _newHttp = httpFactory ?? NewHttp;
+        _delay = delay ?? (milliseconds => Task.Delay(milliseconds));
         _login = new LoginFile(credPath);
         _sync = hub.Sync();
         // 退出标记读不到（被占用）：状态未知，文件都留着、先不登录，稍后再判断
@@ -264,6 +274,12 @@ public sealed partial class XuexitongService
 
     public void RefreshNow() { _next = DateTime.MinValue; Expired = false; Tick(); }
 
+    internal async Task RefreshForTestAsync()
+    {
+        _next = DateTime.MinValue;
+        await RefreshAsync();
+    }
+
     private async Task RefreshAsync()
     {
         _busy = true;
@@ -278,19 +294,34 @@ public sealed partial class XuexitongService
         }
         try
         {
-            var items = await Task.Run(() => Fetch(jar, ticket));
-            if (items == null) return;
+            var previous = _hub.Previous(Platform);
+            var items = await Task.Run(() => Fetch(jar, ticket, previous));
+            if (items == null)
+            {
+                if (Expired) LastError = "学习通登录已过期";
+                return;
+            }
             // 会话没变才提交：存 Cookie（服务器可能续期了）、更新作业列表、写缓存；退出 / 换号后的旧结果直接丢掉
             bool committed;
             lock (_state) committed = _sync.Commit(ticket, Platform, items, () => PersistLocked(jar));
             if (!committed) { App.Log("学习通: 会话已切换或凭据没保存，丢弃这次拉取的结果"); return; }
-            lock (_state) LastOk = DateTime.Now;
+            lock (_state) { LastOk = DateTime.Now; LastError = ""; }
             _hub.Refreshed();
             App.Log($"学习通: {items.Count} 项未交");
         }
         catch (StaleSession) { App.Log("学习通: 会话已切换，丢弃这次拉取"); }
-        catch (AntiSpiderException) when (_sync.IsCurrent(ticket)) { App.Log("学习通: 触发了验证页，2 小时后再试"); _next = DateTime.Now.AddHours(2); }
-        catch (Exception ex) when (_sync.IsCurrent(ticket)) { App.Log("学习通: " + ex.Message); _next = DateTime.Now.AddMinutes(10); }
+        catch (AntiSpiderException) when (_sync.IsCurrent(ticket))
+        {
+            LastError = "学习通暂时不可用";
+            App.Log("学习通: 触发了验证页，2 小时后再试");
+            _next = DateTime.Now.AddHours(2);
+        }
+        catch (Exception ex) when (_sync.IsCurrent(ticket))
+        {
+            LastError = "学习通暂时不可用";
+            App.Log("学习通: " + ex.Message);
+            _next = DateTime.Now.AddMinutes(10);
+        }
         catch (Exception) { App.Log("学习通: 会话已切换，丢弃这次拉取的结果"); }
         finally { _busy = false; Changed?.Invoke(); }
     }
@@ -304,9 +335,13 @@ public sealed partial class XuexitongService
         using var res = await h.GetAsync(url);
         if (!_sync.IsCurrent(ticket)) throw new StaleSession();
         var final = res.RequestMessage?.RequestUri?.ToString() ?? "";
+        if (final.Contains("passport2.chaoxing.com/login", StringComparison.OrdinalIgnoreCase)) { MarkExpired(ticket); return null; }
+        if (!res.IsSuccessStatusCode)
+            throw new HttpRequestException($"HTTP {(int)res.StatusCode}", null, res.StatusCode);
         var text = await res.Content.ReadAsStringAsync();
+        if (!_sync.IsCurrent(ticket)) throw new StaleSession();
         if (final.Contains("antispider", StringComparison.OrdinalIgnoreCase) || text.Contains("antispiderShowVerify")) throw new AntiSpiderException();
-        if (final.Contains("passport2.chaoxing.com/login") || text.Contains("<title>用户登录</title>")) { MarkExpired(ticket); return null; }
+        if (text.Contains("<title>用户登录</title>", StringComparison.OrdinalIgnoreCase)) { MarkExpired(ticket); return null; }
         return text;
     }
 
@@ -323,11 +358,14 @@ public sealed partial class XuexitongService
         });
     }
 
-    private sealed record Course(string Name, string Id, string Clazz, string Cpi);
+    internal enum CoursePageKind { Courses, Empty, Unknown }
+    internal sealed record CoursePage(CoursePageKind Kind, List<Course> Courses);
+    internal sealed record Course(string Name, string Id, string Clazz, string Cpi);
+    private sealed class UnknownPageException(string message) : Exception(message);
 
-    private async Task<List<HomeworkItem>?> Fetch(CookieContainer jar, long ticket)
+    private async Task<List<HomeworkItem>?> Fetch(CookieContainer jar, long ticket, IReadOnlyList<HomeworkItem> previous)
     {
-        using var h = NewHttp(jar);
+        using var h = _newHttp(jar);
         var basePage = await Get(h, ticket, "https://i.chaoxing.com/base");
         if (basePage == null) return null;
         var fm = Regex.Match(basePage, "\"fid\"\\s*:\\s*\"?(\\d+)\"?");
@@ -336,50 +374,67 @@ public sealed partial class XuexitongService
         var list = await Get(h, ticket, $"https://mooc2-ans.chaoxing.com/mooc2-ans/visit/courselistdata?courseType=1&courseFid={fid}&courseTeacherid=0&courseOrderBy=0");
         if (list == null) return null;
         Dump("courses.html", list);
-        var courses = ParseCourses(list).Take(20).ToList();
+        var page = ParseCoursePage(list);
+        if (page.Kind == CoursePageKind.Unknown) throw new UnknownPageException("无法识别的课程页面");
+        var courses = page.Courses.Take(20).ToList();
         var now = DateTime.Now;
         var items = new List<HomeworkItem>();
         var dumped = 0;
         foreach (var c in courses)
         {
-            await Task.Delay(700);
-            var mid = await Get(h, ticket, $"https://mooc1.chaoxing.com/visit/stucoursemiddle?courseid={c.Id}&clazzid={c.Clazz}&cpi={c.Cpi}&ismooc2=1&v=2");
-            if (mid == null) return null;
-            var workEnc = Hidden(mid, "workEnc");
-            if (workEnc.Length == 0) continue; // 这门课没开作业
-            var t = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-            await Task.Delay(400);
-            var wl = await Get(h, ticket, $"https://mooc1.chaoxing.com/mooc2/work/list?courseId={c.Id}&classId={c.Clazz}&cpi={c.Cpi}&ut=s&openc={Hidden(mid, "openc")}&enc={workEnc}&t={t}&stuenc={Hidden(mid, "enc")}&isdisplaytable=2");
-            if (wl == null) return null;
-            if (dumped++ < 2) Dump($"work-{c.Id}.html", wl);
-            foreach (Match m in WorkItem().Matches(wl))
+            try
             {
-                var url = WebUtility.HtmlDecode(Uri.UnescapeDataString(m.Groups[1].Value));
-                var title = WebUtility.HtmlDecode(m.Groups[2].Value.Trim());
-                var state = m.Groups[3].Value.Trim();
-                if (state.Contains("待批阅"))
+                await _delay(700);
+                var mid = await Get(h, ticket, $"https://mooc1.chaoxing.com/visit/stucoursemiddle?courseid={c.Id}&clazzid={c.Clazz}&cpi={c.Cpi}&ismooc2=1&v=2");
+                if (mid == null) return null;
+                var workEnc = Hidden(mid, "workEnc");
+                if (workEnc.Length == 0)
                 {
-                    // 交了没批：只用列表上现成的剩余时间，不为它多发详情请求
-                    if (LeftFromList(wl, m.Index, now) is { } sd && sd > now)
-                        items.Add(new HomeworkItem(Platform, c.Name, title, sd, true, url.StartsWith("http") ? url : "", "作业", Ungraded: true));
-                    continue;
+                    if (!LooksLikeCourseMiddlePage(mid)) throw new UnknownPageException("无法识别的课程详情页");
+                    continue; // 这门课没开作业
                 }
-                if (DoneMarks.Any(state.Contains) || state.Contains("已截止") || state.Contains("已过期")) continue;
-                // 列表上有时直接写着「剩余 X 小时」，能省一次详情请求
-                var dl = LeftFromList(wl, m.Index, now);
-                if (dl == null && url.StartsWith("http"))
+                var t = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+                await _delay(400);
+                var wl = await Get(h, ticket, $"https://mooc1.chaoxing.com/mooc2/work/list?courseId={c.Id}&classId={c.Clazz}&cpi={c.Cpi}&ut=s&openc={Hidden(mid, "openc")}&enc={workEnc}&t={t}&stuenc={Hidden(mid, "enc")}&isdisplaytable=2");
+                if (wl == null) return null;
+                if (dumped++ < 2) Dump($"work-{c.Id}.html", wl);
+                var matches = WorkItem().Matches(wl);
+                if (matches.Count == 0 && !LooksLikeEmptyWorkList(wl))
+                    throw new UnknownPageException("无法识别的作业列表页");
+                foreach (Match m in matches)
                 {
-                    if (!_deadlineCache.TryGetValue(url, out dl))
+                    var url = WebUtility.HtmlDecode(Uri.UnescapeDataString(m.Groups[1].Value));
+                    var title = WebUtility.HtmlDecode(m.Groups[2].Value.Trim());
+                    var state = m.Groups[3].Value.Trim();
+                    if (state.Contains("待批阅"))
                     {
-                        await Task.Delay(500);
-                        var detail = await Get(h, ticket, url);
-                        if (detail == null) return null;
-                        dl = ParseDeadline(detail, now);
-                        _deadlineCache[url] = dl;
+                        // 交了没批：只用列表上现成的剩余时间，不为它多发详情请求
+                        if (LeftFromList(wl, m.Index, now) is { } sd && sd > now)
+                            items.Add(new HomeworkItem(Platform, c.Name, title, sd, true, url.StartsWith("http") ? url : "", "作业", Ungraded: true));
+                        continue;
                     }
+                    if (DoneMarks.Any(state.Contains) || state.Contains("已截止") || state.Contains("已过期")) continue;
+                    // 列表上有时直接写着「剩余 X 小时」，能省一次详情请求
+                    var dl = LeftFromList(wl, m.Index, now);
+                    if (dl == null && url.StartsWith("http"))
+                    {
+                        if (!_deadlineCache.TryGetValue(url, out dl))
+                        {
+                            await _delay(500);
+                            var detail = await Get(h, ticket, url);
+                            if (detail == null) return null;
+                            dl = ParseDeadline(detail, now);
+                            _deadlineCache[url] = dl;
+                        }
+                    }
+                    if (dl is { } d && d > now)
+                        items.Add(new HomeworkItem(Platform, c.Name, title, d, false, url.StartsWith("http") ? url : "", "作业"));
                 }
-                if (dl is { } d && d > now)
-                    items.Add(new HomeworkItem(Platform, c.Name, title, d, false, url.StartsWith("http") ? url : "", "作业"));
+            }
+            catch (Exception ex) when (ex is not StaleSession and not AntiSpiderException)
+            {
+                App.Log($"学习通: 课程 {c.Name} 拉取失败，保留旧作业 · {ex.GetType().Name}");
+                items.AddRange(previous.Where(i => i.Course == c.Name));
             }
         }
         return items;
@@ -389,6 +444,32 @@ public sealed partial class XuexitongService
 
     [GeneratedRegex("<li onclick=\"goTask\\(this\\);\" data=\"([^\"]+)\"[\\s\\S]*?<p class=\"overHidden2 fl\">([^<]+)</p>[\\s\\S]*?<p class=\"status fl\">([^<]*)</p>")]
     private static partial Regex WorkItem();
+
+    internal static CoursePage ParseCoursePage(string html)
+    {
+        var courses = ParseCourses(html);
+        if (courses.Count > 0) return new CoursePage(CoursePageKind.Courses, courses);
+        return LooksLikeCoursePage(html)
+            ? new CoursePage(CoursePageKind.Empty, [])
+            : new CoursePage(CoursePageKind.Unknown, []);
+    }
+
+    internal static bool LooksLikeCoursePage(string html) =>
+        Regex.IsMatch(html, @"class\s*=\s*[""'][^""']*\bcourse-list\b", RegexOptions.IgnoreCase)
+        || html.Contains("id=\"courseList\"", StringComparison.OrdinalIgnoreCase)
+        || html.Contains("暂无课程", StringComparison.Ordinal)
+        || html.Contains("暂无课程数据", StringComparison.Ordinal);
+
+    private static bool LooksLikeCourseMiddlePage(string html) =>
+        html.Contains("courseid", StringComparison.OrdinalIgnoreCase)
+        || html.Contains("stuenc", StringComparison.OrdinalIgnoreCase)
+        || html.Contains("暂无作业", StringComparison.Ordinal);
+
+    private static bool LooksLikeEmptyWorkList(string html) =>
+        Regex.IsMatch(html, @"class\s*=\s*[""'][^""']*\bwork-list\b", RegexOptions.IgnoreCase)
+        || html.Contains("id=\"workList\"", StringComparison.OrdinalIgnoreCase)
+        || html.Contains("暂无作业", StringComparison.Ordinal)
+        || html.Contains("暂无任务", StringComparison.Ordinal);
 
     private static List<Course> ParseCourses(string html)
     {
