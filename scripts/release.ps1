@@ -11,7 +11,9 @@
 安全约定：
 - 开始前工作区必须干净、HEAD 必须正好是 -ExpectedCommit，否则什么都不改；
 - 先写版本号再跑测试（测的就是要发的版本）；测试 / 发布 / 校验任何一步失败都把 csproj 还原；
-- 只显式暂存 csproj，提交后核对父提交和改动文件；每条 git 命令都检查退出码。
+- 只显式暂存 csproj，提交后核对父提交和改动文件；每条 git 命令都检查退出码；
+- HEAD 上的 csproj 已经是目标版本（版本号单独提交过）时，不写文件、不新建提交，核对后直接给这个 HEAD 打标签发布；
+  -DryRun 也走同一个判断和核对，只是在提交 / 打标签之前停下。
 #>
 param(
     [Parameter(Mandatory = $true, Position = 0)][string]$Version,
@@ -25,13 +27,8 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-# 所有 git 调用都走这里：退出码不是 0 就抛错，不让失败的 git 命令被悄悄吞掉
-function Invoke-Git {
-    $gitArgs = @($args)
-    $output = & git @gitArgs
-    if ($LASTEXITCODE -ne 0) { throw "git $($gitArgs -join ' ') 失败（退出码 $LASTEXITCODE）" }
-    return $output
-}
+# Invoke-Git、Get-VersionPlan、Assert-ReleaseFromHead 等纯函数在 release-lib.ps1 里（有独立的行为测试）
+. (Join-Path $PSScriptRoot 'release-lib.ps1')
 
 $Version = $Version.TrimStart('v')
 if ($Version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z\.]+)?$') { throw "版本号要像 1.0.1 或 1.1.0-preview.2，收到的是 $Version" }
@@ -58,19 +55,25 @@ if (-not $Notes) { $Notes = "Qisland $tag" }
 
 $original = [IO.File]::ReadAllText((Resolve-Path $csproj))
 function Restore-Csproj {
+    if ($plan -ne 'write') { return }   # 版本号已提交的分支从没改过 csproj，不需要还原
     [IO.File]::WriteAllText((Resolve-Path $csproj), $original, (New-Object Text.UTF8Encoding $false))
     Write-Host "已还原 $csproj" -ForegroundColor Yellow
 }
 
+# 0.5 判断版本号是否已经提交在 HEAD 上
+$plan = Get-VersionPlan $original $Version
+if ($plan -eq 'committed') {
+    Assert-ReleaseFromHead $csprojGit $Version $expected
+    Write-Host "版本号已在 HEAD 提交（$expected 的 csproj 就是 $Version）：不改 csproj、不新建提交，直接从这个提交发布" -ForegroundColor Cyan
+}
+
 try {
     # 1. 版本号写进 csproj（先写再测：下面的测试和发布都针对这个版本）
-    $core = ($Version -split '-')[0]
-    $x = $original
-    $x = $x -replace '<Version>[^<]*</Version>', "<Version>$Version</Version>"
-    $x = $x -replace '<FileVersion>[^<]*</FileVersion>', "<FileVersion>$core.0</FileVersion>"
-    $x = $x -replace '<InformationalVersion>[^<]*</InformationalVersion>', "<InformationalVersion>$Version</InformationalVersion>"
-    [IO.File]::WriteAllText((Resolve-Path $csproj), $x, (New-Object Text.UTF8Encoding $false))
-    Write-Host "版本号 → $Version" -ForegroundColor Cyan
+    if ($plan -eq 'write') {
+        $x = Set-CsprojVersion $original $Version
+        [IO.File]::WriteAllText((Resolve-Path $csproj), $x, (New-Object Text.UTF8Encoding $false))
+        Write-Host "版本号 → $Version" -ForegroundColor Cyan
+    }
 
     # 2. 跑全部测试；任何一项失败都不打包，并还原版本号
     Write-Host "运行全部测试…" -ForegroundColor Cyan
@@ -110,19 +113,29 @@ catch {
     Restore-Csproj
     throw
 }
-if ($DryRun) { Restore-Csproj; Write-Host "DryRun：到此为止（版本号已还原，工作区保持干净）" -ForegroundColor Yellow; return }
+if ($plan -eq 'committed') {
+    # 测试、发布、打包之后再核一遍：工作区仍干净（publish\ releases\ 在 .gitignore 里）、HEAD 没变
+    Assert-ReleaseFromHead $csprojGit $Version $expected
+}
+if ($DryRun) {
+    Restore-Csproj
+    Write-Host "DryRun：到此为止（分支：$plan；没有提交、没有打标签、没有推送，工作区保持干净）" -ForegroundColor Yellow
+    return
+}
 
-# 5. 只暂存 csproj，提交后核对：父提交是发版前的 HEAD，改动的只有 csproj，工作区干净
-Invoke-Git add -- $csproj
-$staged = @(Invoke-Git diff --cached --name-only)
-if ($staged.Count -ne 1 -or $staged[0].Trim() -ne $csprojGit) { throw "暂存区不是只有 $csprojGit：$($staged -join ', ')" }
-Invoke-Git commit -q -m "发布 $tag"
-$parent = (Invoke-Git rev-parse "HEAD^" | Select-Object -First 1).Trim()
-if ($parent -ne $expected) { throw "发版提交的父提交是 $parent，不是 $expected" }
-$changed = @(Invoke-Git diff --name-only "HEAD^" HEAD)
-if ($changed.Count -ne 1 -or $changed[0].Trim() -ne $csprojGit) { throw "发版提交改动了意料之外的文件：$($changed -join ', ')" }
-$left = Invoke-Git status --porcelain
-if ($left) { throw "提交后工作区仍有改动：`n$($left -join "`n")" }
+if ($plan -eq 'write') {
+    # 5. 只暂存 csproj，提交后核对：父提交是发版前的 HEAD，改动的只有 csproj，工作区干净
+    Invoke-Git add -- $csproj
+    $staged = @(Invoke-Git diff --cached --name-only)
+    if ($staged.Count -ne 1 -or $staged[0].Trim() -ne $csprojGit) { throw "暂存区不是只有 $csprojGit：$($staged -join ', ')" }
+    Invoke-Git commit -q -m "发布 $tag"
+    $parent = (Invoke-Git rev-parse "HEAD^" | Select-Object -First 1).Trim()
+    if ($parent -ne $expected) { throw "发版提交的父提交是 $parent，不是 $expected" }
+    $changed = @(Invoke-Git diff --name-only "HEAD^" HEAD)
+    if ($changed.Count -ne 1 -or $changed[0].Trim() -ne $csprojGit) { throw "发版提交改动了意料之外的文件：$($changed -join ', ')" }
+    $left = Invoke-Git status --porcelain
+    if ($left) { throw "提交后工作区仍有改动：`n$($left -join "`n")" }
+}
 
 # 6. 打标签、推送
 Invoke-Git tag -a $tag -m "Qisland $tag"
