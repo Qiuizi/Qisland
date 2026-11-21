@@ -139,7 +139,7 @@ public static class HookPlans
     }
 
     /// <summary>只删我们的条目，删空的组和事件；别的原样。</summary>
-    public static string Remove(HookTarget t, string? json, out int removed) => Remove(t, json, null, out removed);
+    public static string Remove(HookTarget t, string? json, out int removed) => Remove(t, json, null, out removed) ?? "";   // only 为 null 时不会返回 null
 
     /// <summary>
     /// only 不为 null 时只删身份在 only 里的条目（按次数），确认之后新加或改过的我们的条目也保留。
