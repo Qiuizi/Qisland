@@ -82,7 +82,7 @@
 | `accepted` | 收下的卡片条数 |
 | `id` | 卡片在岛上的 ID（放进了 `ext:` 外部命名空间；一次只有一张卡片时才有，否则为 `null`） |
 
-`GET /v1/island/active` 返回当前外部卡片的数组，每项：`id`、`title`、`body`、`source`、`type`、`priority`（`high` / `normal` / `low`）、`progress`、`expires_at`（UTC，可能为 `null`）。
+`GET /v1/island/active` 返回当前外部卡片的数组，每项：`id`、`source`、`type`、`priority`（`high` / `normal` / `low`）、`progress`、`expires_at`（UTC，可能为 `null`）。设了 Token 且请求带对 Token 时，每项另有 `title`、`body`；没设 Token 时任何本机进程都能调这个接口，所以不返回标题和正文。
 
 ## 三、WebSocket（Qisland 不提供）
 

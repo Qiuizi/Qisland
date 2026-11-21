@@ -55,6 +55,16 @@ public sealed class ApiServer : IDisposable
     {
     }
 
+    /// <summary>按 Token 文件的三种状态启动：Invalid 时普通读写一律 503 并说明原因（健康检查、HMAC 审批路由不受影响）。</summary>
+    public ApiServer(int port, ActivityStore store, Action<Action> postToUi, string? approvalKey, ApiTokenConfig token)
+        : this(port, store, postToUi, approvalKey, TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(2), 128,
+            token.State == ApiTokenState.Enabled ? token.Token : null)
+    {
+        if (token.State == ApiTokenState.Invalid) _tokenError = token.Error ?? "Token 文件无效";
+    }
+
+    private readonly string? _tokenError;
+
     internal ApiServer(int port, ActivityStore store, Action<Action> postToUi,
         TimeSpan receiveTimeout, TimeSpan approvalTimeout, int maxConnections)
         : this(port, store, postToUi, null, receiveTimeout, approvalTimeout, maxConnections)
@@ -161,13 +171,19 @@ public sealed class ApiServer : IDisposable
                     await Response(stream, 503, "{\"ok\":false,\"error\":\"too many connections\"}").ConfigureAwait(false);
                     return;
                 }
+                if (_tokenError != null && !IsHealth(method, clean))
+                {
+                    // 配置了 Token 但文件读不了 / 无效：明确拒绝，不能悄悄当成「没配置」放行
+                    await Response(stream, 503, JsonSerializer.Serialize(new { ok = false, error = "api token invalid", detail = _tokenError })).ConfigureAwait(false);
+                    return;
+                }
                 if (!Authorized(method, clean, headers))
                 {
                     await Response(stream, 401, "{\"ok\":false,\"error\":\"unauthorized\"}").ConfigureAwait(false);
                     return;
                 }
                 var (normalCode, normalJson) = method == "GET" && clean is "/v1/island/active" or "/v3/island/active"
-                    ? await ActiveRoute().ConfigureAwait(false)
+                    ? await ActiveRoute(full: _apiToken != null).ConfigureAwait(false)
                     : SafeRoute(method, path, body);
                 await Response(stream, normalCode, normalJson).ConfigureAwait(false);
             }
@@ -268,7 +284,7 @@ public sealed class ApiServer : IDisposable
     private bool Authorized(string method, string clean, Dictionary<string, string> headers)
     {
         if (_apiToken == null) return true;
-        if (method == "GET" && clean is "" or "/health" or "/v1/status" or "/v1/health") return true;
+        if (IsHealth(method, clean)) return true;
         foreach (var name in new[] { "X-Qisland-Token", "X-WinIslands-Token" })
         {
             if (headers.TryGetValue(name, out var value)
@@ -277,6 +293,9 @@ public sealed class ApiServer : IDisposable
         }
         return false;
     }
+
+    private static bool IsHealth(string method, string clean) =>
+        method == "GET" && clean is "" or "/health" or "/v1/status" or "/v1/health";
 
     private static bool IsApprovalPath(string path)
     {
@@ -311,24 +330,29 @@ public sealed class ApiServer : IDisposable
     /// <summary>
     /// GET /v1/island/active（/v3 同）：只读，列出当前的外部卡片（本机接口 / 收件箱推进来的），
     /// Qisland 自己的条目（验证码、日程、待办……）不往外给。ActivityStore 只在 UI 线程上动，所以到 UI 线程上取快照。
+    /// 没配置 Token 时任何本机进程都能调这个接口，所以只给最少字段（id、来源、类型、优先级、进度、过期时间），
+    /// 不给标题和正文；配置了 Token 且请求带对了 Token（full）才返回完整卡片。
     /// </summary>
-    private async Task<(int, string)> ActiveRoute()
+    private async Task<(int, string)> ActiveRoute(bool full)
     {
         var done = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         _post(() =>
         {
             try
             {
-                var cards = _store.Ranked().Where(a => a.External).Select(a => new Dictionary<string, object?>
+                var cards = _store.Ranked().Where(a => a.External).Select(a =>
                 {
-                    ["id"] = a.Id,
-                    ["title"] = a.Title,
-                    ["body"] = a.Body,
-                    ["source"] = a.Source,
-                    ["type"] = a.Kind switch { Qisland.Core.ActivityKind.Error => "error", Qisland.Core.ActivityKind.Warning or Qisland.Core.ActivityKind.WaitingApproval => "warning", Qisland.Core.ActivityKind.Done => "success", _ => "info" },
-                    ["priority"] = a.Priority >= 70 ? "high" : a.Priority <= 15 ? "low" : "normal",
-                    ["progress"] = a.Progress,
-                    ["expires_at"] = a.Expires?.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture),
+                    var card = new Dictionary<string, object?>
+                    {
+                        ["id"] = a.Id,
+                        ["source"] = a.Source,
+                        ["type"] = a.Kind switch { Qisland.Core.ActivityKind.Error => "error", Qisland.Core.ActivityKind.Warning or Qisland.Core.ActivityKind.WaitingApproval => "warning", Qisland.Core.ActivityKind.Done => "success", _ => "info" },
+                        ["priority"] = a.Priority >= 70 ? "high" : a.Priority <= 15 ? "low" : "normal",
+                        ["progress"] = a.Progress,
+                        ["expires_at"] = a.Expires?.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture),
+                    };
+                    if (full) { card["title"] = a.Title; card["body"] = a.Body; }
+                    return card;
                 }).ToList();
                 done.TrySetResult(JsonSerializer.Serialize(cards));
             }

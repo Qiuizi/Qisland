@@ -6,6 +6,8 @@
 
 把 Token 写进 `%APPDATA%\Qisland\api-token.txt`（一行，可见 ASCII），重启 Qisland 后生效。设了 Token，除健康检查（`GET /health`、`/v1/status`、`/v1/health`）以外的普通请求都要带 `X-Qisland-Token` 或原来的 `X-WinIslands-Token`，否则回 `401`。没有这个文件就不校验。
 
+文件存在但读不了（被占用、没权限、路径是目录）、是空的、或内容不是一段不含空白的可见 ASCII，都算「配置了但无效」：Qisland 启动时记日志并在岛上报错，所有普通读写一律回 `503`（`{"ok":false,"error":"api token invalid","detail":"原因"}`），只有健康检查照常返回；不会退化成不校验。修好文件后重启 Qisland。
+
 仓库里的调用方会自己带上 Token：`scripts/qisland-push.ps1`、WSL 的 `scripts/qisland-push`、`Qisland.exe hook`、`docs/sdk-examples/` 和 DeepSeek Harness 插件都按「环境变量 `QISLAND_TOKEN` → `api-token.txt`」的顺序取 Token。审批接口 `/v1/approval/*` 用自己的 HMAC 签名，不看这个 Token。
 
 ## 外部活动的命名空间
@@ -51,7 +53,7 @@
 | 方法 | 路径 | 作用 |
 |---|---|---|
 | DELETE | `/v1/island/push/{id}` | 去掉一条（只能删外部卡片） |
-| GET | `/v1/island/active`（或 `/v3/island/active`） | 只读：当前外部卡片，JSON 数组，每项 `id` / `title` / `body` / `source` / `type` / `priority` / `progress` / `expires_at` |
+| GET | `/v1/island/active`（或 `/v3/island/active`） | 只读：当前外部卡片，JSON 数组，每项 `id` / `source` / `type` / `priority` / `progress` / `expires_at`；设了 Token 并带对 Token 时另有 `title` / `body`（没设 Token 时不返回标题和正文） |
 | GET | `/v1/health`（或 `/health`、`/v1/status`） | 健康检查，不要 Token，返回 `{"ok":true,"app":"Qisland","product":"Qisland"}` |
 
 上游 WinIslands 的 `PATCH /v3/island/push/{id}` 和 WebSocket `/v3/ws` Qisland 没有实现：更新就用同一个 `id` 再 POST。

@@ -135,8 +135,15 @@ public sealed partial class App : Application
         var apiReady = false;
         try
         {
-            var apiToken = ApiTokenFile.Read(DataDir);
-            if (apiToken != null) Log("本机推送接口已启用 Token 校验");
+            var apiToken = ApiTokenFile.Load(DataDir);
+            if (apiToken.State == ApiTokenState.Enabled) Log("本机推送接口已启用 Token 校验");
+            if (apiToken.State == ApiTokenState.Invalid)
+            {
+                // 配置了 Token 却读不了 / 内容无效：普通接口全部拒绝（健康检查除外），并在岛上明确提示
+                Log("本机推送接口 Token 无效，普通接口已全部拒绝: " + apiToken.Error);
+                _store.Upsert(new IslandActivity("api:token", "qisland", "推送接口 Token 无效",
+                    (apiToken.Error ?? "Token 文件无效") + "；修好后重启 Qisland", ActivityKind.Error, 70, DurationSeconds: 0), sticky: true);
+            }
             _api = new ApiServer(Port, _store, a => { _ = Dispatcher.InvokeAsync(a); }, approvalKey, apiToken);
             _api.Start();
             apiReady = true;
