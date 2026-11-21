@@ -364,9 +364,7 @@ public sealed class CalendarWatcher
 
         foreach (var e in Events)
         {
-            if (e.AllDay) continue;
-            var left = e.Start - now;
-            if (left <= TimeSpan.Zero || left > TimeSpan.FromMinutes(10) || !_reminded.Add(e.Key)) continue;
+            if (!InReminderWindow(e, now) || !_reminded.Add(e.Key)) continue;
             ShowReminder(e, now);
             break;
         }
@@ -384,7 +382,11 @@ public sealed class CalendarWatcher
             .ToList();
         foreach (var card in cards)
         {
-            if (!byId.TryGetValue(card.Id, out var current))
+            // 事件没了，或者有了改动、改完已经不在提醒窗口里：撤卡片，并重置这一条的提醒状态（以后再进窗口会重新提醒）。
+            // 没改动、只是到点开始了的，留给卡片自己的 120 秒到期，别在开会那一刻把加入链接收走
+            if (!byId.TryGetValue(card.Id, out var current)
+                || (!InReminderWindow(current, now)
+                    && !(_shownReminders.TryGetValue(card.Id, out var was) && SameReminder(was, current) && card.OpenUri == current.JoinUrl)))
             {
                 _store.Remove(card.Id);
                 _shownReminders.Remove(card.Id);
@@ -406,6 +408,14 @@ public sealed class CalendarWatcher
 
         foreach (var id in _shownReminders.Keys.Where(id => _store.Get(id) == null).ToList())
             _shownReminders.Remove(id);
+    }
+
+    /// <summary>提醒窗口：非全天、还没开始、10 分钟内开始。新建提醒和更新已上岛的提醒共用这一个判断。</summary>
+    internal static bool InReminderWindow(CalEvent e, DateTime now)
+    {
+        if (e.AllDay) return false;
+        var left = e.Start - now;
+        return left > TimeSpan.Zero && left <= TimeSpan.FromMinutes(10);
     }
 
     private void ShowReminder(CalEvent e, DateTime now)
