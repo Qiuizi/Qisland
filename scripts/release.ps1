@@ -52,6 +52,8 @@ if ($LASTEXITCODE -ne 0) { throw "发布失败" }
 # 产物必须来自 Qisland.App，且版本与 csproj 一致；旧 WinIslands 即使放错位置也会在这里被拦下
 $exe = Join-Path $out "Qisland.exe"
 if (-not (Test-Path -LiteralPath $exe)) { throw "发布产物缺少 Qisland.exe：$exe" }
+$legacy = Get-ChildItem -LiteralPath $out -Recurse -File -Filter "WinIslands.Legacy.exe" -ErrorAction SilentlyContinue
+if ($legacy) { throw "发布产物包含旧版 WinIslands.Legacy.exe：$($legacy[0].FullName)" }
 $projectXml = [xml](Get-Content $csproj -Raw -Encoding UTF8)
 $declaredVersion = @($projectXml.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { $_ })[0].Trim()
 $info = [Diagnostics.FileVersionInfo]::GetVersionInfo($exe)

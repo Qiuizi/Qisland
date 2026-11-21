@@ -26,12 +26,17 @@ public sealed class ApiServer : IDisposable
     private readonly string? _approvalKey;
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _slots;
+    private readonly SemaphoreSlim _approvalSlots = new(ApprovalReserve, ApprovalReserve);
+    private readonly SemaphoreSlim _overflowSlots = new(OverflowReserve, OverflowReserve);
     private readonly object _handlersGate = new();
     private readonly HashSet<Task> _handlers = [];
     private readonly TimeSpan _receiveTimeout;
     private readonly TimeSpan _approvalTimeout;
     private Task? _acceptTask;
     private int _disposed;
+    private const int ApprovalReserve = 8;
+    private const int OverflowReserve = 32;
+    private static readonly TimeSpan OverflowReceiveTimeout = TimeSpan.FromMilliseconds(500);
     /// <summary>挂起式审批：hook 连着不放，直到岛上给出决定（allow / deny / 空）。</summary>
     public Func<string, string, Task<string>>? Approval { get; set; }
     /// <summary>每条 Agent 事件（已经在 UI 线程上），给 AI 页的多会话列表用。</summary>
@@ -93,47 +98,90 @@ public sealed class ApiServer : IDisposable
     {
         using (client)
         {
-            if (!_slots.Wait(0))
+            var normalSlot = _slots.Wait(0);
+            if (!normalSlot && !_overflowSlots.Wait(0))
             {
                 await Reject(client);
                 return;
             }
+            var approvalSlot = false;
             try
             {
+                if (!normalSlot && !await WaitForData(client, OverflowReceiveTimeout))
+                {
+                    await Reject(client);
+                    return;
+                }
                 var stream = client.GetStream();
                 using var receive = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-                receive.CancelAfter(_receiveTimeout);
+                receive.CancelAfter(normalSlot ? _receiveTimeout : TimeSpan.FromSeconds(2));
                 var (method, path, body, headers) = await ReadRequest(stream, receive.Token);
                 var clean = path.Split('?')[0].TrimEnd('/');
-                var (code, json) = method == "POST" && IsApprovalPath(clean)
-                    ? await ApprovalRoute(clean, headers, body)
-                    : SafeRoute(method, path, body);
-                var payload = code == 204 ? [] : Encoding.UTF8.GetBytes(json);
-                var type = payload.Length > 0 ? "Content-Type: application/json; charset=utf-8\r\n" : "";
-                var reason = code switch { 200 => "OK", 204 => "No Content", 401 => "Unauthorized", 403 => "Forbidden", 404 => "Not Found", 500 => "Internal Server Error", 503 => "Service Unavailable", 504 => "Gateway Timeout", _ => "Error" };
-                var head = $"HTTP/1.1 {code} {reason}\r\n{type}Content-Length: {payload.Length}\r\nConnection: close\r\n\r\n";
-                using var write = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-                write.CancelAfter(TimeSpan.FromSeconds(5));
-                await stream.WriteAsync(Encoding.ASCII.GetBytes(head), write.Token);
-                await stream.WriteAsync(payload, write.Token);
+                if (method == "POST" && IsApprovalPath(clean))
+                {
+                    // 普通连接再多也不能挡住审批：审批走独立的小池子，满了才回 503
+                    if (!_approvalSlots.Wait(0))
+                    {
+                        await Response(stream, 503, "{\"ok\":false,\"error\":\"too many approval requests\"}");
+                        return;
+                    }
+                    approvalSlot = true;
+                    var (code, json) = await ApprovalRoute(clean, headers, body);
+                    await Response(stream, code, json);
+                    return;
+                }
+                if (!normalSlot)
+                {
+                    // 已经超过普通连接上限；等读完请求再拒绝，避免把审批请求误伤在入口
+                    await Response(stream, 503, "{\"ok\":false,\"error\":\"too many connections\"}");
+                    return;
+                }
+                var (normalCode, normalJson) = SafeRoute(method, path, body);
+                await Response(stream, normalCode, normalJson);
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException)
+            {
+                if (!normalSlot) await Reject(client);
+            }
             catch { /* 客户端断开就算了 */ }
-            finally { _slots.Release(); }
+            finally
+            {
+                if (approvalSlot) _approvalSlots.Release();
+                if (normalSlot) _slots.Release();
+                else _overflowSlots.Release();
+            }
         }
+    }
+
+    private static async Task<bool> WaitForData(TcpClient client, TimeSpan timeout)
+    {
+        var end = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < end)
+        {
+            try { if (client.Available > 0) return true; } catch { return false; }
+            await Task.Delay(10);
+        }
+        try { return client.Available > 0; } catch { return false; }
+    }
+
+    private async Task Response(NetworkStream stream, int code, string json)
+    {
+        var payload = code == 204 ? [] : Encoding.UTF8.GetBytes(json);
+        var type = payload.Length > 0 ? "Content-Type: application/json; charset=utf-8\r\n" : "";
+        var reason = code switch { 200 => "OK", 204 => "No Content", 401 => "Unauthorized", 403 => "Forbidden", 404 => "Not Found", 500 => "Internal Server Error", 503 => "Service Unavailable", 504 => "Gateway Timeout", _ => "Error" };
+        var head = $"HTTP/1.1 {code} {reason}\r\n{type}Content-Length: {payload.Length}\r\nConnection: close\r\n\r\n";
+        using var write = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        write.CancelAfter(TimeSpan.FromSeconds(5));
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(head), write.Token);
+        await stream.WriteAsync(payload, write.Token);
     }
 
     private async Task Reject(TcpClient client)
     {
         try
         {
-            var body = Encoding.UTF8.GetBytes("{\"ok\":false,\"error\":\"too many connections\"}");
-            var head = $"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n";
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-            timeout.CancelAfter(TimeSpan.FromSeconds(1));
             var stream = client.GetStream();
-            await stream.WriteAsync(Encoding.ASCII.GetBytes(head), timeout.Token);
-            await stream.WriteAsync(body, timeout.Token);
+            await Response(stream, 503, "{\"ok\":false,\"error\":\"too many connections\"}");
         }
         catch { }
     }
@@ -312,6 +360,8 @@ public sealed class ApiServer : IDisposable
         lock (_handlersGate) handlers = _handlers.ToArray();
         try { Task.WhenAll(handlers).GetAwaiter().GetResult(); } catch { }
         _slots.Dispose();
+        _approvalSlots.Dispose();
+        _overflowSlots.Dispose();
         _cts.Dispose();
     }
 }
