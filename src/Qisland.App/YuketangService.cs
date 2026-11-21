@@ -171,9 +171,13 @@ public sealed class YuketangService
         return true;
     }
 
-    private static HttpClient NewHttp(CookieContainer? jar = null)
+    /// <summary>
+    /// session = true：要手工带会话 Cookie 头的请求。关掉自动重定向——HttpClient 跟随重定向时会把手工设置的
+    /// Cookie 头原样带到新地址（包括跨域的 HTTPS 地址）；需要跟随的由 <see cref="Send"/> 核对同源后自己重发。
+    /// </summary>
+    private static HttpClient NewHttp(CookieContainer? jar = null, bool session = false)
     {
-        var h = new HttpClient(new HttpClientHandler { CookieContainer = jar ?? new CookieContainer(), UseCookies = jar != null }) { Timeout = TimeSpan.FromSeconds(40) };
+        var h = new HttpClient(new HttpClientHandler { CookieContainer = jar ?? new CookieContainer(), UseCookies = jar != null, AllowAutoRedirect = !session }) { Timeout = TimeSpan.FromSeconds(40) };
         h.DefaultRequestHeaders.UserAgent.ParseAdd(UA);
         h.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/plain, */*");
         h.DefaultRequestHeaders.Referrer = new Uri($"https://{Host}/web");
@@ -266,6 +270,13 @@ public sealed class YuketangService
     }
 
     internal string? SessionIdForTests => _jar["sessionid"];
+
+    /// <summary>会话所属的源（协议 + 主机 + 端口）。测试可指向本机假服务器；正式运行固定为 https://{Host}。</summary>
+    internal Uri? OriginOverride { get; set; }
+    private Uri Origin => OriginOverride ?? new Uri($"https://{Host}");
+
+    internal Task<AuthVerdict> ConfirmForTests() => Confirm(_jar.Generation);
+    internal Task<List<HomeworkItem>?> FetchForTests() => Fetch(_jar.Generation);
 
     /// <summary>退出登录。返回凭据的处理结果：Removed 删掉了；Pending 删不掉但写了退出标记（后台重试）；Failed 两样都没做成。</summary>
     public LogoutOutcome Logout()
@@ -374,7 +385,7 @@ public sealed class YuketangService
     {
         try
         {
-            using var h = NewHttp();
+            using var h = NewHttp(session: true);
             var (_, v, _) = await Send(h, gen, ConfirmPath, null);
             return v;
         }
@@ -386,27 +397,61 @@ public sealed class YuketangService
     /// <summary>请求一个接口：带上全部 Cookie，收下 Set-Cookie，并给出这次响应对登录状态的判断。</summary>
     private async Task<(JsonNode? body, AuthVerdict verdict, string detail)> Send(HttpClient h, long gen, string path, string? classroom)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Get, $"https://{Host}{path}");
-        if (classroom != null) req.Headers.Add("classroom-id", classroom);
-        if (!_jar.TryHeader(gen, DateTimeOffset.UtcNow, out var cookieHeader)) throw new StaleSession();
-        if (cookieHeader.Length == 0) throw new AuthProblem(AuthVerdict.Rejected, "本机没有可用的会话 Cookie");
-        req.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
-        req.Headers.Add("xtbz", "ykt");
-        using var res = await h.SendAsync(req);
-        if (!_jar.IsCurrent(gen)) throw new StaleSession();   // 等响应期间退出 / 换号了：Set-Cookie 不收、结论不算
-        var deleted = AbsorbCookies(res, gen);
-        var text = await res.Content.ReadAsStringAsync();
+        var origin = Origin;
+        var uri = new Uri(origin, path);
+        HttpResponseMessage? res = null;
+        var deleted = false;
+        try
+        {
+            for (var hop = 0; ; hop++)
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, uri);
+                if (classroom != null) req.Headers.Add("classroom-id", classroom);
+                if (!_jar.TryHeader(gen, DateTimeOffset.UtcNow, out var cookieHeader)) throw new StaleSession();
+                if (cookieHeader.Length == 0) throw new AuthProblem(AuthVerdict.Rejected, "本机没有可用的会话 Cookie");
+                req.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
+                req.Headers.Add("xtbz", "ykt");
+                res = await h.SendAsync(req);
+                if (!_jar.IsCurrent(gen)) throw new StaleSession();   // 等响应期间退出 / 换号了：Set-Cookie 不收、结论不算
+                deleted |= AbsorbCookies(res, gen);
+                if (!IsRedirect(res.StatusCode) || res.Headers.Location is not { } loc) break;
+                var next = loc.IsAbsoluteUri ? loc : new Uri(uri, loc);
+                // 只有协议、主机、端口都属于本会话才带着 Cookie 重发；跨源的一律不跟，按非 JSON 响应处理
+                if (!SameOrigin(next, origin))
+                {
+                    App.Log($"雨课堂: 不跟随跨源重定向 {path.Split('?')[0]} → {next.Scheme}://{next.Host}:{next.Port}");
+                    break;
+                }
+                if (hop >= 4) { App.Log("雨课堂: 重定向次数过多，停止跟随"); break; }
+                res.Dispose(); res = null;
+                uri = next;
+            }
+        }
+        catch { res?.Dispose(); throw; }
+        using var resp = res!;
+        var text = await resp.Content.ReadAsStringAsync();
         JsonNode? o = null;
         var isJson = false;
         try { if (text.TrimStart().StartsWith('{') || text.TrimStart().StartsWith('[')) { o = JsonNode.Parse(text); isJson = true; } } catch { }
         var code = (o as JsonObject)?["code"] ?? (o as JsonObject)?["errcode"];
-        var v = SessionHealth.ClassifyYuketang((int)res.StatusCode, isJson, code?.ToString(), deleted);
+        var v = SessionHealth.ClassifyYuketang((int)resp.StatusCode, isJson, code?.ToString(), deleted);
         var msg = (o as JsonObject)?["msg"] ?? (o as JsonObject)?["errmsg"] ?? (o as JsonObject)?["message"];
         var where = path.Split('?')[0];
         if (where.Length > 48) where = where[..48] + "…";
-        var detail = $"{where} HTTP {(int)res.StatusCode}{(isJson ? "" : " 非JSON")}{(code != null ? " code " + code : "")}{(msg != null ? " " + Short(msg.ToString()) : "")}{(deleted ? " 会话Cookie被删除" : "")}";
+        var detail = $"{where} HTTP {(int)resp.StatusCode}{(isJson ? "" : " 非JSON")}{(code != null ? " code " + code : "")}{(msg != null ? " " + Short(msg.ToString()) : "")}{(deleted ? " 会话Cookie被删除" : "")}";
         return (o, v, detail);
     }
+
+    private static bool IsRedirect(HttpStatusCode code) =>
+        code is HttpStatusCode.MovedPermanently or HttpStatusCode.Found or HttpStatusCode.SeeOther
+            or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect;
+
+    /// <summary>同源：协议、主机、端口完全一致（主机不分大小写）。</summary>
+    internal static bool SameOrigin(Uri a, Uri b) =>
+        a.IsAbsoluteUri && b.IsAbsoluteUri
+        && string.Equals(a.Scheme, b.Scheme, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(a.IdnHost, b.IdnHost, StringComparison.OrdinalIgnoreCase)
+        && a.Port == b.Port;
 
     private static string Short(string s) => s.Length > 40 ? s[..40] + "…" : s;
 
@@ -470,7 +515,7 @@ public sealed class YuketangService
 
     private async Task<List<HomeworkItem>?> Fetch(long gen)
     {
-        using var h = NewHttp();
+        using var h = NewHttp(session: true);
         var courses = await Get(h, gen, "/v2/api/web/courses/list?identity=2");
         Dump("courses", courses);
         var list = courses["data"]?["list"]?.AsArray() ?? [];
