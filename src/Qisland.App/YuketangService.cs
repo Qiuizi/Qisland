@@ -587,11 +587,24 @@ public sealed class YuketangService
                     ungraded = st.sc >= 1 && st.ungraded;
                 }
                 var kind = type == 5 ? "试卷" : type == 19 ? "章节作业" : "作业";
-                items.Add(new HomeworkItem(Platform, course, ao["title"]?.ToString() ?? kind, dl.Value, done,
-                    $"https://{Host}/v2/web/studentLog/{cid}", kind, ungraded));
+                var title = ao["title"]?.ToString() ?? kind;
+                items.Add(new HomeworkItem(Platform, course, title, dl.Value, done,
+                    $"https://{Host}/v2/web/studentLog/{cid}", kind, ungraded,
+                    CourseId: cid, ActivityId: ActivityId(ao, title), Account: _account));
             }
         }
         return items;
+    }
+
+    /// <summary>
+    /// 平台活动 ID：同一门课的作业共用一个学习日志链接，只能靠它区分。依次取 id / courseware_id / content.leaf_id，
+    /// 都没有时退回「标题」（加前缀，不会和数字 ID 撞）。
+    /// </summary>
+    internal static string ActivityId(JsonObject a, string title)
+    {
+        foreach (var n in new[] { a["id"], a["courseware_id"], (a["content"] as JsonObject)?["leaf_id"] })
+            if (n is JsonValue && n.ToString() is { Length: > 0 } v && v != "0") return v;
+        return "title:" + title;
     }
 
     // 不同活动类型的截止字段名不统一：在活动本身和 content 里找名字带 deadline / end 的时间戳

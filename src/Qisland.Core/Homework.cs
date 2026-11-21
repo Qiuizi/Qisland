@@ -2,7 +2,8 @@ namespace Qisland.Core;
 
 /// <summary>一条作业 / 测验 / 考试的截止信息（来自雨课堂、学习通等，只读）。</summary>
 /// <param name="Ungraded">交了但老师还没批（主观题待批改）。这类算完成，只在「已交待批」里单独列出来。</param>
-public sealed record HomeworkItem(string Platform, string Course, string Title, DateTime Deadline, bool Done, string Url = "", string Kind = "作业", bool Ungraded = false)
+public sealed record HomeworkItem(string Platform, string Course, string Title, DateTime Deadline, bool Done, string Url = "", string Kind = "作业", bool Ungraded = false,
+    string CourseId = "", string ActivityId = "", string Account = "")
 {
     /// <summary>截止提醒的档位：24 / 3 / 1 小时内，0 表示还早。</summary>
     public int Tier(DateTime now)
@@ -15,10 +16,20 @@ public sealed record HomeworkItem(string Platform, string Course, string Title, 
     public string Key => $"{Platform}|{Course}|{Title}|{Deadline:yyyyMMddHHmm}";
 
     /// <summary>
-    /// 提醒去重用的键：作业链接（或 平台+课程+标题），不含截止时间——学习通列表只给「剩余时间」，
-    /// 每次拉取反推的截止时间会差一两分钟，带分钟的键会让同一档提醒弹两次。
+    /// 提醒去重用的键，不含截止时间——学习通列表只给「剩余时间」，每次拉取反推的截止时间会差一两分钟，带分钟的键会让同一档提醒弹两次。
+    /// 有平台活动 ID 时按 平台 + 账号 + 课程 + 活动 ID 区分（雨课堂同一门课的作业共用一个链接，不能按链接认）；
+    /// 没有活动 ID 的（学习通每份作业链接各不相同）沿用 作业链接 / 平台+课程+标题。
     /// </summary>
-    public string AlertKey => Url.Length > 0 ? $"{Platform}|{Url}" : $"{Platform}|{Course}|{Title}";
+    public string AlertKey => ActivityId.Length > 0 ? $"{Platform}|{Account}|{CourseId}|{ActivityId}"
+        : Url.Length > 0 ? $"{Platform}|{Url}" : $"{Platform}|{Course}|{Title}";
+
+    /// <summary>旧版本可能用过的提醒键（4.0.0 带截止分钟的键、4.0.9 及以前的链接 / 课程+标题键），升级时用来继承提醒档位。</summary>
+    public IEnumerable<string> LegacyAlertKeys()
+    {
+        if (Url.Length > 0) yield return $"{Platform}|{Url}";
+        yield return $"{Platform}|{Course}|{Title}";
+        yield return Key;
+    }
 
     public string Left(DateTime now)
     {
@@ -61,8 +72,16 @@ public static class HomeworkAlerts
     {
         var list = pending.ToList();
         var migrated = false;
-        foreach (var p in list)   // 4.0.0 及以前的键带截止分钟：搬到新键上，升级后不重复提醒
-            if (!alerted.ContainsKey(p.AlertKey) && alerted.TryGetValue(p.Key, out var old)) { alerted[p.AlertKey] = old; migrated = true; }
+        // 旧版本的键搬到新键上，升级后不重复提醒；但一条旧记录只在唯一对上一份作业时才继承——
+        // 雨课堂同一门课的几份作业旧键相同，谁继承都会压掉别人的提醒，干脆都不继承
+        var claims = list.SelectMany(p => p.LegacyAlertKeys().Where(k => k != p.AlertKey).Distinct().Select(k => (k, p.AlertKey)))
+            .GroupBy(x => x.k).ToDictionary(g => g.Key, g => g.Select(x => x.AlertKey).Distinct().Count());
+        foreach (var p in list)
+        {
+            if (alerted.ContainsKey(p.AlertKey)) continue;
+            foreach (var k in p.LegacyAlertKeys())
+                if (k != p.AlertKey && claims.GetValueOrDefault(k) == 1 && alerted.TryGetValue(k, out var old)) { alerted[p.AlertKey] = old; migrated = true; break; }
+        }
         var keys = list.Select(p => p.AlertKey).ToHashSet();
         var stale = alerted.Keys.Where(k => !keys.Contains(k)).ToList();
         foreach (var k in stale) alerted.Remove(k);
