@@ -30,6 +30,11 @@ public static class SelectionGrabber
 
     public const string TargetChangedMessage = "目标窗口已变化，已复制，请手动粘贴";
 
+    /// <summary>剪贴板备份的结果：Saved 备份到了内容；Empty 剪贴板本来就是空的；Unavailable 没法可靠备份（被占用 / 读失败 / 有存不下来的格式）。</summary>
+    internal enum BackupState { Saved, Empty, Unavailable }
+
+    internal sealed record ClipboardBackup(BackupState State, Dictionary<string, object>? Data = null);
+
     internal interface ISelectionPasteHost
     {
         PasteTargetSnapshot ForegroundTarget();
@@ -37,7 +42,22 @@ public static class SelectionGrabber
         bool ModifiersAreDown();
         Task DelayAsync(int milliseconds);
         bool SetClipboardText(string text);
-        void SendPaste();
+        /// <summary>发 Ctrl+V；返回 SendInput 是否把按键全部送进了输入队列。</summary>
+        bool SendPaste();
+        ClipboardBackup Backup();
+        void Restore(ClipboardBackup backup);
+    }
+
+    /// <summary>划词时模拟 Ctrl+C 用到的剪贴板 / 按键操作（测试里换成假的）。</summary>
+    internal interface ISelectionCopyHost
+    {
+        uint ClipboardSequenceNumber { get; }
+        Task DelayAsync(int milliseconds);
+        /// <summary>发 Ctrl+C；返回 SendInput 是否把按键全部送进了输入队列。</summary>
+        bool SendCopy();
+        string? ReadText();
+        ClipboardBackup Backup();
+        void Restore(ClipboardBackup backup);
     }
 
     internal readonly record struct PasteAttemptResult(PasteOutcome Outcome, uint Sequence);
@@ -65,27 +85,43 @@ public static class SelectionGrabber
         for (var i = 0; i < 40 && ModifiersDown(); i++) await Task.Delay(25);
         if (GetForegroundWindow() != fg) return new(null, fg, "窗口切走了", focus, pid, capturedAt);
 
-        var backup = Backup();
-        var seq = GetClipboardSequenceNumber();
+        var (text, refused) = await CopySelectionAsync(WindowsHost);
+        return refused != null || string.IsNullOrWhiteSpace(text)
+            ? new(null, fg, refused ?? "没有选中文字", focus, pid, capturedAt)
+            : new(text, fg, null, focus, pid, capturedAt);
+    }
+
+    internal static Task<(string? Text, string? Refused)> CopySelectionForTestAsync(ISelectionCopyHost host) => CopySelectionAsync(host);
+
+    /// <summary>临时 Ctrl+C 取选中文字，再把剪贴板还原。</summary>
+    private static async Task<(string? Text, string? Refused)> CopySelectionAsync(ISelectionCopyHost host)
+    {
+        var backup = host.Backup();
+        // 备份不可靠（剪贴板被占用 / 读失败 / 有存不下来的格式）：不做临时复制，免得还原不回去把用户的剪贴板弄丢
+        if (backup.State == BackupState.Unavailable)
+            return (null, "剪贴板暂时没法可靠备份，没有模拟复制（可以先手动复制再试）");
+        var seq = host.ClipboardSequenceNumber;
         SuppressClipUntil = DateTime.Now.AddSeconds(3);
-        SendChord(0x43); // C
+        if (!host.SendCopy())
+        {
+            SuppressClipUntil = DateTime.Now.AddMilliseconds(800);
+            return (null, "模拟 Ctrl+C 没有发出去（按键被系统拒绝），剪贴板没动");
+        }
         string? text = null;
         uint copied = 0;
         for (var i = 0; i < 24; i++)
         {
-            await Task.Delay(25);
-            if (GetClipboardSequenceNumber() == seq) continue;
-            await Task.Delay(30);
-            copied = GetClipboardSequenceNumber();
-            try { if (Clipboard.ContainsText()) text = Clipboard.GetText(); } catch { }
+            await host.DelayAsync(25);
+            if (host.ClipboardSequenceNumber == seq) continue;
+            await host.DelayAsync(30);
+            copied = host.ClipboardSequenceNumber;
+            text = host.ReadText();
             break;
         }
         // 只在剪贴板还是这次 Ctrl+C 的结果时还原；期间别的程序又复制了东西就不覆盖它
-        if (PasteGuard.ShouldRestoreClipboard(copied, GetClipboardSequenceNumber())) Restore(backup);
+        if (PasteGuard.ShouldRestoreClipboard(copied, host.ClipboardSequenceNumber)) host.Restore(backup);
         SuppressClipUntil = DateTime.Now.AddMilliseconds(800);
-        return string.IsNullOrWhiteSpace(text)
-            ? new(null, fg, "没有选中文字", focus, pid, capturedAt)
-            : new(text, fg, null, focus, pid, capturedAt);
+        return (text, null);
     }
 
     /// <summary>把文字粘贴到 target 窗口（岛不抢焦点，所以一般还是原来那个窗口），然后还原剪贴板。不按回车。</summary>
@@ -124,8 +160,14 @@ public static class SelectionGrabber
 
     private static async Task<PasteOutcome> PasteNow(string text, PasteTargetSnapshot target, ISelectionPasteHost? host = null)
     {
-        host ??= WindowsPasteHost;
-        var backup = Backup();
+        host ??= WindowsHost;
+        var backup = host.Backup();
+        if (backup.State == BackupState.Unavailable)
+        {
+            // 没法保证粘贴后还原原来的剪贴板：不走「临时放进剪贴板 → Ctrl+V → 还原」，只把译文复制好让你手动粘贴
+            App.Log("粘贴: 剪贴板没法可靠备份，改为只复制");
+            return host.SetClipboardText(text) ? PasteOutcome.Copied : PasteOutcome.Failed;
+        }
         SuppressClipUntil = DateTime.Now.AddSeconds(3);
         var result = await RunPasteAsync(text, target, host);
         if (result.Outcome != PasteOutcome.Pasted)
@@ -135,11 +177,14 @@ public static class SelectionGrabber
         }
         await host.DelayAsync(350);   // 让目标程序读完剪贴板再还原
         // 期间剪贴板被别人改过（序号不是我们放进去的那个）就不还原，免得把用户新复制的内容冲掉
-        if (PasteGuard.ShouldRestoreClipboard(result.Sequence, host.ClipboardSequenceNumber)) Restore(backup);
+        if (PasteGuard.ShouldRestoreClipboard(result.Sequence, host.ClipboardSequenceNumber)) host.Restore(backup);
         else App.Log("粘贴后剪贴板已被其他程序改动，不还原");
         SuppressClipUntil = DateTime.Now.AddMilliseconds(800);
         return PasteOutcome.Pasted;
     }
+
+    internal static Task<PasteOutcome> PasteNowForTestAsync(string text, PasteTargetSnapshot target, ISelectionPasteHost host) =>
+        PasteNow(text, target, host);
 
     internal static Task<PasteAttemptResult> PasteForTestAsync(string text, PasteTargetSnapshot target, ISelectionPasteHost host) =>
         RunPasteAsync(text, target, host);
@@ -156,20 +201,28 @@ public static class SelectionGrabber
         var current = host.ClipboardSequenceNumber;
         if (PasteGuard.DecideTarget(target, now, ours, current) != PasteDecision.Paste)
             return new(PasteOutcome.TargetChanged, ours);
-        host.SendPaste();
+        // 以 SendInput 的实际结果为准：按键没进输入队列就不算粘贴成功，译文留在剪贴板上提示手动粘贴
+        if (!host.SendPaste()) return new(PasteOutcome.Copied, ours);
         return new(PasteOutcome.Pasted, ours);
     }
 
-    private static readonly ISelectionPasteHost WindowsPasteHost = new WindowsSelectionPasteHost();
+    private static readonly WindowsSelectionHost WindowsHost = new();
 
-    private sealed class WindowsSelectionPasteHost : ISelectionPasteHost
+    private sealed class WindowsSelectionHost : ISelectionPasteHost, ISelectionCopyHost
     {
         public PasteTargetSnapshot ForegroundTarget() => TargetOf(GetForegroundWindow());
         public uint ClipboardSequenceNumber => GetClipboardSequenceNumber();
         public bool ModifiersAreDown() => ModifiersDown();
         public Task DelayAsync(int milliseconds) => Task.Delay(milliseconds);
         public bool SetClipboardText(string text) => SetPrivateText(text);
-        public void SendPaste() => SendChord(0x56);
+        public bool SendPaste() => SendChord(0x56);
+        public bool SendCopy() => SendChord(0x43);
+        public string? ReadText()
+        {
+            try { return Clipboard.ContainsText() ? Clipboard.GetText() : null; } catch { return null; }
+        }
+        public ClipboardBackup Backup() => SelectionGrabber.Backup();
+        public void Restore(ClipboardBackup backup) => SelectionGrabber.Restore(backup);
     }
 
     public static PasteTargetSnapshot TargetOf(IntPtr window) =>
@@ -194,26 +247,37 @@ public static class SelectionGrabber
 
     private static readonly string[] Formats = [DataFormats.UnicodeText, DataFormats.Rtf, DataFormats.Html, DataFormats.FileDrop, DataFormats.Bitmap];
 
-    private static Dictionary<string, object>? Backup()
+    /// <summary>
+    /// 备份剪贴板。区分三种情况：真的是空的（Empty，之后还原就是清空）；备份到了（Saved）；
+    /// 没法可靠备份（Unavailable：被别的程序占着、读出错、或者里面只有存不下来的格式）——这种情况调用方不做临时复制。
+    /// </summary>
+    private static ClipboardBackup Backup()
     {
         try
         {
             var data = Clipboard.GetDataObject();
-            if (data == null) return null;
+            var formats = data?.GetFormats(false) ?? [];
+            if (formats.Length == 0)
+                return CountClipboardFormats() == 0 ? new(BackupState.Empty) : new(BackupState.Unavailable);
             var keep = new Dictionary<string, object>();
             foreach (var f in Formats)
-                if (data.GetDataPresent(f) && data.GetData(f) is { } v)
-                    keep[f] = v is StringCollection sc ? sc.Cast<string>().ToArray() : v;
-            return keep;
+            {
+                if (!data!.GetDataPresent(f)) continue;
+                if (data.GetData(f) is not { } v) return new(BackupState.Unavailable);   // 说有却读不出来
+                keep[f] = v is StringCollection sc ? sc.Cast<string>().ToArray() : v;
+            }
+            return keep.Count > 0 ? new(BackupState.Saved, keep) : new(BackupState.Unavailable);   // 有内容但没有一种能存下来
         }
-        catch { return null; }
+        catch { return new(BackupState.Unavailable); }
     }
 
-    private static void Restore(Dictionary<string, object>? keep)
+    private static void Restore(ClipboardBackup backup)
     {
+        if (backup.State == BackupState.Unavailable) return;   // 没备份到就不动（调用方本来也不会走到这里）
+        var keep = backup.Data;
         try
         {
-            if (keep == null || keep.Count == 0) { Clipboard.Clear(); return; }
+            if (backup.State == BackupState.Empty || keep == null || keep.Count == 0) { Clipboard.Clear(); return; }
             var d = new DataObject();
             foreach (var (f, v) in keep) d.SetData(f, v);
             Clipboard.SetDataObject(d, true);
@@ -304,13 +368,16 @@ public static class SelectionGrabber
         (GetAsyncKeyState(0x12) & 0x8000) != 0 || (GetAsyncKeyState(0x10) & 0x8000) != 0 || (GetAsyncKeyState(0x5B) & 0x8000) != 0 || (GetAsyncKeyState(0x5C) & 0x8000) != 0
         || (GetAsyncKeyState(0x11) & 0x8000) != 0;
 
-    private static void SendChord(ushort vk)
+    private static bool SendChord(ushort vk)
     {
         var inputs = new[]
         {
             Key(0x11, false), Key(vk, false), Key(vk, true), Key(0x11, true),
         };
-        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>());
+        var sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>());
+        if (sent == inputs.Length) return true;
+        App.Log($"SendInput 只送进了 {sent}/{inputs.Length} 个按键（错误 {Marshal.GetLastWin32Error()}）");
+        return false;
     }
 
     private static Input Key(ushort vk, bool up) => new() { type = 1, ki = new KeybdInput { wVk = vk, dwFlags = up ? 2u : 0u } };
@@ -330,6 +397,7 @@ public static class SelectionGrabber
 
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern uint GetClipboardSequenceNumber();
+    [DllImport("user32.dll")] private static extern int CountClipboardFormats();
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vk);
     [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint n, Input[] inputs, int size);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
