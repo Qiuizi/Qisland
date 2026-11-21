@@ -81,6 +81,12 @@ public sealed class ApiServer : IDisposable
         get { lock (_handlersGate) return _handlers.Count; }
     }
 
+    /// <summary>还记在跟踪集合里的连接数（测试用，确认每条退出路径都清理了）。</summary>
+    internal int TrackedClients
+    {
+        get { lock (_clientsGate) return _clients.Count; }
+    }
+
     public void Start()
     {
         if (_acceptTask != null) return;
@@ -106,6 +112,13 @@ public sealed class ApiServer : IDisposable
     }
 
     private async Task Handle(TcpClient client)
+    {
+        // 跟踪集合的清理放在最外层 finally：快速 503、超时、异常、正常返回，每条出口都会走到
+        try { await HandleCore(client).ConfigureAwait(false); }
+        finally { lock (_clientsGate) _clients.Remove(client); }
+    }
+
+    private async Task HandleCore(TcpClient client)
     {
         using (client)
         {
@@ -165,7 +178,6 @@ public sealed class ApiServer : IDisposable
                 if (approvalSlot) _approvalSlots.Release();
                 if (normalSlot) _slots.Release();
                 else _overflowSlots.Release();
-                lock (_clientsGate) _clients.Remove(client);
             }
         }
     }
