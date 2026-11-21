@@ -224,10 +224,14 @@ public sealed class Updater
                       ?? throw new InvalidOperationException("压缩包里没有 Qisland.exe");
             var from = Path.GetDirectoryName(exe)!;
             var appDir = AppContext.BaseDirectory.TrimEnd('\\');
+            var targetVersion = UpdateScript.NormalizeVersion(r.Tag);
+            UpdateScript.ValidateCandidate(from, targetVersion);
 
             var pid = Environment.ProcessId;
             App.Log($"更新 {Current} → {r.Tag}，覆盖 {appDir}");
-            using var updater = UpdateScript.Start(pid, from, appDir, Path.Combine(tmp, "backup"), ResultFile);
+            using var updater = UpdateScript.Start(pid, from, appDir, Path.Combine(tmp, "backup"), ResultFile,
+                targetVersion, manifestFile: Path.Combine(tmp, "manifest.json"),
+                readyFile: Path.Combine(tmp, "ready.txt"));
             App.Log($"更新器已启动（PID {updater.Id}）");
             Progress(1, "马上重启…");
             await Task.Delay(600);
@@ -237,8 +241,11 @@ public sealed class Updater
         {
             App.Log("更新失败: " + ex);
             _busy = false;
+            var reason = ex is InvalidDataException or InvalidOperationException
+                ? ex.Message
+                : "网络不通，点一下再试";
             App.Current.Dispatcher.BeginInvoke(() =>
-                _store.Upsert(new IslandActivity(Id, "update", "更新没成功", "网络不通，点一下再试", ActivityKind.Error, 60, DurationSeconds: 0), sticky: true, quiet: true));
+                _store.Upsert(new IslandActivity(Id, "update", "更新没成功", reason, ActivityKind.Error, 60, DurationSeconds: 0), sticky: true, quiet: true));
         }
     }
 }
