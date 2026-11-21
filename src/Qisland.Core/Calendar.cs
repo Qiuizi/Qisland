@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Qisland.Core;
@@ -5,7 +8,43 @@ namespace Qisland.Core;
 /// <summary>日历订阅里的一次具体日程（重复的已经展开）。</summary>
 public sealed record CalEvent(string Uid, string Title, string Location, DateTime Start, DateTime End, bool AllDay, string? JoinUrl, string? JoinApp)
 {
-    public string Key => $"{Uid}@{Start:yyyyMMddHHmm}";
+    /// <summary>订阅 ID；订阅是链接的稳定哈希，本机日程固定为 local。</summary>
+    public string SourceId { get; init; } = "";
+
+    /// <summary>这一次在原始日程中的开始时间；RECURRENCE-ID 改期时保留原定时间。</summary>
+    public DateTime? OriginalStart { get; init; }
+
+    /// <summary>去重、活动 ID 和提醒索引共用这一个身份。</summary>
+    public string Key => CalendarIdentity.Key(SourceId, Uid, Title, Location, Start, OriginalStart);
+}
+
+/// <summary>日程身份：订阅 + UID + 原始开始时间（秒级 UTC）；没有 UID 才用内容哈希。</summary>
+public static class CalendarIdentity
+{
+    public static string FeedId(string url)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(url));
+        return Convert.ToHexString(hash.AsSpan(0, 8)).ToLowerInvariant();
+    }
+
+    public static string Key(string sourceId, string uid, string title, string location, DateTime start, DateTime? originalStart)
+    {
+        if (string.IsNullOrWhiteSpace(uid))
+        {
+            var raw = $"{title.Trim()}\n{Utc(originalStart ?? start):yyyyMMdd'T'HHmmss'Z'}\n{location.Trim()}";
+            return "t:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw))).ToLowerInvariant();
+        }
+
+        var identity = Utc(originalStart ?? start);
+        return $"u:{sourceId}:{identity.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture)}:{uid}";
+    }
+
+    private static DateTime Utc(DateTime time) => time.Kind switch
+    {
+        DateTimeKind.Utc => time,
+        DateTimeKind.Local => time.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(time, DateTimeKind.Local).ToUniversalTime(),
+    };
 }
 
 /// <summary>
@@ -27,7 +66,7 @@ public static class CalendarIcs
     }
 
     /// <param name="local">换算到哪个时区显示（默认本机时区；单测里指定）。</param>
-    public static List<CalEvent> Expand(string ics, DateTime from, DateTime to, TimeZoneInfo? local = null)
+    public static List<CalEvent> Expand(string ics, DateTime from, DateTime to, TimeZoneInfo? local = null, string sourceId = "")
     {
         local ??= TimeZoneInfo.Local;
         var evs = Parse(ics, local).ToList();
@@ -52,7 +91,11 @@ public static class CalendarIcs
                 if (e.RecurrenceId == null && moved.Contains((e.Uid, st))) continue;
                 var en = st + dur;
                 if (en <= from || st >= to) continue;
-                list.Add(new CalEvent(e.Uid, Clean(e.Summary), Clean(e.Location), st, en, e.AllDay, join?.Url, join?.App));
+                list.Add(new CalEvent(e.Uid, Clean(e.Summary), Clean(e.Location), st, en, e.AllDay, join?.Url, join?.App)
+                {
+                    SourceId = sourceId,
+                    OriginalStart = e.RecurrenceId ?? st,
+                });
             }
         }
         return Dedupe(list);
@@ -63,7 +106,7 @@ public static class CalendarIcs
     /// 没有 UID 才退回 标题 + 开始 + 地点。同名同时、UID 或地点不同的两个日程都保留。
     /// </summary>
     public static List<CalEvent> Dedupe(IEnumerable<CalEvent> events) =>
-        events.GroupBy(c => c.Uid.Length > 0 ? ("u", c.Uid, c.Start, "") : ("t", c.Title, c.Start, c.Location))
+        events.GroupBy(c => c.Key, StringComparer.Ordinal)
             .Select(g => g.First()).OrderBy(c => c.Start).ToList();
 
     private static IEnumerable<Ev> Parse(string ics, TimeZoneInfo local)

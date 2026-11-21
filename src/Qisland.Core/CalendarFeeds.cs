@@ -48,6 +48,10 @@ public sealed class CalendarFeeds
 
     /// <summary>当前订阅着的日历内容（按订阅顺序；退订的不在里面）。</summary>
     public List<string> Sources() => _urls.Where(_cache.ContainsKey).Select(u => _cache[u]).ToList();
+
+    /// <summary>当前订阅内容及来源 URL，用来给每个日程带上稳定的订阅身份。</summary>
+    public List<(string Url, string Ics)> SourcesWithUrls() =>
+        _urls.Where(_cache.ContainsKey).Select(u => (u, _cache[u])).ToList();
 }
 
 /// <summary>代数：后台重建开始时取一个号，结束时不是最新的号就丢掉结果（晚到的旧结果不覆盖新的）。</summary>

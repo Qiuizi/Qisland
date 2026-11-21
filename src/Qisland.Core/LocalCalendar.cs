@@ -102,7 +102,11 @@ public sealed class LocalCalendar
     }
 
     private static CalEvent Make(LocalEvent e, DateTime s, DateTime end) =>
-        new(UidPrefix + e.Id + "@" + s.ToString("yyyyMMdd"), e.Title, e.Location, s, end, e.AllDay, null, null);
+        new(UidPrefix + e.Id + "@" + s.ToString("yyyyMMdd"), e.Title, e.Location, s, end, e.AllDay, null, null)
+        {
+            SourceId = "local",
+            OriginalStart = s,
+        };
 
     public string ToJson() => JsonSerializer.Serialize(_items);
 

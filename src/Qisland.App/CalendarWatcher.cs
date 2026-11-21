@@ -27,8 +27,10 @@ public sealed class CalendarWatcher
     private readonly HttpClient _http;
     private readonly HashSet<string> _reminded = [];
     private readonly Dictionary<string, CalEvent> _shownReminders = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _feedErrors = new(StringComparer.Ordinal);
     private readonly object _feedsGate = new();
     private readonly Func<string, bool> _featureOn;
+    private readonly Func<bool> _netReady;
     // 订阅 + 缓存；拉取时领票，期间退订（或退订后重订）的结果不会被收下
     private readonly CalendarFeeds _feeds = new();
     private readonly Generation _gen = new();
@@ -40,13 +42,14 @@ public sealed class CalendarWatcher
 
     public CalendarWatcher(ActivityStore store, HttpClient http) : this(store, http, App.DataDir) { }
 
-    internal CalendarWatcher(ActivityStore store, HttpClient http, string dataDir, Action<string>? log = null, Func<string, bool>? featureOn = null)
+    internal CalendarWatcher(ActivityStore store, HttpClient http, string dataDir, Action<string>? log = null, Func<string, bool>? featureOn = null, Func<bool>? netReady = null)
     {
         _store = store;
         _http = http;
         _dataDir = dataDir;
         _log = log ?? App.Log;
         _featureOn = featureOn ?? Features.On;
+        _netReady = netReady ?? App.NetReady;
     }
 
     internal Task LoadForTestAsync() => LoadAsync();
@@ -56,6 +59,30 @@ public sealed class CalendarWatcher
     {
         _feeds.Apply(_feeds.BeginFetch(url), ics);
         await Rebuild();
+    }
+
+    internal Task RunRefreshLoopForTestAsync(int iterations, Func<Task>? wait = null) =>
+        RunRefreshLoopAsync(iterations, wait);
+
+    internal string FeedErrorForTest(string url)
+    {
+        lock (_feedErrors) return _feedErrors.GetValueOrDefault(url, "");
+    }
+
+    public IReadOnlyDictionary<string, string> FeedErrors
+    {
+        get { lock (_feedErrors) return new Dictionary<string, string>(_feedErrors, StringComparer.Ordinal); }
+    }
+
+    internal static Dictionary<string, CalEvent> BuildReminderIndex(IEnumerable<CalEvent> events, Action<string>? log = null)
+    {
+        var byId = new Dictionary<string, CalEvent>(StringComparer.Ordinal);
+        foreach (var e in events)
+        {
+            var id = CalendarReminder.ActivityId(e);
+            if (!byId.TryAdd(id, e)) log?.Invoke($"日历提醒: 日程身份重复，保留一条 {id}");
+        }
+        return byId;
     }
 
     private Task? _load;
@@ -110,6 +137,9 @@ public sealed class CalendarWatcher
         {
             var ics = await Fetch(url);
             if (!ics.Contains("BEGIN:VCALENDAR", StringComparison.OrdinalIgnoreCase)) return (false, "这个链接返回的不是 .ics 日历");
+            var sourceId = CalendarIdentity.FeedId(url);
+            var parsed = await Task.Run(() => CalendarIcs.Expand(ics, DateTime.Today, DateTime.Today.AddDays(8), null, sourceId));
+            _ = BuildReminderIndex(CalendarIcs.Dedupe(Events.Concat(parsed)), _log);
             lock (_feedsGate)
             {
                 if (_feeds.Contains(url)) return (false, "这个日历已经订阅过了");
@@ -118,12 +148,13 @@ public sealed class CalendarWatcher
                 _feeds.Add(url, ics);
             }
             PersistCache();
-            await Rebuild();
-            var n = CalendarIcs.Expand(ics, DateTime.Today, DateTime.Today.AddDays(8)).Count;
+            try { await Rebuild(); }
+            catch (Exception ex) { _log("日历: 新订阅已保存，首次刷新稍后重试 · " + ex.Message); }
+            var n = parsed.Count;
             _log($"日历: 添加订阅 {Host(url)}，未来一周 {n} 个日程");
             return (true, $"已添加（{Host(url)}），未来一周有 {n} 个日程");
         }
-        catch (Exception ex) { _log($"日历: 添加 {Host(url)} 失败 {ex.GetType().Name}"); return (false, "拉取失败：" + ex.Message); }
+        catch (Exception ex) { _log($"日历: 添加 {Host(url)} 失败 {ex.GetType().Name}"); return (false, "新增订阅失败：" + Describe(ex)); }
     }
 
     public bool Remove(string url)
@@ -138,6 +169,7 @@ public sealed class CalendarWatcher
             }
             _feeds.Remove(url);
         }
+        lock (_feedErrors) _feedErrors.Remove(url);
         PersistCache();
         _rebuild = Rebuild();
         _log($"日历: 删除订阅 {Host(url)}");
@@ -204,40 +236,96 @@ public sealed class CalendarWatcher
         _load = LoadAsync();
         try { await _load; } catch (Exception ex) { _log("日历读取: " + ex.Message); }
         await Task.Delay(TimeSpan.FromSeconds(30));
-        while (true)
+        await RunRefreshLoopAsync();
+    }
+
+    private async Task RunRefreshLoopAsync(int? iterations = null, Func<Task>? wait = null)
+    {
+        var done = 0;
+        while (iterations is not { } max || done < max)
         {
-            if (_feeds.Count > 0 && Features.On(Features.Calendar) && App.NetReady())
+            try
             {
-                var ok = 0; var err = "";
-                foreach (var url in _feeds.Urls.ToList())
-                {
-                    var ticket = _feeds.BeginFetch(url);
-                    try { var ics = await Fetch(url); if (ics.Contains("BEGIN:VCALENDAR", StringComparison.OrdinalIgnoreCase) && _feeds.Apply(ticket, ics)) ok++; }
-                    catch (Exception ex) { err = $"{Host(url)}: {ex.GetType().Name}"; _log("日历拉取失败 " + err); }
-                }
-                if (ok > 0) { LastOk = DateTime.Now; PersistCache(); }
-                LastError = err;
-                await Rebuild();
+                if (_feeds.Count > 0 && _featureOn(Features.Calendar) && _netReady())
+                    await RefreshFeedsAsync();
             }
-            var kick = _kick.Task;
-            await Task.WhenAny(App.Nap(TimeSpan.FromMinutes(15)), kick);
-            if (kick.IsCompleted) _kick = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            catch (Exception ex)
+            {
+                LastError = "刷新异常：" + ex.GetType().Name;
+                _log("日历刷新循环: " + ex.Message);
+            }
+            done++;
+            if (iterations is { } limit && done >= limit) break;
+            try
+            {
+                if (wait != null) await wait();
+                else if (iterations == null)
+                {
+                    var kick = _kick.Task;
+                    await Task.WhenAny(App.Nap(TimeSpan.FromMinutes(15)), kick);
+                    if (kick.IsCompleted) _kick = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                }
+            }
+            catch (Exception ex) { _log("日历刷新等待: " + ex.GetType().Name); }
         }
     }
+
+    private async Task RefreshFeedsAsync()
+    {
+        var ok = 0;
+        var errors = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var url in _feeds.Urls.ToList())
+        {
+            var ticket = _feeds.BeginFetch(url);
+            try
+            {
+                var ics = await Fetch(url);
+                if (!ics.Contains("BEGIN:VCALENDAR", StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("返回的不是 .ics 日历");
+                var sourceId = CalendarIdentity.FeedId(url);
+                var parsed = await Task.Run(() => CalendarIcs.Expand(ics, DateTime.Today.AddDays(-1), DateTime.Today.AddDays(8), null, sourceId));
+                _ = BuildReminderIndex(parsed, _log);
+                if (_feeds.Apply(ticket, ics)) ok++;
+            }
+            catch (Exception ex)
+            {
+                var reason = Describe(ex);
+                errors[url] = reason;
+                _log($"日历拉取失败 {Host(url)}: {reason}");
+            }
+        }
+        lock (_feedErrors)
+        {
+            _feedErrors.Clear();
+            foreach (var (url, reason) in errors) _feedErrors[url] = reason;
+        }
+        LastError = string.Join("；", errors.Select(kv => $"{Host(kv.Key)}: {kv.Value}"));
+        if (ok > 0) { LastOk = DateTime.Now; PersistCache(); }
+        await Rebuild();
+    }
+
+    private static string Describe(Exception ex) => ex switch
+    {
+        HttpRequestException { StatusCode: { } status } => $"HTTP {(int)status}",
+        HttpRequestException => "网络请求失败",
+        OperationCanceledException => "请求超时",
+        IOException io => io.Message,
+        _ => ex.GetType().Name,
+    };
 
     /// <summary>解析放到后台线程（大的日历文件几十毫秒），结果回到 UI 线程再换上。</summary>
     private async Task Rebuild()
     {
         var gen = _gen.Next();
-        var sources = _feeds.Sources();
+        var sources = _feeds.SourcesWithUrls();
         var from = DateTime.Today.AddDays(-1);
         var local = _local.Expand(from, DateTime.Today.AddDays(8)).ToList();
         var events = await Task.Run(() =>
         {
             var all = new List<CalEvent>();
-            foreach (var ics in sources)
+            foreach (var (url, ics) in sources)
             {
-                try { all.AddRange(CalendarIcs.Expand(ics, from, DateTime.Today.AddDays(8))); }
+                try { all.AddRange(CalendarIcs.Expand(ics, from, DateTime.Today.AddDays(8), null, CalendarIdentity.FeedId(url))); }
                 catch (Exception ex) { _log("日历解析: " + ex.Message); }
             }
             all.AddRange(local);
@@ -290,7 +378,7 @@ public sealed class CalendarWatcher
     /// <summary>每次快照都核对已上岛的提醒：事件没了就撤回，链接 / 时间 / 标题变了就原地刷新。</summary>
     private void SyncCalendarReminders(DateTime now)
     {
-        var byId = Events.ToDictionary(CalendarReminder.ActivityId, StringComparer.Ordinal);
+        var byId = BuildReminderIndex(Events, _log);
         var cards = _store.Ranked()
             .Where(a => a.Source == Source && a.Id.StartsWith(CalendarReminder.IdPrefix, StringComparison.Ordinal))
             .ToList();
