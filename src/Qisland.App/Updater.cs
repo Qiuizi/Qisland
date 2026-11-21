@@ -181,7 +181,11 @@ public sealed class Updater
         catch { return null; }
         if (!UpdateScript.IsInterrupted(text) || !File.Exists(manifestFile)) return null;
         if (UpdateScript.ApplyingPid(text) is int scriptPid && IsAlivePowerShell(scriptPid)) return null;
-        return UpdateScript.StartRecover(pid, appDir, backupDir, resultFile, manifestFile, exe, waitForPid);
+        // 状态、清单、备份必须属于同一次更新、同一个安装目录；对不上就什么都不做，绝不把别处的备份写进来
+        var status = UpdateScript.ParseStatus(text);
+        if (status.UpdateId is not { } updateId) return null;
+        if (!UpdateScript.ManifestMatches(manifestFile, updateId, appDir, backupDir)) return null;
+        return UpdateScript.StartRecover(pid, appDir, backupDir, resultFile, manifestFile, updateId, exe, waitForPid);
     }
 
     private static bool IsAlivePowerShell(int pid)
@@ -194,7 +198,15 @@ public sealed class Updater
         catch { return false; }
     }
 
-    private static string UpdateTemp => Path.Combine(Path.GetTempPath(), "Qisland-update");
+    /// <summary>每个安装目录一份独立的更新工作区（按目录路径的 SHA256 区分），两份安装互不共用状态、清单和备份。</summary>
+    private static string UpdateTemp => UpdateTempFor(AppContext.BaseDirectory);
+
+    public static string UpdateTempFor(string appDir)
+    {
+        var key = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            UpdateScript.NormalizeDir(appDir).ToUpperInvariant())))[..16].ToLowerInvariant();
+        return Path.Combine(Path.GetTempPath(), "Qisland-update", key);
+    }
 
     /// <summary>App 启动时调用：发现中断的覆盖就拉起恢复脚本，返回 true 表示本进程应立即退出。</summary>
     public static bool RecoverInterruptedUpdate()
@@ -210,7 +222,7 @@ public sealed class Updater
         catch (Exception ex) { App.Log("启动更新恢复失败: " + ex.Message); return false; }
     }
 
-    private static string ResultFile => Path.Combine(Path.GetTempPath(), "Qisland-update", "result.txt");
+    private static string ResultFile => Path.Combine(UpdateTemp, "result.txt");
 
     /// <summary>以 --update-failed 启动（替换脚本回滚后拉起的旧版）：读脚本留下的结果，记日志并在岛上报错。</summary>
     public void ReportFailedUpdate()
@@ -226,7 +238,7 @@ public sealed class Updater
     private async Task Install(Release r)
     {
         _busy = true;
-        var tmp = Path.Combine(Path.GetTempPath(), "Qisland-update");
+        var tmp = UpdateTemp;
         try
         {
             // 上次覆盖中断留下的清单和备份是还原的唯一依据，恢复完成前不能清掉
@@ -276,7 +288,7 @@ public sealed class Updater
             App.Log($"更新 {Current} → {r.Tag}，覆盖 {appDir}");
             using var updater = UpdateScript.Start(pid, from, appDir, Path.Combine(tmp, "backup"), ResultFile,
                 targetVersion, manifestFile: Path.Combine(tmp, "manifest.json"),
-                readyFile: Path.Combine(tmp, "ready.txt"));
+                readyFile: Path.Combine(tmp, "ready.txt"), updateId: UpdateScript.NewUpdateId());
             App.Log($"更新器已启动（PID {updater.Id}）");
             Progress(1, "马上重启…");
             await Task.Delay(600);

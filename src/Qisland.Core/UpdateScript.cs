@@ -19,47 +19,93 @@ public static class UpdateScript
     public const int DefaultReadyTimeoutSeconds = 20;
     public const string InstallManifestName = "qisland-files.json";
 
-    /// <summary>result 文件停在 applying：覆盖进行到一半时进程被杀或断电，下次启动要按清单还原。</summary>
-    public static bool IsInterrupted(string? resultText)
+    /// <summary>
+    /// 覆盖期间的状态行：「applying &lt;脚本PID&gt; &lt;更新ID&gt;」或「pending &lt;脚本PID&gt; &lt;更新ID&gt;」。
+    /// 两者都表示安装目录可能已被改动、新版本还没确认就绪；脚本此时死掉，下次启动必须按同一更新 ID 的清单还原。
+    /// </summary>
+    public readonly record struct Status(string State, int? Pid, string? UpdateId);
+
+    public static Status ParseStatus(string? resultText)
     {
-        var t = (resultText ?? "").Trim();
-        return t == "applying" || t.StartsWith("applying ", StringComparison.Ordinal);
+        var parts = (resultText ?? "").Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return new("", null, null);
+        int? pid = parts.Length > 1 && int.TryParse(parts[1], out var n) ? n : null;
+        var id = parts.Length > 2 && IsValidUpdateId(parts[2]) ? parts[2] : null;
+        return new(parts[0], pid, id);
     }
 
-    /// <summary>applying 后面记着正在覆盖的脚本进程号；脚本还活着说明覆盖仍在进行，不是中断。</summary>
+    /// <summary>result 文件停在 applying 或 pending：覆盖进行到一半、或新进程还没确认就绪时脚本被杀/断电，下次启动要按清单还原。</summary>
+    public static bool IsInterrupted(string? resultText) => ParseStatus(resultText).State is "applying" or "pending";
+
+    /// <summary>applying / pending 后面记着脚本进程号；脚本还活着说明更新仍在进行，不是中断。</summary>
     public static int? ApplyingPid(string? resultText)
     {
-        var t = (resultText ?? "").Trim();
-        return IsInterrupted(t) && t.Length > 9 && int.TryParse(t[9..].Trim(), out var pid) ? pid : null;
+        var st = ParseStatus(resultText);
+        return st.State is "applying" or "pending" ? st.Pid : null;
     }
+
+    public static bool IsValidUpdateId(string? id) =>
+        !string.IsNullOrEmpty(id) && id.Length <= 64 && id.All(c => char.IsAsciiLetterOrDigit(c) || c == '-');
+
+    public static string NewUpdateId() => Guid.NewGuid().ToString("N");
+
+    /// <summary>同一路径的规范形式：恢复记录里的安装目录必须和当前要恢复的目录逐字一致（忽略大小写）。</summary>
+    public static string NormalizeDir(string dir) => Path.GetFullPath(dir).TrimEnd('\\', '/');
+
+    /// <summary>
+    /// 核对变更清单（恢复记录）：格式、更新 ID、安装目录、备份目录都和调用方一致才返回 true。
+    /// 旧格式（裸数组、没有绑定信息）一律不认，宁可不恢复也不把别处的备份写进来。
+    /// </summary>
+    public static bool ManifestMatches(string manifestFile, string updateId, string appDir, string backupDir)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(manifestFile, Encoding.UTF8));
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object) return false;
+            string? Str(string name) => root.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
+            return Str("format") == ManifestFormat
+                && Str("updateId") == updateId
+                && string.Equals(Str("appDir"), NormalizeDir(appDir), StringComparison.OrdinalIgnoreCase)
+                && string.Equals(Str("backupDir"), NormalizeDir(backupDir), StringComparison.OrdinalIgnoreCase)
+                && root.TryGetProperty("entries", out var e) && e.ValueKind == System.Text.Json.JsonValueKind.Array;
+        }
+        catch { return false; }
+    }
+
+    public const string ManifestFormat = "qisland-update/2";
 
     /// <summary>PowerShell 不在乎缩进和空行；去掉它们，长路径加大量文件时 -EncodedCommand 也留有余量。</summary>
     private static string Compact(string script) =>
         string.Join("\n", script.Replace("\r\n", "\n").Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0)) + "\n";
 
     private const string CommonFunctions = """
-function Write-Result([string]$text) {
+$utf8 = [Text.UTF8Encoding]::new($false)
+function Test-File([string]$p) { Test-Path -LiteralPath $p -PathType Leaf }
+function New-Map { return ,([Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)) }
+function Write-Result([string]$text, [switch]$Strict) {
     try {
         $dir = [IO.Path]::GetDirectoryName($resultFile)
         if ($dir) { [IO.Directory]::CreateDirectory($dir) | Out-Null }
-        [IO.File]::WriteAllText($resultFile, $text, [Text.UTF8Encoding]::new($false))
-    } catch { }
+        [IO.File]::WriteAllText($resultFile, $text, $utf8)
+        if ([IO.File]::ReadAllText($resultFile) -ne $text) { throw '状态回读不一致' }
+    } catch { if ($Strict) { throw } }
 }
-function Write-HelperLog([string]$text) {
-    try { [IO.File]::AppendAllText($resultFile + '.log', "$(Get-Date -Format o) $text`r`n", [Text.UTF8Encoding]::new($false)) } catch { }
+function Write-Log([string]$text) {
+    try { [IO.File]::AppendAllText($resultFile + '.log', "$(Get-Date -Format o) $text`r`n", $utf8) } catch { }
 }
 function Start-Old {
     try {
         Remove-Item Env:QISLAND_UPDATE_READY -ErrorAction SilentlyContinue
-        Start-Process -FilePath (Join-Path $appDir $exeName) -ArgumentList '--update-failed' -WorkingDirectory $appDir -ErrorAction Stop | Out-Null
-    } catch { Write-HelperLog "start old failed: $($_.Exception.Message)" }
+        Start-Process -FilePath (Join-Path $appDir $exeName) -ArgumentList '--update-failed' -WorkingDirectory $appDir | Out-Null
+    } catch { Write-Log "start old failed: $($_.Exception.Message)" }
 }
 function Start-New {
     $dir = [IO.Path]::GetDirectoryName($readyFile)
     if ($dir) { [IO.Directory]::CreateDirectory($dir) | Out-Null }
     Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue
     $env:QISLAND_UPDATE_READY = $readyFile
-    Start-Process -FilePath (Join-Path $appDir $exeName) -ArgumentList '--updated' -WorkingDirectory $appDir -PassThru -ErrorAction Stop
+    Start-Process -FilePath (Join-Path $appDir $exeName) -ArgumentList '--updated' -WorkingDirectory $appDir -PassThru
 }
 function Stop-New([Diagnostics.Process]$process) {
     if ($null -eq $process) { return }
@@ -68,7 +114,7 @@ function Stop-New([Diagnostics.Process]$process) {
             $process.Kill()
             $process.WaitForExit(3000) | Out-Null
         }
-    } catch { Write-HelperLog "stop new failed: $($_.Exception.Message)" }
+    } catch { Write-Log "stop new failed: $($_.Exception.Message)" }
 }
 function Get-RelativePath([string]$root, [string]$path) {
     $base = [IO.Path]::GetFullPath($root).TrimEnd('\')
@@ -89,7 +135,7 @@ function Get-Sha256([string]$path) {
     } finally { $sha.Dispose() }
 }
 function Get-FileMap([string]$root) {
-    $map = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $map = New-Map
     Get-ChildItem -LiteralPath $root -Recurse -File -Force | ForEach-Object {
         $map[(Get-RelativePath $root $_.FullName)] = $_.FullName
     }
@@ -97,9 +143,9 @@ function Get-FileMap([string]$root) {
 }
 function Test-Content([string]$path, [string]$expected) {
     if (-not $expected) {
-        return -not (Test-Path -LiteralPath $path -PathType Leaf)
+        return -not (Test-File $path)
     }
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+    if (-not (Test-File $path)) { return $false }
     try { return (Get-Sha256 $path) -eq $expected } catch { return $false }
 }
 function Restore-Plan {
@@ -112,9 +158,9 @@ function Restore-Plan {
                 $source = Join-Path $backupDir $entry.path
                 $dir = [IO.Path]::GetDirectoryName($target)
                 if ($dir) { [IO.Directory]::CreateDirectory($dir) | Out-Null }
-                Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop
-            } elseif (Test-Path -LiteralPath $target -PathType Leaf) {
-                Remove-Item -LiteralPath $target -Force -ErrorAction Stop
+                Copy-Item -LiteralPath $source -Destination $target -Force
+            } elseif (Test-File $target) {
+                Remove-Item -LiteralPath $target -Force
             }
         } catch {
             $errors.Add("$($entry.path): $($_.Exception.Message)")
@@ -129,17 +175,17 @@ function Restore-Plan {
     return $errors.ToArray()
 }
 function Read-InstallManifest([string]$path) {
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
-    try { $doc = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($path, [Text.Encoding]::UTF8)) }
-    catch { Write-HelperLog "install manifest unreadable: $($_.Exception.Message)"; return $null }
-    if ($null -eq $doc -or $doc.format -ne 'qisland-files/1' -or $null -eq $doc.files) { Write-HelperLog 'install manifest format unknown'; return $null }
-    $map = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
+    if (-not (Test-File $path)) { return $null }
+    try { $doc = ConvertFrom-Json ([IO.File]::ReadAllText($path, [Text.Encoding]::UTF8)) }
+    catch { Write-Log "install manifest unreadable: $($_.Exception.Message)"; return $null }
+    if ($null -eq $doc -or $doc.format -ne 'qisland-files/1' -or $null -eq $doc.files) { Write-Log 'install manifest format unknown'; return $null }
+    $map = New-Map
     foreach ($f in @($doc.files)) {
         if ($null -eq $f) { continue }
         $p = ([string]$f.path).Replace('/', '\')
         $h = ([string]$f.sha256).ToLowerInvariant()
         if (-not $p -or [IO.Path]::IsPathRooted($p) -or $p.Contains(':') -or $p -match '(^|\\)\.\.(\\|$)' -or $h -notmatch '^[0-9a-f]{64}$') {
-            Write-HelperLog "install manifest entry rejected: $p"
+            Write-Log "install manifest entry rejected: $p"
             return $null
         }
         if ($p -ieq $installManifestName) { continue }
@@ -199,8 +245,11 @@ function Read-InstallManifest([string]$path) {
         string exe = "Qisland.exe",
         string? manifestFile = null,
         string? readyFile = null,
-        int readyTimeoutSeconds = DefaultReadyTimeoutSeconds)
+        int readyTimeoutSeconds = DefaultReadyTimeoutSeconds,
+        string? updateId = null)
     {
+        updateId ??= NewUpdateId();
+        if (!IsValidUpdateId(updateId)) throw new ArgumentException("更新 ID 只能含字母、数字和 -", nameof(updateId));
         from = Path.GetFullPath(from).TrimEnd('\\');
         appDir = Path.GetFullPath(appDir).TrimEnd('\\');
         backupDir = Path.GetFullPath(backupDir).TrimEnd('\\');
@@ -222,6 +271,7 @@ $backupDir = {{Ps(backupDir)}}
 $resultFile = {{Ps(resultFile)}}
 $manifestFile = {{Ps(manifestFile)}}
 $readyFile = {{Ps(readyFile)}}
+$updateId = {{Ps(updateId)}}
 $expectedVersion = {{Ps(targetVersion)}}
 $exeName = {{Ps(exe)}}
 $entryExe = 'Qisland.exe'
@@ -283,7 +333,7 @@ try {
     $candidate = Get-FileMap $from
     $candidate.Remove($installManifestName) | Out-Null
     $trusted = Read-InstallManifest (Join-Path $appDir $installManifestName)
-    $newHashes = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $newHashes = New-Map
     $listed = @()
     foreach ($path in (@($candidate.Keys) | Sort-Object)) {
         $newHashes[$path] = Get-Sha256 $candidate[$path]
@@ -293,15 +343,15 @@ try {
     $stagedDir = [IO.Path]::GetDirectoryName($stagedInstall)
     if ($stagedDir) { [IO.Directory]::CreateDirectory($stagedDir) | Out-Null }
     [IO.File]::WriteAllText($stagedInstall,
-        (ConvertTo-Json -InputObject ([ordered]@{ format = 'qisland-files/1'; version = $expectedVersion; files = @($listed) }) -Depth 4),
-        [Text.UTF8Encoding]::new($false))
+        (ConvertTo-Json ([ordered]@{ format = 'qisland-files/1'; version = $expectedVersion; files = @($listed) }) -Depth 4),
+        $utf8)
     $candidate[$installManifestName] = $stagedInstall
     $newHashes[$installManifestName] = Get-Sha256 $stagedInstall
 
     foreach ($path in (@($candidate.Keys) | Sort-Object)) {
         $target = Join-Path $appDir $path
         $oldHash = ''
-        if (Test-Path -LiteralPath $target -PathType Leaf) { $oldHash = Get-Sha256 $target }
+        if (Test-File $target) { $oldHash = Get-Sha256 $target }
         $newHash = $newHashes[$path]
         if ($oldHash -eq $newHash) { continue }
         $script:manifest += [pscustomobject]@{ path = $path; old = $oldHash; new = $newHash; action = 'copy' }
@@ -310,21 +360,21 @@ try {
         foreach ($path in (@($trusted.Keys) | Sort-Object)) {
             if ($candidate.ContainsKey($path)) { continue }
             $target = Join-Path $appDir $path
-            if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { continue }
+            if (-not (Test-File $target)) { continue }
             $oldHash = Get-Sha256 $target
-            if ($oldHash -ne $trusted[$path]) { Write-HelperLog "keep modified file: $path"; continue }
+            if ($oldHash -ne $trusted[$path]) { Write-Log "keep modified file: $path"; continue }
             $script:manifest += [pscustomobject]@{ path = $path; old = $oldHash; new = ''; action = 'delete' }
         }
     }
 
     $manifestDir = [IO.Path]::GetDirectoryName($manifestFile)
     if ($manifestDir) { [IO.Directory]::CreateDirectory($manifestDir) | Out-Null }
-    [IO.File]::WriteAllText($manifestFile,
-        (ConvertTo-Json -InputObject @($script:manifest) -Depth 4),
-        [Text.UTF8Encoding]::new($false))
+    $record = ConvertTo-Json ([ordered]@{ format = '{{ManifestFormat}}'; updateId = $updateId; appDir = $appDir; backupDir = $backupDir; entries = @($script:manifest) }) -Depth 5
+    [IO.File]::WriteAllText($manifestFile, $record, $utf8)
+    if ([IO.File]::ReadAllText($manifestFile) -ne $record) { throw '恢复记录回读不一致' }
 
     if (Test-Path -LiteralPath $backupDir) {
-        Remove-Item -LiteralPath $backupDir -Recurse -Force -ErrorAction Stop
+        Remove-Item -LiteralPath $backupDir -Recurse -Force
     }
     [IO.Directory]::CreateDirectory($backupDir) | Out-Null
     foreach ($entry in $script:manifest) {
@@ -333,7 +383,7 @@ try {
         $target = Join-Path $backupDir $entry.path
         $dir = [IO.Path]::GetDirectoryName($target)
         if ($dir) { [IO.Directory]::CreateDirectory($dir) | Out-Null }
-        Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop
+        Copy-Item -LiteralPath $source -Destination $target -Force
         if ((Get-Sha256 $target) -ne $entry.old) {
             throw "备份 SHA256 不一致：$($entry.path)"
         }
@@ -343,27 +393,26 @@ try {
     Stop-WithResult "backup-failed $($_.Exception.Message)"
 }
 
-$abortAfter = 0
-if ($env:QISLAND_UPDATE_TEST_ABORT_AFTER) { $abortAfter = [int]$env:QISLAND_UPDATE_TEST_ABORT_AFTER }
+$abortAfter = [int]$env:QISLAND_UPDATE_TEST_ABORT_AFTER
 $applied = 0
 $applyError = $null
+try { Write-Result "applying $PID $updateId" -Strict } catch { Stop-WithResult "backup-failed status $($_.Exception.Message)" }
 try {
-    Write-Result "applying $PID"
     foreach ($entry in $script:manifest) {
         $target = Join-Path $appDir $entry.path
         if ($entry.action -eq 'copy') {
             $source = $candidate[$entry.path]
             $dir = [IO.Path]::GetDirectoryName($target)
             if ($dir) { [IO.Directory]::CreateDirectory($dir) | Out-Null }
-            Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop
+            Copy-Item -LiteralPath $source -Destination $target -Force
             if ((Get-Sha256 $target) -ne $entry.new) {
                 throw "覆盖后 SHA256 不一致：$($entry.path)"
             }
         } else {
-            if (Test-Path -LiteralPath $target -PathType Leaf) {
-                Remove-Item -LiteralPath $target -Force -ErrorAction Stop
+            if (Test-File $target) {
+                Remove-Item -LiteralPath $target -Force
             }
-            if (Test-Path -LiteralPath $target -PathType Leaf) {
+            if (Test-File $target) {
                 throw "删除后文件仍存在：$($entry.path)"
             }
         }
@@ -385,8 +434,9 @@ foreach ($entry in $script:manifest) {
 }
 
 $newProcess = $null
+try { Write-Result "pending $PID $updateId" -Strict } catch { Rollback-And-StartOld "status $($_.Exception.Message)" }
+if ($env:QISLAND_UPDATE_TEST_ABORT_AT_PENDING) { [Environment]::Exit(9) }
 try {
-    Write-Result 'pending'
     $newProcess = Start-New
 } catch {
     Rollback-And-StartOld "start $($_.Exception.Message)"
@@ -395,7 +445,7 @@ try {
 $ready = $false
 $deadline = [DateTime]::UtcNow.AddSeconds($readyTimeoutSeconds)
 while ([DateTime]::UtcNow -lt $deadline) {
-    if (Test-Path -LiteralPath $readyFile -PathType Leaf) {
+    if (Test-File $readyFile) {
         $ready = $true
         break
     }
@@ -429,8 +479,9 @@ exit 0
     /// 成功写 rolled-back interrupted，再以 --update-failed 拉起旧版；清单读不出时写 rollback-failed，不做任何猜测性删除。
     /// </summary>
     public static string BuildRecover(int pid, string appDir, string backupDir, string resultFile, string manifestFile,
-        string exe = "Qisland.exe", bool waitForPid = true)
+        string updateId, string exe = "Qisland.exe", bool waitForPid = true)
     {
+        if (!IsValidUpdateId(updateId)) throw new ArgumentException("更新 ID 无效", nameof(updateId));
         appDir = Path.GetFullPath(appDir).TrimEnd('\\');
         backupDir = Path.GetFullPath(backupDir).TrimEnd('\\');
         resultFile = Path.GetFullPath(resultFile);
@@ -442,6 +493,7 @@ $appDir = {{Ps(appDir)}}
 $backupDir = {{Ps(backupDir)}}
 $resultFile = {{Ps(resultFile)}}
 $manifestFile = {{Ps(manifestFile)}}
+$updateId = {{Ps(updateId)}}
 $readyFile = ''
 $exeName = {{Ps(exe)}}
 $installManifestName = {{Ps(InstallManifestName)}}
@@ -450,12 +502,24 @@ $script:manifest = @()
 if ({{(waitForPid ? "$true" : "$false")}}) {
     try {
         $old = [Diagnostics.Process]::GetProcessById($pidToWait)
-        if (-not $old.WaitForExit(60000)) { Write-HelperLog 'recover: process still running'; exit 1 }
+        if (-not $old.WaitForExit(60000)) { Write-Log 'recover: process still running'; exit 1 }
     } catch { }
 }
 try {
-    $parsed = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($manifestFile, [Text.Encoding]::UTF8))
-    $script:manifest = @(@($parsed) | Where-Object { $null -ne $_ -and $_.path })
+    $parsed = ConvertFrom-Json ([IO.File]::ReadAllText($manifestFile, [Text.Encoding]::UTF8))
+    if ($parsed.format -ne '{{ManifestFormat}}' -or $parsed.updateId -ne $updateId -or
+        -not ([string]$parsed.appDir).Equals($appDir, [StringComparison]::OrdinalIgnoreCase) -or
+        -not ([string]$parsed.backupDir).Equals($backupDir, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Log "recover: manifest belongs to another update or install, left untouched"
+        exit 2
+    }
+    $status = ''
+    try { $status = [IO.File]::ReadAllText($resultFile, [Text.Encoding]::UTF8).Trim() } catch { }
+    if (-not $status.EndsWith(" $updateId")) {
+        Write-Log "recover: status no longer points at $updateId, left untouched"
+        exit 2
+    }
+    $script:manifest = @(@($parsed.entries) | Where-Object { $null -ne $_ -and $_.path })
     foreach ($entry in $script:manifest) { Get-RelativePath $appDir (Join-Path $appDir $entry.path) | Out-Null }
 } catch {
     Write-Result "rollback-failed interrupted | manifest $($_.Exception.Message)"
@@ -471,7 +535,7 @@ exit 0
     }
 
     public static Process StartRecover(int pid, string appDir, string backupDir, string resultFile, string manifestFile,
-        string exe = "Qisland.exe", bool waitForPid = true)
+        string updateId, string exe = "Qisland.exe", bool waitForPid = true)
     {
         var psi = new ProcessStartInfo("powershell.exe")
         {
@@ -484,7 +548,7 @@ exit 0
         psi.ArgumentList.Add("-ExecutionPolicy");
         psi.ArgumentList.Add("Bypass");
         psi.ArgumentList.Add("-EncodedCommand");
-        psi.ArgumentList.Add(Encode(BuildRecover(pid, appDir, backupDir, resultFile, manifestFile, exe, waitForPid)));
+        psi.ArgumentList.Add(Encode(BuildRecover(pid, appDir, backupDir, resultFile, manifestFile, updateId, exe, waitForPid)));
         return Process.Start(psi)!;
     }
 
@@ -502,7 +566,8 @@ exit 0
         string exe = "Qisland.exe",
         string? manifestFile = null,
         string? readyFile = null,
-        int readyTimeoutSeconds = DefaultReadyTimeoutSeconds)
+        int readyTimeoutSeconds = DefaultReadyTimeoutSeconds,
+        string? updateId = null)
     {
         var psi = new ProcessStartInfo("powershell.exe")
         {
@@ -516,7 +581,7 @@ exit 0
         psi.ArgumentList.Add("Bypass");
         psi.ArgumentList.Add("-EncodedCommand");
         psi.ArgumentList.Add(Encode(Build(pid, from, appDir, backupDir, resultFile, targetVersion,
-            exe, manifestFile, readyFile, readyTimeoutSeconds)));
+            exe, manifestFile, readyFile, readyTimeoutSeconds, updateId)));
         return Process.Start(psi)!;
     }
 
