@@ -47,7 +47,8 @@ public static class PushParser
             var id = S("id");
             draft = new PushDraft
             {
-                Id = id.Length > 0 ? id : "push:" + Guid.NewGuid().ToString("N")[..8],
+                // 调用方起的名字放进外部命名空间：撞不上内部活动的 id
+                Id = ExternalActivity.Namespace(id.Length > 0 ? id : "push:" + Guid.NewGuid().ToString("N")[..8]),
                 Title = title,
                 Body = S("body"),
                 Subtitle = S("subtitle"),
@@ -55,6 +56,8 @@ public static class PushParser
                 Type = S("type").ToLowerInvariant(),
                 Priority = S("priority").ToLowerInvariant(),
                 Source = S("source").Length > 0 ? S("source") : "push",
+                // source 只是显示用的标签，不参与内部动作分发
+                Dispatch = ExternalActivity.PushDispatch,
                 DurationSeconds = duration ?? 12,
                 // 调用方明确给了时长：进度卡也按它来，不再抬到 600 秒
                 DurationExplicit = duration != null,

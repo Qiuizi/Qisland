@@ -177,11 +177,12 @@ public static class QislandIngest
     {
         var id = Text(root, "id");
         if (id.Length == 0) id = "push:" + Guid.NewGuid().ToString("N");
-        return new IslandActivity(id, Text(root, "source").Length == 0 ? "push" : Text(root, "source"),
+        return new IslandActivity(ExternalActivity.Namespace(id), Text(root, "source").Length == 0 ? "push" : Text(root, "source"),
             Text(root, "title"), Text(root, "body"), ActivityKind.Info, 40,
             DurationSeconds: 30, ResetTtl: true,
             OpenUri: IslandActivity.SafeUri(Text(root, "open_uri").Length > 0 ? Text(root, "open_uri") : Text(root, "url")),
-            AppId: Text(root, "app_id").Length > 0 ? Text(root, "app_id") : null);
+            AppId: Text(root, "app_id").Length > 0 ? Text(root, "app_id") : null,
+            Dispatch: ExternalActivity.PushDispatch);
     }
 
     private static IReadOnlyList<IslandActivity> InfoBundle(JsonElement root, DateOnly today)

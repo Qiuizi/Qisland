@@ -21,10 +21,10 @@ public sealed partial class IslandWindow
 
     private static Level LevelOf(LiveActivity a)
     {
-        if (a.Source is "media") return Level.Passive;
-        if (a.Source is "call" && a.Kind == ActivityKind.Warning) return Level.Critical;   // 来电：立刻展开
+        if (a.Dispatch is "media") return Level.Passive;
+        if (a.Dispatch is "call" && a.Kind == ActivityKind.Warning) return Level.Critical;   // 来电：立刻展开
         // 微信 / QQ 消息只是“主动”档：胶囊轻弹、换上新内容，不展开（要看就鼠标移上去）
-        if (a.Source is "wechat" or "qq") return Level.Active;
+        if (a.Dispatch is "wechat" or "qq") return Level.Active;
         return a.Kind switch
         {
             ActivityKind.WaitingApproval or ActivityKind.Error => Level.Critical,

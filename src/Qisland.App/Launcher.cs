@@ -96,17 +96,17 @@ public static class Launcher
     /// </summary>
     public static bool Open(LiveActivity a)
     {
-        var plan = JumpPlan.For(a.Source, a.OpenUri, a.AppId, CanOpen(a.Source));
+        var plan = JumpPlan.For(a.Dispatch, a.OpenUri, a.AppId, CanOpen(a.Dispatch));
         App.Log($"跳转 {a.Id}: 计划 {string.Join(" → ", plan)}");
         foreach (var step in plan)
         {
             var ok = step switch
             {
-                JumpStep.Uri => OpenUri(a.OpenUri!, a.Source),
+                JumpStep.Uri => OpenUri(a.OpenUri!, a.Dispatch),
                 JumpStep.WeChat => OpenWeChat(),
-                JumpStep.App => Open(a.Source),
-                JumpStep.Aumid => AppJump.Aumid(a.AppId!, a.Source),
-                JumpStep.Terminal => AppJump.Terminal(a.AppId, a.Source),
+                JumpStep.App => Open(a.Dispatch),
+                JumpStep.Aumid => AppJump.Aumid(a.AppId!, a.Dispatch),
+                JumpStep.Terminal => AppJump.Terminal(a.AppId, a.Dispatch),
                 JumpStep.Calendar => OpenCalendarApp(),
                 _ => false,
             };
@@ -117,7 +117,7 @@ public static class Launcher
     }
 
     /// <summary>这一条点了能跳到某个软件 / 页面。</summary>
-    public static bool CanJump(LiveActivity a) => JumpPlan.For(a.Source, a.OpenUri, a.AppId, CanOpen(a.Source)).Count > 0;
+    public static bool CanJump(LiveActivity a) => JumpPlan.For(a.Dispatch, a.OpenUri, a.AppId, CanOpen(a.Dispatch)).Count > 0;
 
     /// <summary>正在放的歌 / 视频：浏览器先找标题含这个视频名的窗口，再按会话的 AUMID 找播放器窗口，最后按来源切 / 启动。</summary>
     public static bool OpenMedia(MediaState m)

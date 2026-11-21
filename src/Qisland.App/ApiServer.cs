@@ -26,6 +26,7 @@ public sealed class ApiServer : IDisposable
     private readonly Action<Action> _post;
     private readonly ActivityStore _store;
     private readonly string? _approvalKey;
+    private readonly byte[]? _apiToken;
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _slots;
     private readonly SemaphoreSlim _approvalSlots = new(ApprovalReserve, ApprovalReserve);
@@ -49,8 +50,8 @@ public sealed class ApiServer : IDisposable
     /// <summary>每条 Agent 事件（已经在 UI 线程上），给 AI 页的多会话列表用。</summary>
     public Action<IslandActivity>? AgentEvent { get; set; }
 
-    public ApiServer(int port, ActivityStore store, Action<Action> postToUi, string? approvalKey = null)
-        : this(port, store, postToUi, approvalKey, TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(2), 128)
+    public ApiServer(int port, ActivityStore store, Action<Action> postToUi, string? approvalKey = null, string? apiToken = null)
+        : this(port, store, postToUi, approvalKey, TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(2), 128, apiToken)
     {
     }
 
@@ -61,8 +62,10 @@ public sealed class ApiServer : IDisposable
     }
 
     internal ApiServer(int port, ActivityStore store, Action<Action> postToUi, string? approvalKey,
-        TimeSpan receiveTimeout, TimeSpan approvalTimeout, int maxConnections)
+        TimeSpan receiveTimeout, TimeSpan approvalTimeout, int maxConnections, string? apiToken = null)
     {
+        // 设了 Token（%APPDATA%\Qisland\api-token.txt）时，普通 HTTP 请求必须带 X-Qisland-Token 或 X-WinIslands-Token
+        _apiToken = string.IsNullOrWhiteSpace(apiToken) ? null : Encoding.UTF8.GetBytes(apiToken.Trim());
         _listener = new TcpListener(IPAddress.Loopback, port);
         _store = store;
         _post = postToUi;
@@ -142,6 +145,11 @@ public sealed class ApiServer : IDisposable
                 {
                     // 已经超过普通连接上限；等读完请求再拒绝，避免把审批请求误伤在入口
                     await Response(stream, 503, "{\"ok\":false,\"error\":\"too many connections\"}").ConfigureAwait(false);
+                    return;
+                }
+                if (!Authorized(method, clean, headers))
+                {
+                    await Response(stream, 401, "{\"ok\":false,\"error\":\"unauthorized\"}").ConfigureAwait(false);
                     return;
                 }
                 var (normalCode, normalJson) = SafeRoute(method, path, body);
@@ -241,6 +249,20 @@ public sealed class ApiServer : IDisposable
         return i;
     }
 
+    /// <summary>健康检查不带数据，不要求 Token；其余普通路由在设了 Token 时都要校验（定长比较）。审批路由走自己的 HMAC，不经过这里。</summary>
+    private bool Authorized(string method, string clean, Dictionary<string, string> headers)
+    {
+        if (_apiToken == null) return true;
+        if (method == "GET" && clean is "" or "/health" or "/v1/status" or "/v1/health") return true;
+        foreach (var name in new[] { "X-Qisland-Token", "X-WinIslands-Token" })
+        {
+            if (headers.TryGetValue(name, out var value)
+                && System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(value.Trim()), _apiToken))
+                return true;
+        }
+        return false;
+    }
+
     private static bool IsApprovalPath(string path)
     {
         const string prefix = "/v1/approval/";
@@ -293,7 +315,8 @@ public sealed class ApiServer : IDisposable
             var r = IslandPayload.Decode(body, PayloadRoute.Ingest);
             if (!r.Ok) return (400, $"{{\"ok\":false,\"error\":{JsonSerializer.Serialize(r.Error)}}}");
             var drafts = r.Cards;
-            _post(() => { foreach (var (d, p) in drafts) _store.Upsert(d, p); });
+            // 外部入口：只写外部命名空间 / 自己写过的条目，内部活动由 ActivityStore 拒绝
+            _post(() => { foreach (var (d, p) in drafts) _store.UpsertExternal(d, p); });
             return (200, $"{{\"ok\":true,\"accepted\":{drafts.Count}}}");
         }
 
@@ -338,7 +361,7 @@ public sealed class ApiServer : IDisposable
             var r = IslandPayload.Decode(body, PayloadRoute.Push);
             if (!r.Ok) return (400, $"{{\"ok\":false,\"error\":{JsonSerializer.Serialize(r.Error)}}}");
             var drafts = r.Cards;
-            _post(() => { foreach (var (d, progress) in drafts) _store.Upsert(d, progress); });
+            _post(() => { foreach (var (d, progress) in drafts) _store.UpsertExternal(d, progress); });
             var id = drafts.Count == 1 ? JsonSerializer.Serialize(drafts[0].Draft.Id) : "null";
             return (200, $"{{\"ok\":true,\"accepted\":{drafts.Count},\"id\":{id}}}");
         }
@@ -346,14 +369,15 @@ public sealed class ApiServer : IDisposable
         if (method == "POST" && path.StartsWith("/v1/agent/", StringComparison.Ordinal))
         {
             var a = AgentEventParser.Parse(body, path["/v1/agent/".Length..]);
-            if (a is not null) _post(() => { _store.Upsert(a); AgentEvent?.Invoke(a); });
+            if (a is not null) _post(() => { if (_store.UpsertExternal(a)) AgentEvent?.Invoke(a); });
             return (200, "{\"ok\":true}");
         }
 
         if (method == "DELETE" && path.StartsWith("/v1/island/push/", StringComparison.Ordinal))
         {
-            var id = Uri.UnescapeDataString(path["/v1/island/push/".Length..]);
-            _post(() => _store.Remove(id));
+            // 只能撤回外部命名空间里的卡片；传 "demo" 或 "ext:demo" 都指同一张
+            var id = ExternalActivity.Namespace(Uri.UnescapeDataString(path["/v1/island/push/".Length..]));
+            _post(() => _store.RemoveExternal(id));
             return (200, "{\"ok\":true}");
         }
         return (404, "{\"ok\":false,\"error\":\"not found\"}");

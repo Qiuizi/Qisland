@@ -11,9 +11,38 @@ public sealed class ActivityStore
     private readonly Dictionary<string, LiveActivity> _items = new(StringComparer.Ordinal);
     public event Action? Changed;
 
+    /// <summary>内部代码用 PushDraft 写一条（演示数据等）。外部入口必须走 <see cref="UpsertExternal(PushDraft, double?)"/>。</summary>
     public void Upsert(PushDraft d, double? progress = null)
     {
-        if (string.IsNullOrWhiteSpace(d.Id) || string.IsNullOrWhiteSpace(d.Title)) return;
+        if (ToActivity(d, progress, d.Dispatch) is { } a) Upsert(a, progress: progress);
+    }
+
+    /// <summary>
+    /// 外部入口（本机 HTTP、收件箱）写一条：同 id 已有内部活动时拒绝（返回 false），不改内容、不改归属；
+    /// 来源标签只做显示，内部动作分发键按 <see cref="ExternalActivity.DispatchFor"/> 决定。
+    /// </summary>
+    public bool UpsertExternal(PushDraft d, double? progress = null)
+    {
+        var a = ToActivity(d, progress, ExternalActivity.DispatchFor(d.Dispatch, string.IsNullOrEmpty(d.Source) ? "push" : d.Source));
+        return a != null && UpsertExternal(a, progress);
+    }
+
+    /// <summary>外部 Agent 事件等已经成形的活动；归属规则同上。</summary>
+    public bool UpsertExternal(IslandActivity a, double? progress = null)
+    {
+        if (_items.TryGetValue(a.Id, out var existing) && !existing.External) return false;
+        var external = a with { Dispatch = ExternalActivity.DispatchFor(a.Dispatch, string.IsNullOrEmpty(a.Source) ? "push" : a.Source) };
+        UpsertCore(external, sticky: false, progress, quiet: false, isExternal: true);
+        return true;
+    }
+
+    /// <summary>外部入口删一条：只删外部写入的条目，内部活动原样保留。</summary>
+    public bool RemoveExternal(string id) =>
+        _items.TryGetValue(id, out var live) && live.External && Remove(id);
+
+    private static IslandActivity? ToActivity(PushDraft d, double? progress, string? dispatch)
+    {
+        if (string.IsNullOrWhiteSpace(d.Id) || string.IsNullOrWhiteSpace(d.Title)) return null;
         var kind = d.Type switch
         {
             "error" => ActivityKind.Error,
@@ -26,15 +55,21 @@ public sealed class ActivityStore
         if (d.Source is "claude-code" or "codex" or "deepseek-harness" or "doubao" or "trae" or "workbuddy" && kind == ActivityKind.Info)
             kind = ActivityKind.Running;
         var prio = d.Priority switch { "high" => 90, "low" => 20, _ => 50 };
-        Upsert(new IslandActivity(d.Id, d.Source, d.Title, d.Body, kind, prio, d.Icon, d.Subtitle,
-            d.DurationSeconds, d.ResetTtl, IslandActivity.SafeUri(d.OpenUri), d.AppId, ExactDuration: d.DurationExplicit), progress: progress);
+        return new IslandActivity(d.Id, d.Source, d.Title, d.Body, kind, prio, d.Icon, d.Subtitle,
+            d.DurationSeconds, d.ResetTtl, IslandActivity.SafeUri(d.OpenUri), d.AppId, ExactDuration: d.DurationExplicit,
+            Dispatch: dispatch);
     }
 
-    public void Upsert(IslandActivity a, bool sticky = false, double? progress = null, bool quiet = false)
+    /// <summary>内部提供方写一条：内部永远有权威，同 id 若是外部写的就收回为内部活动。</summary>
+    public void Upsert(IslandActivity a, bool sticky = false, double? progress = null, bool quiet = false) =>
+        UpsertCore(a, sticky, progress, quiet, isExternal: false);
+
+    private void UpsertCore(IslandActivity a, bool sticky, double? progress, bool quiet, bool isExternal)
     {
         var isNew = !_items.TryGetValue(a.Id, out var live);
         live ??= new LiveActivity { Id = a.Id };
         var changed = ActivityMerge.Apply(live, a, isNew, sticky, progress, quiet, DateTime.Now);
+        live.External = isExternal;
         _items[a.Id] = live;
         if (changed) Changed?.Invoke();
     }
@@ -54,7 +89,8 @@ public sealed class ActivityStore
             var now = _items[a.Id];
             if (!had || sig != now.Title + "\u0001" + now.Body + "\u0001" + now.Kind) dirty = true;
         }
-        foreach (var id in _items.Values.Where(x => x.Source == source && !keep.Contains(x.Id)).Select(x => x.Id).ToList())
+        // 只收回自己（内部）写的条目：外部卡片打着同样的来源标签也不会被快照替换掉
+        foreach (var id in _items.Values.Where(x => !x.External && x.Source == source && !keep.Contains(x.Id)).Select(x => x.Id).ToList())
         {
             _items.Remove(id);
             dirty = true;

@@ -135,7 +135,9 @@ public sealed partial class App : Application
         var apiReady = false;
         try
         {
-            _api = new ApiServer(Port, _store, a => { _ = Dispatcher.InvokeAsync(a); }, approvalKey);
+            var apiToken = ApiTokenFile.Read(DataDir);
+            if (apiToken != null) Log("本机推送接口已启用 Token 校验");
+            _api = new ApiServer(Port, _store, a => { _ = Dispatcher.InvokeAsync(a); }, approvalKey, apiToken);
             _api.Start();
             apiReady = true;
         }
@@ -573,7 +575,8 @@ public sealed partial class App : Application
         try { File.Delete(f); }
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
-        foreach (var (d, p) in r.Cards) _store.Upsert(d, p);
+        // 收件箱是外部入口：和本机 HTTP 一样只能写外部命名空间 / 自己写过的条目
+        foreach (var (d, p) in r.Cards) _store.UpsertExternal(d, p);
         return true;
     }
 

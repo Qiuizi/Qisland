@@ -28,8 +28,14 @@ $body = @{
 } | ConvertTo-Json -Depth 6
 
 $uri = "http://127.0.0.1:$Port/v1/island/push"
+# Token：-Token 参数 > 环境变量 QISLAND_TOKEN > %APPDATA%\Qisland\api-token.txt（没有就不带）
+if (-not $Token) { $Token = $env:QISLAND_TOKEN }
+if (-not $Token) {
+    $tokenFile = Join-Path $env:APPDATA "Qisland\api-token.txt"
+    if (Test-Path -LiteralPath $tokenFile) { $Token = (Get-Content -LiteralPath $tokenFile -Raw -Encoding UTF8).Trim() }
+}
 $headers = @{}
-if ($Token) { $headers["X-WinIslands-Token"] = $Token }
+if ($Token) { $headers["X-Qisland-Token"] = $Token; $headers["X-WinIslands-Token"] = $Token }
 
 $resp = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -ContentType "application/json"
 Write-Host ("推送成功: id={0} position={1}" -f $resp.id, $resp.position)

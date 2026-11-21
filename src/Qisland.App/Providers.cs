@@ -168,7 +168,7 @@ public sealed class MessengerFlash : IDisposable
         if (source is null) return;
         _flashing[source] = pid;
         // 已经有带正文的通知就不再叠一条“有新消息”
-        if (_store.Ranked().Any(a => a.Source == source && !a.Id.EndsWith(":flash", StringComparison.Ordinal))) return;
+        if (_store.Ranked().Any(a => a.Dispatch == source && !a.Id.EndsWith(":flash", StringComparison.Ordinal))) return;
         _store.Upsert(new IslandActivity(source + ":flash", source, source == "wechat" ? "微信有新消息" : "QQ 有新消息",
             "点一下打开", ActivityKind.Info, 74, DurationSeconds: 30 * 60, ResetTtl: false));
     }
@@ -182,7 +182,7 @@ public sealed class MessengerFlash : IDisposable
         {
             if (p != pid) continue;
             _flashing.Remove(source);
-            foreach (var a in _store.Ranked().Where(a => a.Source == source).ToList()) _store.Remove(a.Id);
+            foreach (var a in _store.Ranked().Where(a => a.Dispatch == source).ToList()) _store.Remove(a.Id);
         }
     }
 

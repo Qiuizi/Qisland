@@ -1116,10 +1116,10 @@ public sealed partial class IslandWindow : Window
         g.Children.Add(right);
 
         var canOpen = CanOpenItem(a); // 登录过期：点一下弹扫码
-        if (a.Source == "otp") right.Children.Add(Chip("复制", () => CopyOtp(a)));
-        if (a.Source is "agenda" or "calendar" && a.OpenUri is { } join) right.Children.Add(Chip("加入", () => Launcher.OpenUri(join, a.Source), "打开会议链接"));
+        if (a.Dispatch == "otp") right.Children.Add(Chip("复制", () => CopyOtp(a)));
+        if (a.Dispatch is "agenda" or "calendar" && a.OpenUri is { } join) right.Children.Add(Chip("加入", () => Launcher.OpenUri(join, a.Dispatch), "打开会议链接"));
         // QQ 等发系统通知的软件：原通知还在时，给一个去通知中心的入口——点原通知，软件自己会跳到那个会话
-        if (a.Source is not "wechat" && a.OpenUri == null && ToastMirror.Current?.Alive(a.Id) == true)
+        if (a.Dispatch is not "wechat" && a.OpenUri == null && ToastMirror.Current?.Alive(a.Id) == true)
             right.Children.Add(ActionCenterButton());
         if (canOpen) g.Cursor = Cursors.Hand;
         AddHover(g);
@@ -1134,7 +1134,8 @@ public sealed partial class IslandWindow : Window
         return g;
     }
 
-    private static bool CanOpenItem(LiveActivity a) => a.Source == "otp" || Launcher.CanJump(a) || a.Source is "update" or "system" or "battery" or "device" or "copy" or "download"
+    // 内部动作只看 Dispatch：外部推送的来源标签写成 otp / download / update 也不会触发对应的内部动作
+    private static bool CanOpenItem(LiveActivity a) => a.Dispatch == "otp" || Launcher.CanJump(a) || a.Dispatch is "update" or "system" or "battery" or "device" or "copy" or "download"
         || a.Id is "ykt:expired" or "ykt:expired-note" or "xxt:expired" or "xxt:expired-note";
 
     /// <summary>
@@ -1147,7 +1148,7 @@ public sealed partial class IslandWindow : Window
         if (ranked.Count > 0)
         {
             var a = ranked[0];
-            if (a.Source == "otp" || !CanOpenItem(a)) return false;
+            if (a.Dispatch == "otp" || !CanOpenItem(a)) return false;
             App.Log($"点击胶囊 {a.Id}");
             ActivateItem(a, true);
             return true;
@@ -1160,7 +1161,7 @@ public sealed partial class IslandWindow : Window
     private void ActivateItem(LiveActivity a, bool canOpen)
     {
         {
-            if (a.Source == "otp") { CopyOtp(a); return; }
+            if (a.Dispatch == "otp") { CopyOtp(a); return; }
             if (!canOpen || OpenRequested?.Invoke(a) != true)
             {
                 // 没有对应软件（计时、通知等）：点一下当作「已读」，已完成或非常驻的直接收掉
@@ -1168,9 +1169,9 @@ public sealed partial class IslandWindow : Window
                 return;
             }
             // 消息类点开即已读；Agent 运行中的保留，完成的收掉
-            if (!a.Sticky && (a.Kind != ActivityKind.Running && a.Kind != ActivityKind.WaitingApproval || a.Source is "wechat" or "qq"))
+            if (!a.Sticky && (a.Kind != ActivityKind.Running && a.Kind != ActivityKind.WaitingApproval || a.Dispatch is "wechat" or "qq"))
                 _store.Remove(a.Id);
-            if (a.Source is "wechat" or "qq") MessengerFlash.ClearFlash(a.Source, _store);
+            if (a.Dispatch is "wechat" or "qq") MessengerFlash.ClearFlash(a.Dispatch, _store);
             _pinned = false;
             _peekUntil = DateTime.MinValue;
             SetMode(DesiredRestMode());

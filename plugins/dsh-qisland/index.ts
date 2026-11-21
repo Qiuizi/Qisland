@@ -7,15 +7,29 @@
  * 没有在 DeepSeek Harness 0.2.2-rc.1 桌面版里运行过。
  */
 import type { Context } from '@deepseek-ai/cordis'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 export const name = 'qisland'
 
 const endpoint = () => process.env.QISLAND_URL ?? 'http://127.0.0.1:9840/v1/qisland/ingest'
 
+// Token：环境变量 QISLAND_TOKEN 优先，其次是 %APPDATA%\Qisland\api-token.txt（没有就不带）
+function token(): string {
+  if (process.env.QISLAND_TOKEN) return process.env.QISLAND_TOKEN.trim()
+  try {
+    const file = process.env.QISLAND_API_TOKEN_FILE ?? join(process.env.APPDATA ?? '', 'Qisland', 'api-token.txt')
+    return readFileSync(file, 'utf8').trim()
+  } catch {
+    return ''
+  }
+}
+
 async function post(body: Record<string, unknown>): Promise<void> {
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (process.env.QISLAND_TOKEN) headers['X-Qisland-Token'] = process.env.QISLAND_TOKEN
+    const t = token()
+    if (t) headers['X-Qisland-Token'] = t
     await fetch(endpoint(), { method: 'POST', headers, body: JSON.stringify(body) })
   } catch {
     // 岛没开就跳过，不影响 Harness。

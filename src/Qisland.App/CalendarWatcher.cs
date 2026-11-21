@@ -380,7 +380,7 @@ public sealed class CalendarWatcher
     {
         var byId = BuildReminderIndex(Events, _log);
         var cards = _store.Ranked()
-            .Where(a => a.Source == Source && a.Id.StartsWith(CalendarReminder.IdPrefix, StringComparison.Ordinal))
+            .Where(a => !a.External && a.Source == Source && a.Id.StartsWith(CalendarReminder.IdPrefix, StringComparison.Ordinal))
             .ToList();
         foreach (var card in cards)
         {
@@ -422,7 +422,7 @@ public sealed class CalendarWatcher
     private void ClearCalendarReminders()
     {
         foreach (var card in _store.Ranked()
-                     .Where(a => a.Source == Source && a.Id.StartsWith(CalendarReminder.IdPrefix, StringComparison.Ordinal))
+                     .Where(a => !a.External && a.Source == Source && a.Id.StartsWith(CalendarReminder.IdPrefix, StringComparison.Ordinal))
                      .ToList())
             _store.Remove(card.Id);
         _shownReminders.Clear();

@@ -54,9 +54,12 @@ public static class HookRelay
         try
         {
             using var tcp = new TcpClient();
-            if (!tcp.ConnectAsync("127.0.0.1", App.Port).Wait(400)) return "";
+            if (!tcp.ConnectAsync("127.0.0.1", HookPort()).Wait(400)) return "";
             var payload = Encoding.UTF8.GetBytes(body);
-            var head = Encoding.ASCII.GetBytes($"POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {payload.Length}\r\nConnection: close\r\n\r\n");
+            // 设了推送 Token（环境变量 QISLAND_TOKEN 或 api-token.txt）就带上；Token 只能是可见 ASCII，防止拼出额外的请求头
+            var token = ApiTokenFile.ForClient(App.DataDir);
+            var auth = token != null && token.All(c => c is > ' ' and < (char)127) ? $"X-Qisland-Token: {token}\r\n" : "";
+            var head = Encoding.ASCII.GetBytes($"POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n{auth}Content-Length: {payload.Length}\r\nConnection: close\r\n\r\n");
             var s = tcp.GetStream();
             s.WriteTimeout = 800;
             s.ReadTimeout = readTimeout;

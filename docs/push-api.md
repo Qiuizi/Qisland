@@ -1,6 +1,21 @@
 # 上岛协议
 
-任何本机程序都可以把一条活动推到 Qisland。服务只听 `127.0.0.1`，默认端口 `9840`。设置里如果填了 Token，请求要带 `X-Qisland-Token` 或原来的 `X-WinIslands-Token`。
+任何本机程序都可以把一条活动推到 Qisland。服务只听 `127.0.0.1`，默认端口 `9840`。
+
+## Token
+
+把 Token 写进 `%APPDATA%\Qisland\api-token.txt`（一行，可见 ASCII），重启 Qisland 后生效。设了 Token，除健康检查（`GET /health`、`/v1/status`、`/v1/health`）以外的普通请求都要带 `X-Qisland-Token` 或原来的 `X-WinIslands-Token`，否则回 `401`。没有这个文件就不校验。
+
+仓库里的调用方会自己带上 Token：`scripts/qisland-push.ps1`、WSL 的 `scripts/qisland-push`、`Qisland.exe hook`、`docs/sdk-examples/` 和 DeepSeek Harness 插件都按「环境变量 `QISLAND_TOKEN` → `api-token.txt`」的顺序取 Token。审批接口 `/v1/approval/*` 用自己的 HMAC 签名，不看这个 Token。
+
+## 外部活动的命名空间
+
+本机接口和收件箱写进来的都是「外部活动」，碰不到 Qisland 自己的条目（更新提示、待办提醒、日程、Agent 窗口监视等）：
+
+- 普通卡片的 `id` 会放进 `ext:` 命名空间：推 `"id":"demo-1"`，岛上的 id 是 `ext:demo-1`，响应里的 `id` 也是它。再推同一个 `id` 就是更新；`DELETE /v1/island/push/demo-1` 和 `DELETE /v1/island/push/ext:demo-1` 删的是同一张。
+- 接入消息（Agent 会话、JARVIS、信息站、课程快照）的 id 由 Qisland 生成（如 `agent:codex:t1`、`jarvis:task-1`）；和 Qisland 内部条目撞 id 时这条会被忽略。
+- `DELETE` 只能删外部活动，删内部条目不会生效。
+- 卡片里的 `source` 只是显示用的来源标签，不会触发 Qisland 内部的动作（比如写成 `download`、`otp` 不会打开下载文件夹或复制验证码）。认得出的接入消息保留各自的跳转（Codex 会话链接、终端等）。
 
 消息可以带一个顶层 `$type` 说明自己是什么：
 

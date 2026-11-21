@@ -5,6 +5,11 @@ public sealed class LiveActivity
 {
     public required string Id { get; init; }
     public string Source { get; set; } = "push";
+    /// <summary>内部动作分发键（点击跳转、复制…）；内部活动等于 Source，外部活动见 <see cref="ExternalActivity"/>。</summary>
+    public string Dispatch { get => _dispatch ?? Source; set => _dispatch = value; }
+    private string? _dispatch;
+    /// <summary>由外部入口（本机 HTTP / 收件箱）写入；外部只能改、删 External 的条目。</summary>
+    public bool External { get; set; }
     public string Title { get; set; } = "";
     public string Body { get; set; } = "";
     public ActivityKind Kind { get; set; }
@@ -37,6 +42,7 @@ public static class ActivityMerge
         var body = a.Body.Length > 0 ? a.Body : a.Subtitle;
         var changed = isNew || live.Title != a.Title || live.Body != body || live.Kind != a.Kind || live.Progress != progress;
         live.Source = string.IsNullOrEmpty(a.Source) ? "push" : a.Source;
+        live.Dispatch = a.Dispatch ?? live.Source;
         live.Title = a.Title;
         live.Body = body;
         live.Kind = a.Kind;

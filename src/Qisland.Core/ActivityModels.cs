@@ -26,8 +26,11 @@ public sealed record IslandActivity(
     string? OpenUri = null,
     string? AppId = null,
     bool Replace = false,
-    bool ExactDuration = false)
+    bool ExactDuration = false,
+    string? Dispatch = null)
 {
+    // Dispatch：内部动作分发用的键（点击跳转、复制、打开下载…）。内部提供方不填，等于 Source；
+    //   外部推送的 Source 只是显示用的来源标签，Dispatch 由 ActivityStore 在外部入口按 ExternalActivity 规则决定。
     // Replace：这次更新是这一条的完整状态——OpenUri / AppId 为 null 就是「清掉」，不沿用上一条的链接。
     //   快照型来源（日程、课表…）和复用同一 id 的提醒都该用它；Agent 会话这类逐步补全信息的事件不用。
     // ExactDuration：调用方明确给了时长（Island API 的 duration_seconds），运行中的卡片也按它过期，不再至少挂 10 分钟。
@@ -85,6 +88,8 @@ public sealed class PushDraft
     /// <summary>调用方明确给了 duration_seconds（见 <see cref="IslandActivity.ExactDuration"/>）。</summary>
     public bool DurationExplicit { get; set; }
     public string Source { get; set; } = "";
+    /// <summary>内部动作分发键；null 表示按 Source（见 <see cref="IslandActivity.Dispatch"/>）。</summary>
+    public string? Dispatch { get; set; }
     public string? OpenUri { get; set; }
     public string? AppId { get; set; }
 }
@@ -116,6 +121,7 @@ public static class PushMapping
             DurationSeconds = Math.Max(4, activity.DurationSeconds),
             ResetTtl = activity.ResetTtl || activity.Kind is ActivityKind.Done or ActivityKind.Error,
             Source = activity.Source,
+            Dispatch = activity.Dispatch,
             OpenUri = activity.OpenUri,
             AppId = activity.AppId,
         };
@@ -133,4 +139,29 @@ public static class PushMapping
         "media" => "\uE8D6",
         _ => activity.Kind == ActivityKind.WaitingApproval ? "\uE7BA" : "\uE7F4",
     };
+}
+
+/// <summary>
+/// 外部活动（本机 HTTP、收件箱）的命名空间和动作分发规则。
+/// - 调用方自己起名的卡片（普通推送）统一放进 <c>ext:</c> 命名空间，永远撞不上内部 id（update、todo:remind:…、download:done:…）；
+/// - 认得出的接入协议（Agent 会话、JARVIS、信息站、课程快照、消息镜像）由解析器生成自己的前缀，写入时由 ActivityStore 校验归属；
+/// - 来源标签（Source）只用于显示；内部动作按 Dispatch 分发，普通推送一律是 <c>push</c>。
+/// </summary>
+public static class ExternalActivity
+{
+    public const string IdPrefix = "ext:";
+    public const string PushDispatch = "push";
+
+    /// <summary>接入协议的来源：解析器从固定词表里给出，保留各自的跳转（终端、codex:// 链接、微信…）。</summary>
+    private static readonly HashSet<string> ProtocolSources = new(StringComparer.Ordinal)
+    {
+        "claude-code", "codex", "deepseek-harness", "doubao", "trae", "workbuddy",
+        "jarvis", "coursedesk", "info-station", "wechat", "qq",
+    };
+
+    public static string Namespace(string id) =>
+        id.StartsWith(IdPrefix, StringComparison.Ordinal) ? id : IdPrefix + id;
+
+    public static string DispatchFor(string? dispatch, string source) =>
+        dispatch ?? (ProtocolSources.Contains(source) ? source : PushDispatch);
 }

@@ -23,14 +23,14 @@ public static class DebugJumpTarget
             _ when activity.Id.StartsWith("todo:remind:", StringComparison.Ordinal) => "岛内：打开待办页",
             _ when activity.Id is "ykt:expired" or "ykt:expired-note" => "登录：打开雨课堂扫码窗口",
             _ when activity.Id is "xxt:expired" or "xxt:expired-note" => "登录：打开学习通扫码窗口",
-            _ when activity.Source == "download" => "资源管理器：打开下载文件夹",
+            _ when activity.Dispatch == "download" => "资源管理器：打开下载文件夹",
             _ => ResolvePlan(activity),
         };
     }
 
     private static string ResolvePlan(LiveActivity activity)
     {
-        var plan = JumpPlan.For(activity.Source, activity.OpenUri, activity.AppId, Launcher.CanOpen(activity.Source));
+        var plan = JumpPlan.For(activity.Dispatch, activity.OpenUri, activity.AppId, Launcher.CanOpen(activity.Dispatch));
         if (plan.Count == 0) return $"没有跳转目标：{activity.Id}";
         var steps = plan.Select(step => step switch
         {

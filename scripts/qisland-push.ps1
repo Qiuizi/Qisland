@@ -27,9 +27,18 @@ if ($Port -le 0) {
 }
 
 $headers = @{ "Content-Type" = "application/json; charset=utf-8" }
-if ($env:QISLAND_TOKEN) {
-    $headers["X-Qisland-Token"] = $env:QISLAND_TOKEN
-    $headers["X-WinIslands-Token"] = $env:QISLAND_TOKEN
+# Token：环境变量 QISLAND_TOKEN 优先，其次是 Qisland 的 api-token.txt（没有就不带）
+$token = $env:QISLAND_TOKEN
+if (-not $token) {
+    $tokenFile = $env:QISLAND_API_TOKEN_FILE
+    if (-not $tokenFile) { $tokenFile = Join-Path $env:APPDATA "Qisland\api-token.txt" }
+    if (Test-Path -LiteralPath $tokenFile -PathType Leaf) {
+        $token = ([IO.File]::ReadAllText($tokenFile, [Text.Encoding]::UTF8)).Trim()
+    }
+}
+if ($token) {
+    $headers["X-Qisland-Token"] = $token
+    $headers["X-WinIslands-Token"] = $token
 }
 $uri = "http://127.0.0.1:$Port/v1/qisland/ingest"
 try {

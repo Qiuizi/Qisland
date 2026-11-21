@@ -9,6 +9,9 @@ setlocal
 set PORT=%1
 if "%PORT%"=="" set PORT=9840
 set TOKEN=%2
+REM Token: arg > QISLAND_TOKEN > %APPDATA%\Qisland\api-token.txt
+if "%TOKEN%"=="" set TOKEN=%QISLAND_TOKEN%
+if "%TOKEN%"=="" if exist "%APPDATA%\Qisland\api-token.txt" set /p TOKEN=<"%APPDATA%\Qisland\api-token.txt"
 set ID=%3
 
 if "%ID%"=="" (
@@ -16,14 +19,14 @@ if "%ID%"=="" (
   if "%TOKEN%"=="" (
     curl -s "http://127.0.0.1:%PORT%/v1/island/active"
   ) else (
-    curl -s "http://127.0.0.1:%PORT%/v1/island/active" -H "X-WinIslands-Token: %TOKEN%"
+    curl -s "http://127.0.0.1:%PORT%/v1/island/active" -H "X-Qisland-Token: %TOKEN%" -H "X-WinIslands-Token: %TOKEN%"
   )
 ) else (
   echo DELETE http://127.0.0.1:%PORT%/v1/island/push/%ID%
   if "%TOKEN%"=="" (
     curl -s -X DELETE "http://127.0.0.1:%PORT%/v1/island/push/%ID%"
   ) else (
-    curl -s -X DELETE "http://127.0.0.1:%PORT%/v1/island/push/%ID%" -H "X-WinIslands-Token: %TOKEN%"
+    curl -s -X DELETE "http://127.0.0.1:%PORT%/v1/island/push/%ID%" -H "X-Qisland-Token: %TOKEN%" -H "X-WinIslands-Token: %TOKEN%"
   )
 )
 echo.

@@ -35,7 +35,7 @@ public sealed partial class SystemWatch
             var path = a.Id["download:done:".Length..];
             if (File.Exists(path)) { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true }); _store.Remove(a.Id); return true; }
         }
-        if (a.Source == "download" && Directory.Exists(_downloads)) { Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_downloads}\"") { UseShellExecute = true }); return true; }
+        if (a.Dispatch == "download" && Directory.Exists(_downloads)) { Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_downloads}\"") { UseShellExecute = true }); return true; }
         return false;
     }
 

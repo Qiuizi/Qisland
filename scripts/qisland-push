@@ -29,6 +29,25 @@ elif [ "${BODY#\{}" != "$BODY" ] && ! printf '%s' "$BODY" | grep -q '"\$type"[[:
   BODY="{\"\$type\":\"${TYPE}\",${BODY:1}"
 fi
 
+win_user() {
+  if [ -z "${WIN_USER:-}" ] && command -v cmd.exe >/dev/null 2>&1; then
+    WIN_USER="$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r')"
+  fi
+  printf '%s' "${WIN_USER:-}"
+}
+
+# Token：环境变量 QISLAND_TOKEN 优先，其次是 Windows 上 Qisland 的 api-token.txt（没有就不带）
+if [ -z "$TOKEN" ]; then
+  TOKEN_FILE="${QISLAND_API_TOKEN_FILE:-}"
+  if [ -z "$TOKEN_FILE" ]; then
+    U="$(win_user)"
+    [ -n "$U" ] && TOKEN_FILE="/mnt/c/Users/${U}/AppData/Roaming/Qisland/api-token.txt"
+  fi
+  if [ -n "$TOKEN_FILE" ] && [ -r "$TOKEN_FILE" ]; then
+    TOKEN="$(tr -d '\r\n' < "$TOKEN_FILE")"
+  fi
+fi
+
 post() {
   if [ -n "$TOKEN" ]; then
     curl -fsS -m 2 -X POST "$1" \
@@ -62,10 +81,7 @@ if [ -n "$HOST" ] && [ "$HOST" != "127.0.0.1" ]; then
   fi
 fi
 
-WIN_USER="${WIN_USER:-}"
-if [ -z "$WIN_USER" ] && command -v cmd.exe >/dev/null 2>&1; then
-  WIN_USER="$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r')"
-fi
+WIN_USER="$(win_user)"
 if [ -z "$WIN_USER" ]; then
   echo "qisland-push: 设好 WIN_USER 后再写收件箱" >&2
   exit 1

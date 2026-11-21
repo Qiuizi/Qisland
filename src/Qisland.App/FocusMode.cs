@@ -16,7 +16,7 @@ public static class FocusMode
 
     public static bool Passes(LiveActivity a) =>
         a.Kind == ActivityKind.WaitingApproval
-        || a.Source is "call" or "meeting" or "timer" or "mic" or "camera"
+        || a.Dispatch is "call" or "meeting" or "timer" or "mic" or "camera"
         || a.Id == "hw:alert" && a.Kind == ActivityKind.Error;
 
     // ───── Windows 11 专注会话：Windows.UI.Shell.FocusSessionManager（22H2 起）─────
