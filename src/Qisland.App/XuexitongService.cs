@@ -358,7 +358,8 @@ public sealed partial class XuexitongService
         });
     }
 
-    internal enum CoursePageKind { Courses, Empty, Unknown }
+    /// <summary>Courses 解析出了课程；Empty 确认没课；Unparsed 容器里有条目却一门都没解析出来；Unknown 认不出的页面。</summary>
+    internal enum CoursePageKind { Courses, Empty, Unparsed, Unknown }
     internal sealed record CoursePage(CoursePageKind Kind, List<Course> Courses);
     internal sealed record Course(string Name, string Id, string Clazz, string Cpi);
     private sealed class UnknownPageException(string message) : Exception(message);
@@ -376,9 +377,10 @@ public sealed partial class XuexitongService
         Dump("courses.html", list);
         var page = ParseCoursePage(list);
         if (page.Kind == CoursePageKind.Unknown) throw new UnknownPageException("无法识别的课程页面");
+        if (page.Kind == CoursePageKind.Unparsed) throw new UnknownPageException("课程列表里有条目，但一门课都没解析出来，保留旧作业");
         var courses = page.Courses.Take(20).ToList();
         var now = DateTime.Now;
-        var items = new List<HomeworkItem>();
+        var snap = new HomeworkSnapshot(previous);
         var dumped = 0;
         foreach (var c in courses)
         {
@@ -391,6 +393,7 @@ public sealed partial class XuexitongService
                 if (workEnc.Length == 0)
                 {
                     if (!LooksLikeCourseMiddlePage(mid)) throw new UnknownPageException("无法识别的课程详情页");
+                    snap.Course(c.Id, c.Name, HomeworkCourseState.Empty);
                     continue; // 这门课没开作业
                 }
                 var t = DateTimeOffset.Now.ToUnixTimeMilliseconds();
@@ -399,8 +402,14 @@ public sealed partial class XuexitongService
                 if (wl == null) return null;
                 if (dumped++ < 2) Dump($"work-{c.Id}.html", wl);
                 var matches = WorkItem().Matches(wl);
-                if (matches.Count == 0 && !LooksLikeEmptyWorkList(wl))
-                    throw new UnknownPageException("无法识别的作业列表页");
+                if (matches.Count == 0)
+                {
+                    var kind = ClassifyEmptyWorkList(wl);
+                    if (kind == HomeworkCourseState.Failed) throw new UnknownPageException("无法识别的作业列表页");
+                    if (kind == HomeworkCourseState.Unparsed) App.Log($"学习通: 课程 {c.Name} 的作业列表有条目但一条都没解析出来，保留旧作业");
+                    snap.Course(c.Id, c.Name, kind);
+                    continue;
+                }
                 foreach (Match m in matches)
                 {
                     var url = WebUtility.HtmlDecode(Uri.UnescapeDataString(m.Groups[1].Value));
@@ -410,7 +419,7 @@ public sealed partial class XuexitongService
                     {
                         // 交了没批：只用列表上现成的剩余时间，不为它多发详情请求
                         if (LeftFromList(wl, m.Index, now) is { } sd && sd > now)
-                            items.Add(new HomeworkItem(Platform, c.Name, title, sd, true, url.StartsWith("http") ? url : "", "作业", Ungraded: true));
+                            snap.Add(new HomeworkItem(Platform, c.Name, title, sd, true, url.StartsWith("http") ? url : "", "作业", Ungraded: true, CourseId: c.Id));
                         continue;
                     }
                     if (DoneMarks.Any(state.Contains) || state.Contains("已截止") || state.Contains("已过期")) continue;
@@ -427,17 +436,20 @@ public sealed partial class XuexitongService
                             _deadlineCache[url] = dl;
                         }
                     }
-                    if (dl is { } d && d > now)
-                        items.Add(new HomeworkItem(Platform, c.Name, title, d, false, url.StartsWith("http") ? url : "", "作业"));
+                    var fresh = new HomeworkItem(Platform, c.Name, title, dl ?? now, false, url.StartsWith("http") ? url : "", "作业", CourseId: c.Id);
+                    if (dl is { } d) { if (d > now) snap.Add(fresh); }
+                    else if (snap.KeepItem(fresh)) App.Log($"学习通: 课程 {c.Name} 有一份作业读不出截止时间，沿用上次的数据");
                 }
+                snap.Course(c.Id, c.Name, HomeworkCourseState.Parsed);
             }
             catch (Exception ex) when (ex is not StaleSession and not AntiSpiderException)
             {
                 App.Log($"学习通: 课程 {c.Name} 拉取失败，保留旧作业 · {ex.GetType().Name}");
-                items.AddRange(previous.Where(i => i.Course == c.Name));
+                snap.Course(c.Id, c.Name, HomeworkCourseState.Failed);   // 按课程 ID 沿用旧数据（课程改名也认得）
             }
         }
-        return items;
+        App.Log("学习通: 本次拉取 " + snap.Summary());
+        return snap.Items.ToList();
     }
 
     private static readonly string[] DoneMarks = ["已完成", "已提交", "待批阅", "已批阅", "已批改"];
@@ -449,9 +461,12 @@ public sealed partial class XuexitongService
     {
         var courses = ParseCourses(html);
         if (courses.Count > 0) return new CoursePage(CoursePageKind.Courses, courses);
-        return LooksLikeCoursePage(html)
-            ? new CoursePage(CoursePageKind.Empty, [])
-            : new CoursePage(CoursePageKind.Unknown, []);
+        if (!LooksLikeCoursePage(html)) return new CoursePage(CoursePageKind.Unknown, []);
+        // 课程链接都在、只是全部已结束：确实没有在上的课
+        if (CourseLink().IsMatch(html)) return new CoursePage(CoursePageKind.Empty, []);
+        // 明确写着「暂无课程」，或容器里一个条目都没有，才算空；容器里有条目却一门都没解析出来不是空
+        if (html.Contains("暂无课程", StringComparison.Ordinal) || !HasListEntries(html)) return new CoursePage(CoursePageKind.Empty, []);
+        return new CoursePage(CoursePageKind.Unparsed, []);
     }
 
     internal static bool LooksLikeCoursePage(string html) =>
@@ -471,11 +486,24 @@ public sealed partial class XuexitongService
         || html.Contains("暂无作业", StringComparison.Ordinal)
         || html.Contains("暂无任务", StringComparison.Ordinal);
 
+    [GeneratedRegex(@"stucoursemiddle\?courseid=(\d+)&(?:amp;)?clazzid=(\d+)&(?:amp;)?cpi=(\d+)")]
+    private static partial Regex CourseLink();
+
+    private static bool HasListEntries(string html) => Regex.IsMatch(html, @"<li[\s>]", RegexOptions.IgnoreCase);
+
+    /// <summary>作业列表一条都没匹配上时：明确的空 → Empty；容器里有条目 → Unparsed（保留旧数据）；认不出 → Failed。</summary>
+    internal static HomeworkCourseState ClassifyEmptyWorkList(string html)
+    {
+        if (html.Contains("暂无作业", StringComparison.Ordinal) || html.Contains("暂无任务", StringComparison.Ordinal)) return HomeworkCourseState.Empty;
+        if (!LooksLikeEmptyWorkList(html)) return HomeworkCourseState.Failed;
+        return HasListEntries(html) ? HomeworkCourseState.Unparsed : HomeworkCourseState.Empty;
+    }
+
     private static List<Course> ParseCourses(string html)
     {
         var seen = new HashSet<string>();
         var list = new List<Course>();
-        foreach (Match m in Regex.Matches(html, @"stucoursemiddle\?courseid=(\d+)&(?:amp;)?clazzid=(\d+)&(?:amp;)?cpi=(\d+)"))
+        foreach (Match m in CourseLink().Matches(html))
         {
             var key = m.Value;
             if (!seen.Add(key)) continue;

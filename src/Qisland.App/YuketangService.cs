@@ -518,11 +518,12 @@ public sealed class YuketangService
         using var h = NewHttp(session: true);
         var courses = await Get(h, gen, "/v2/api/web/courses/list?identity=2");
         Dump("courses", courses);
-        var list = courses["data"]?["list"]?.AsArray() ?? [];
+        // 缺 data.list 不等于「没有课」：当临时问题处理，不提交、保留旧作业（P1-5）
+        if (courses["data"]?["list"] is not JsonArray list) throw new IOException("课程列表缺 data.list 字段，保留旧作业");
+        var snap = new HomeworkSnapshot(_hub.Previous(Platform));
         // 只看当前学期：term 取最大的那一批
         var terms = list.Select(c => (long?)Num(c?["term"])).Where(t => t > 0).ToList();
         var term = terms.Count > 0 ? terms.Max() : null;
-        var items = new List<HomeworkItem>();
         foreach (var c in list)
         {
             if (c == null) continue;
@@ -537,7 +538,13 @@ public sealed class YuketangService
             {
                 // 课程列表刚刚正常返回，说明登录是好的：单门课的 50000 / 业务错误只跳过这门课，沿用它上次的数据
                 App.Log($"雨课堂: 跳过一门课 · {ex.Message}");
-                items.AddRange(_hub.Previous(Platform).Where(i => i.Course == course));
+                snap.Course(cid, course, HomeworkCourseState.Failed);   // 按课程 ID 沿用旧数据（课程改名也认得）
+                continue;
+            }
+            if (log["data"]?["activities"] is not JsonArray activities)
+            {
+                App.Log("雨课堂: 一门课的学习日志缺 activities 字段，沿用它上次的数据");
+                snap.Course(cid, course, HomeworkCourseState.MissingFields);
                 continue;
             }
 
@@ -557,7 +564,8 @@ public sealed class YuketangService
                     if (l?["id"]?.ToString() is { Length: > 0 } id) sched[id] = (Num(l["schedule"]), Num(l["no_corrected_subj_count"]) > 0);
                 return sched;
             }
-            foreach (var a in log["data"]?["activities"]?.AsArray() ?? [])
+            var added = 0;
+            foreach (var a in activities)
             {
                 if (a is not JsonObject ao) continue;
                 var type = (int)Num(ao["type"]);
@@ -588,12 +596,16 @@ public sealed class YuketangService
                 }
                 var kind = type == 5 ? "试卷" : type == 19 ? "章节作业" : "作业";
                 var title = ao["title"]?.ToString() ?? kind;
-                items.Add(new HomeworkItem(Platform, course, title, dl.Value, done,
+                added++;
+                snap.Add(new HomeworkItem(Platform, course, title, dl.Value, done,
                     $"https://{Host}/v2/web/studentLog/{cid}", kind, ungraded,
                     CourseId: cid, ActivityId: ActivityId(ao, title), Account: _account));
             }
+            // activities 是真的数组：没有带截止时间的作业就是这门课确实没有作业
+            snap.Course(cid, course, added > 0 ? HomeworkCourseState.Parsed : HomeworkCourseState.Empty);
         }
-        return items;
+        App.Log("雨课堂: 本次拉取 " + snap.Summary());
+        return snap.Items.ToList();
     }
 
     /// <summary>
