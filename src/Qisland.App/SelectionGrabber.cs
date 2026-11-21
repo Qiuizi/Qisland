@@ -112,10 +112,18 @@ public static class SelectionGrabber
         for (var i = 0; i < 24; i++)
         {
             await host.DelayAsync(25);
-            if (host.ClipboardSequenceNumber == seq) continue;
-            await host.DelayAsync(30);
-            copied = host.ClipboardSequenceNumber;
-            text = host.ReadText();
+            var now = host.ClipboardSequenceNumber;
+            if (now == seq) continue;
+            // 第一次变化立刻记下序号：这就是这次 Ctrl+C 的结果。之后再变（等待期间、读的同时）都算额外变化
+            copied = now;
+            await host.DelayAsync(30);   // 给复制方一点时间写完
+            if (host.ClipboardSequenceNumber == copied) text = host.ReadText();
+            if (host.ClipboardSequenceNumber != copied)
+            {
+                // 额外变化：分不清读到的是选区还是用户刚复制的内容，既不读取，也不拿旧备份去覆盖
+                SuppressClipUntil = DateTime.Now.AddMilliseconds(800);
+                return (null, "划词时剪贴板又被改动了，没有读取也没有还原（避免冲掉你刚复制的内容）");
+            }
             break;
         }
         // 只在剪贴板还是这次 Ctrl+C 的结果时还原；期间别的程序又复制了东西就不覆盖它
