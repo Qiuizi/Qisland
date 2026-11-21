@@ -89,23 +89,92 @@ public static class HookPlans
         return root.ToJsonString(Pretty);
     }
 
+    // ── 条目身份：一键还原 / 移除前把「你确认时看到的每一条」冻结下来，之后只删这些；新加或改过的条目身份不同，保留 ──
+
+    private static readonly JsonSerializerOptions Canon = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    /// <summary>一条 hook 的身份：事件名 + 这条 hook 对象的紧凑 JSON（命令、超时等任何一处变了身份就不同）。</summary>
+    public static string HookIdentity(string evt, JsonNode hook) => evt + "\u001f" + hook.ToJsonString(Canon);
+
+    /// <summary>插件文件的身份：内容的 SHA256。</summary>
+    public static string FileIdentity(string? text) =>
+        "file\u001f" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text ?? ""))).ToLowerInvariant();
+
+    /// <summary>现在文件里我们的每一条（可能重复，按出现次数记）。</summary>
+    public static List<string> Identities(HookTarget t, string? json)
+    {
+        if (t.Style == HookStyle.PluginFile) return json != null && json.Contains(PluginMarker) ? [FileIdentity(json)] : [];
+        return Identities(t.Style, json);
+    }
+
+    /// <summary>Nested（Gemini / Qwen / Codex：事件 → 组 → hooks）或 Cursor（事件 → hooks）风格里我们的每一条。</summary>
+    public static List<string> Identities(HookStyle style, string? json)
+    {
+        var ids = new List<string>();
+        try
+        {
+            if (ParseRoot(json)["hooks"] is not JsonObject ev) return ids;
+            foreach (var (name, v) in ev)
+            {
+                if (v is not JsonArray arr) continue;
+                if (style == HookStyle.Cursor) ids.AddRange(arr.Where(IsOurs).Select(h => HookIdentity(name, h!)));
+                else foreach (var g in arr)
+                    if (g?["hooks"] is JsonArray hs) ids.AddRange(hs.Where(IsOurs).Select(h => HookIdentity(name, h!)));
+            }
+        }
+        catch { }
+        return ids;
+    }
+
+    /// <summary>冻结的身份按次数用掉：同一身份冻结了几条就最多删几条，确认后又加的同样一条也保留。</summary>
+    public sealed class IdentityBudget(IEnumerable<string> frozen)
+    {
+        private readonly Dictionary<string, int> _left = frozen.GroupBy(x => x).ToDictionary(g => g.Key, g => g.Count());
+        public bool Take(string id)
+        {
+            if (!_left.TryGetValue(id, out var n) || n <= 0) return false;
+            _left[id] = n - 1;
+            return true;
+        }
+    }
+
     /// <summary>只删我们的条目，删空的组和事件；别的原样。</summary>
-    public static string Remove(HookTarget t, string? json, out int removed)
+    public static string Remove(HookTarget t, string? json, out int removed) => Remove(t, json, null, out removed);
+
+    /// <summary>
+    /// only 不为 null 时只删身份在 only 里的条目（按次数），确认之后新加或改过的我们的条目也保留。
+    /// PluginFile 返回 null 表示删文件（only 不为 null 时内容的身份必须对得上），返回原文表示不动。
+    /// </summary>
+    public static string? Remove(HookTarget t, string? json, IReadOnlyCollection<string>? only, out int removed)
     {
         removed = 0;
-        if (t.Style == HookStyle.PluginFile) { removed = json?.Contains(PluginMarker) == true ? 1 : 0; return ""; }
+        if (t.Style == HookStyle.PluginFile)
+        {
+            if (json?.Contains(PluginMarker) != true) return json;
+            if (only != null && !only.Contains(FileIdentity(json))) return json;
+            removed = 1;
+            return only == null ? "" : null;
+        }
+        return Remove(t.Style, json, only, out removed);
+    }
+
+    public static string Remove(HookStyle style, string? json, IReadOnlyCollection<string>? only, out int removed)
+    {
+        removed = 0;
+        var budget = only == null ? null : new IdentityBudget(only);
+        bool Drop(string evt, JsonNode? h) => IsOurs(h) && (budget == null || budget.Take(HookIdentity(evt, h!)));
         var root = ParseRoot(json);
         if (root["hooks"] is not JsonObject ev) return root.ToJsonString(Pretty);
         foreach (var name in ev.Select(kv => kv.Key).ToList())
         {
             if (ev[name] is not JsonArray arr) continue;
-            if (t.Style == HookStyle.Cursor)
-                foreach (var h in arr.Where(IsOurs).ToList()) { arr.Remove(h); removed++; }
+            if (style == HookStyle.Cursor)
+                foreach (var h in arr.Where(h => Drop(name, h)).ToList()) { arr.Remove(h); removed++; }
             else
                 foreach (var g in arr.ToList())
                 {
                     if (g?["hooks"] is not JsonArray hs) continue;
-                    foreach (var h in hs.Where(IsOurs).ToList()) { hs.Remove(h); removed++; }
+                    foreach (var h in hs.Where(h => Drop(name, h)).ToList()) { hs.Remove(h); removed++; }
                     if (hs.Count == 0) arr.Remove(g);
                 }
             if (arr.Count == 0) ev.Remove(name);

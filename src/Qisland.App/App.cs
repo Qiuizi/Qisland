@@ -509,7 +509,7 @@ public sealed partial class App : Application
 
     private void RestoreChanges()
     {
-        var list = ChangeLedger.Sync();
+        var list = ChangeLedger.Freeze(ChangeLedger.Sync());   // 弹窗前冻结每一项具体是哪几条，之后新加 / 改过的不删
         var text = string.Join("\n", list.Select(e => $"· {e.App}：{e.What}"));
         if (System.Windows.MessageBox.Show($"把 Qisland 对其他软件的改动全部还原：\n\n{text}\n\n只删 Qisland 自己加的条目，你自己的 hook 和插件原样保留，改前会备份。Codex 新开的会话、重启后的 DSH 生效。\n\n确定还原？",
                 "Qisland", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;

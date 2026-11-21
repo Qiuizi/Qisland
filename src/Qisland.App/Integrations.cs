@@ -66,25 +66,41 @@ public static class Integrations
         catch (Exception ex) { Notify($"写不进 {path}：{ex.Message}"); App.Log($"接入 {t.App} 失败: {ex.Message}"); }
     }
 
-    /// <summary>移除我们加的那部分；ask=false 用于一键还原（那边已经整体确认过）。</summary>
-    public static string? Remove(HookTarget t, bool ask)
+    /// <summary>
+    /// 移除我们加的那部分；ask=false 用于一键还原（那边已经整体确认过，frozen 是确认时冻结的条目身份）。
+    /// 只删确认时看到的那些条目：确认之后新加或改过的条目身份不同，原样保留。
+    /// </summary>
+    public static string? Remove(HookTarget t, bool ask, IReadOnlyCollection<string>? frozen = null)
     {
         var path = FullPath(t);
         var existing = Read(path);
         if (existing == null || HookPlans.InstalledEvents(t, existing).Count == 0) return null;
+        frozen ??= HookPlans.Identities(t, existing);   // 弹窗前冻结
         if (ask && !Confirm($"从 {t.App} 移除 Qisland？\n\n{(t.Style == HookStyle.PluginFile ? "删除文件 " + path : "只删 " + path + " 里命令带 Qisland.exe 的 hook，其余不动")}\n改前备份。", "Qisland")) return null;
         // 确认后按最新内容重新计算；期间已经没有我们的条目就什么都不改
         string? backup = null;
+        var removed = 0;
         if (!ConfigFile.Update(path,
-                text => HookPlans.InstalledEvents(t, text).Count == 0 ? text
-                    : t.Style == HookStyle.PluginFile ? null : HookPlans.Remove(t, text, out _),
+                text =>
+                {
+                    removed = 0;
+                    if (HookPlans.InstalledEvents(t, text).Count == 0) return text;
+                    var next = HookPlans.Remove(t, text, frozen, out removed);
+                    return removed == 0 ? text : next;
+                },
                 v => backup = Backup(path, v), out var err))
         {
             var fail = $"{t.App}：{path} 在写入时被别的程序改动了，没有移除（{err}）";
             App.Log(fail);
             return fail;
         }
-        var r = $"{t.App}：已移除 Qisland 的接入" + (backup != null ? $"（备份 {Path.GetFileName(backup)}）" : "");
+        if (removed == 0)
+        {
+            var kept = $"{t.App}：确认时看到的条目已经被改过或不在了，没有改动";
+            App.Log(kept);
+            return kept;
+        }
+        var r = $"{t.App}：已移除确认过的 {removed} 条 Qisland 接入" + (backup != null ? $"（备份 {Path.GetFileName(backup)}）" : "");
         App.Log(r);
         ChangeLedger.Sync();
         return r;

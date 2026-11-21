@@ -11,7 +11,31 @@ namespace Qisland.App;
 /// </summary>
 public static class ChangeLedger
 {
-    public sealed record Entry(string Id, string App, string Target, string What, DateTime At, bool Detected = false);
+    /// <summary>Items：一键还原确认时冻结的条目身份（每条 hook / 插件文件内容 / DSH 依赖值），只在内存里用，账本文件里不写。</summary>
+    public sealed record Entry(string Id, string App, string Target, string What, DateTime At, bool Detected = false,
+        [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyList<string>? Items = null);
+
+    /// <summary>
+    /// 弹确认框之前调用：把每一项此刻具体是哪几条记下来（身份 = 事件 + 这条 hook 的完整 JSON / 文件内容哈希 / 依赖值）。
+    /// 还原时只删这些身份的条目；确认之后新加或改过的条目身份不同，原样保留。
+    /// </summary>
+    public static IReadOnlyList<Entry> Freeze(IReadOnlyList<Entry> list) =>
+        list.Select(e => e with { Items = CurrentItems(e.Id) ?? [] }).ToList();
+
+    private static List<string>? CurrentItems(string id)
+    {
+        try
+        {
+            return id switch
+            {
+                "codex-hooks" => Qisland.Core.HookPlans.Identities(Qisland.Core.HookStyle.Nested, Qisland.Core.ConfigFile.Read(CodexHooks).Text),
+                "dsh-bridge" => DshIdentities(Qisland.Core.ConfigFile.Read(DshPackage).Text),
+                _ when Qisland.Core.HookPlans.ById(id) is { } t => Qisland.Core.HookPlans.Identities(t, Qisland.Core.ConfigFile.Read(Integrations.FullPath(t)).Text),
+                _ => null,
+            };
+        }
+        catch { return null; }
+    }
 
     /// <summary>测试用：账本文件放到临时目录。</summary>
     internal static string? PathOverride { get; set; }
@@ -92,31 +116,23 @@ public static class ChangeLedger
         catch { return []; }
     }
 
-    /// <summary>只删命令里带 Qisland.exe 的 hook；删空的组、删空的事件；其余原样写回。按最新内容计算，核对版本后原子替换。</summary>
-    private static string RestoreCodex()
+    /// <summary>
+    /// 只删确认时冻结的那几条 Qisland hook（按身份、按次数）；删空的组、删空的事件；其余原样写回。
+    /// 确认之后新加或改过的 hook 身份不同，保留。按最新内容计算，核对版本后原子替换。
+    /// </summary>
+    private static string RestoreCodex(IReadOnlyCollection<string> frozen)
     {
         var removed = 0;
         var ok = Qisland.Core.ConfigFile.Update(CodexHooks, text =>
         {
             removed = 0;
             if (text == null) return null;
-            var root = JsonNode.Parse(text)!;
-            if (root["hooks"] is not JsonObject ev) return text;
-            foreach (var name in ev.Select(kv => kv.Key).ToList())
-            {
-                if (ev[name] is not JsonArray groups) continue;
-                foreach (var g in groups.ToList())
-                {
-                    if (g?["hooks"] is not JsonArray hs) continue;
-                    foreach (var h in hs.Where(Ours).ToList()) { hs.Remove(h); removed++; }
-                    if (hs.Count == 0) groups.Remove(g);
-                }
-                if (groups.Count == 0) ev.Remove(name);
-            }
-            return removed == 0 ? text : root.ToJsonString(Pretty);
+            var next = Qisland.Core.HookPlans.Remove(Qisland.Core.HookStyle.Nested, text, frozen, out removed);
+            return removed == 0 ? text : next;
         }, v => File.WriteAllText(CodexHooks + ".qisland-restore-bak", v.Text ?? ""), out var err);
         if (!ok) throw new IOException("hooks.json 在写入时一直被别的程序改动：" + err);
-        return $"Codex：删掉了 {removed} 条 Qisland hook，其余保留（备份 hooks.json.qisland-restore-bak）";
+        var kept = Qisland.Core.HookPlans.Identities(Qisland.Core.HookStyle.Nested, Qisland.Core.ConfigFile.Read(CodexHooks).Text).Count;
+        return $"Codex：删掉了确认过的 {removed} 条 Qisland hook" + (kept > 0 ? $"，确认后新加或改过的 {kept} 条保留" : "") + "，其余保留（备份 hooks.json.qisland-restore-bak）";
     }
 
     // ───────────── DeepSeek Harness ─────────────
@@ -133,17 +149,35 @@ public static class ChangeLedger
         catch { return false; }
     }
 
-    /// <summary>从 package.json 的依赖和 bundles 里去掉桥接插件，别的插件不动；重启 DSH 后生效。按最新内容计算，核对版本后原子替换。</summary>
-    private static string RestoreDsh()
+    private static List<string> DshIdentities(string? text)
+    {
+        var ids = new List<string>();
+        if (string.IsNullOrWhiteSpace(text)) return ids;
+        var root = JsonNode.Parse(text);
+        if (root?["dependencies"]?[DshBridge] is { } dep) ids.Add("dep\u001f" + dep.ToJsonString());
+        if (root?["dsh"]?["profile"]?["bundles"] is JsonArray b)
+            ids.AddRange(b.Where(x => x?.ToString() == DshBridge).Select(_ => "bundle\u001f" + DshBridge));
+        return ids;
+    }
+
+    /// <summary>
+    /// 从 package.json 的依赖和 bundles 里去掉确认时看到的桥接插件（依赖值变了就不删），别的插件不动；重启 DSH 后生效。
+    /// 按最新内容计算，核对版本后原子替换。
+    /// </summary>
+    private static string RestoreDsh(IReadOnlyCollection<string> frozen)
     {
         var ok = Qisland.Core.ConfigFile.Update(DshPackage, text =>
         {
             if (text == null) return null;
             var root = JsonNode.Parse(text)!;
-            (root["dependencies"] as JsonObject)?.Remove(DshBridge);
+            var budget = new Qisland.Core.HookPlans.IdentityBudget(frozen);
+            var changed = false;
+            if (root["dependencies"] is JsonObject deps && deps[DshBridge] is { } dep && budget.Take("dep\u001f" + dep.ToJsonString()))
+            { deps.Remove(DshBridge); changed = true; }
             if (root["dsh"]?["profile"]?["bundles"] is JsonArray b)
-                foreach (var x in b.Where(x => x?.ToString() == DshBridge).ToList()) b.Remove(x);
-            return root.ToJsonString(Pretty);
+                foreach (var x in b.Where(x => x?.ToString() == DshBridge).ToList())
+                    if (budget.Take("bundle\u001f" + DshBridge)) { b.Remove(x); changed = true; }
+            return changed ? root.ToJsonString(Pretty) : text;
         }, v => File.WriteAllText(DshPackage + ".qisland-restore-bak", v.Text ?? ""), out var err);
         if (!ok) throw new IOException("package.json 在写入时一直被别的程序改动：" + err);
         return "DeepSeek Harness：去掉了 dsh-qisland-bridge（备份 package.json.qisland-restore-bak），重启 DSH 生效";
@@ -151,10 +185,12 @@ public static class ChangeLedger
 
     /// <summary>
     /// 一键还原：只撤销你在确认框里看到并同意的那些条目，按条目身份（Id + 目标文件）逐条对上现状；
-    /// 确认之后才出现的新改动不碰，已经不在的跳过。返回每一项的结果。
+    /// 确认之后才出现的新改动不碰，已经不在的跳过；每一项只删 <see cref="Freeze"/> 时冻结的那几条。返回每一项的结果。
+    /// 没冻结过的条目（老调用方）在这里补冻结——调用方应在弹确认框之前就 Freeze。
     /// </summary>
     public static List<string> RestoreAll(IReadOnlyList<Entry> confirmed)
     {
+        confirmed = confirmed.Select(e => e.Items != null ? e : Freeze([e])[0]).ToList();
         var results = new List<string>();
         var current = Sync().ToList();
         foreach (var e in confirmed)
@@ -165,9 +201,9 @@ public static class ChangeLedger
             {
                 var r = e.Id switch
                 {
-                    "codex-hooks" when File.Exists(CodexHooks) => RestoreCodex(),
-                    "dsh-bridge" when File.Exists(DshPackage) => RestoreDsh(),
-                    _ when Qisland.Core.HookPlans.ById(e.Id) is { } t => Integrations.Remove(t, ask: false),
+                    "codex-hooks" when File.Exists(CodexHooks) => RestoreCodex(e.Items!),
+                    "dsh-bridge" when File.Exists(DshPackage) => RestoreDsh(e.Items!),
+                    _ when Qisland.Core.HookPlans.ById(e.Id) is { } t => Integrations.Remove(t, ask: false, e.Items!),
                     _ => null,
                 };
                 if (r != null) { results.Add(r); App.Log("改动账本还原: " + r); }

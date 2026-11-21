@@ -28,17 +28,45 @@ public static class ConfigFile
 
     private static string Stamp(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 
-    /// <summary>文件还是 expected 那一版才写入（newText 为 null 表示删除）；版本变了返回 false，什么都不动。</summary>
+    /// <summary>
+    /// 文件还是 expected 那一版才写入（newText 为 null 表示删除）；版本变了返回 false，什么都不动。
+    /// 为了把「核对版本 → 替换」之间的窗口压到最小：新内容先完整写进临时文件并落盘，
+    /// 再在拦住其他写入者的情况下读一遍目标核对版本，核对完立刻覆盖移动（中间不做任何别的 IO）。
+    /// </summary>
     public static bool TryCommit(ConfigVersion expected, string? newText, out string? error)
     {
-        BeforeCommitForTests?.Invoke(expected.Path);
         error = null;
-        if (StampOf(expected.Path) != expected.Stamp) { error = "文件在读取之后被别的程序改过"; return false; }
-        if (newText == null)
-            return expected.Text == null || AtomicFile.TryDelete(expected.Path, out error);
-        var dir = System.IO.Path.GetDirectoryName(expected.Path);
-        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        return AtomicFile.TryWrite(expected.Path, new UTF8Encoding(false).GetBytes(newText), out error);
+        string? tmp = null;
+        try
+        {
+            if (newText != null)
+            {
+                var dir = System.IO.Path.GetDirectoryName(expected.Path);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                tmp = AtomicFile.Prepare(expected.Path, new UTF8Encoding(false).GetBytes(newText));
+            }
+            BeforeCommitForTests?.Invoke(expected.Path);
+            if (!StillIs(expected)) { error = "文件在读取之后被别的程序改过"; return false; }
+            if (tmp == null) return expected.Text == null || AtomicFile.TryDelete(expected.Path, out error);
+            File.Move(tmp, expected.Path, overwrite: true);
+            tmp = null;
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            error = ex.Message;
+            return false;
+        }
+        finally { AtomicFile.Discard(tmp); }
+    }
+
+    /// <summary>核对目标还是读到的那一版：读的时候只允许别人读、不允许写（FileShare.Read），核对期间没人能改。</summary>
+    private static bool StillIs(ConfigVersion expected)
+    {
+        if (expected.Stamp == "missing") return !File.Exists(expected.Path);
+        if (!File.Exists(expected.Path)) return false;
+        using var fs = new FileStream(expected.Path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        return Convert.ToHexString(SHA256.HashData(fs)).ToLowerInvariant() == expected.Stamp;
     }
 
     /// <summary>
