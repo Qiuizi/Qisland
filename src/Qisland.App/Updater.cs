@@ -168,6 +168,48 @@ public sealed class Updater
         if (total > 0 && got != total) throw new IOException($"只下到 {got}/{total} 字节");
     }
 
+    /// <summary>
+    /// 启动恢复入口：上次覆盖停在 applying（覆盖到一半被杀/断电）且变更清单还在时，拉起恢复脚本并返回它；
+    /// 调用方应随即退出，让脚本在本进程退出后按清单逐文件还原，再以 --update-failed 启动旧版。
+    /// 没有中断痕迹时返回 null，什么都不做。
+    /// </summary>
+    public static Process? StartRecoveryIfInterrupted(string resultFile, string manifestFile, string backupDir,
+        string appDir, int pid, string exe = "Qisland.exe", bool waitForPid = true)
+    {
+        string? text;
+        try { text = File.Exists(resultFile) ? File.ReadAllText(resultFile) : null; }
+        catch { return null; }
+        if (!UpdateScript.IsInterrupted(text) || !File.Exists(manifestFile)) return null;
+        if (UpdateScript.ApplyingPid(text) is int scriptPid && IsAlivePowerShell(scriptPid)) return null;
+        return UpdateScript.StartRecover(pid, appDir, backupDir, resultFile, manifestFile, exe, waitForPid);
+    }
+
+    private static bool IsAlivePowerShell(int pid)
+    {
+        try
+        {
+            using var p = Process.GetProcessById(pid);
+            return !p.HasExited && p.ProcessName.StartsWith("powershell", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
+
+    private static string UpdateTemp => Path.Combine(Path.GetTempPath(), "Qisland-update");
+
+    /// <summary>App 启动时调用：发现中断的覆盖就拉起恢复脚本，返回 true 表示本进程应立即退出。</summary>
+    public static bool RecoverInterruptedUpdate()
+    {
+        try
+        {
+            using var p = StartRecoveryIfInterrupted(ResultFile, Path.Combine(UpdateTemp, "manifest.json"),
+                Path.Combine(UpdateTemp, "backup"), AppContext.BaseDirectory.TrimEnd('\\'), Environment.ProcessId);
+            if (p == null) return false;
+            App.Log($"检测到上次更新覆盖中断，已启动恢复脚本（PID {p.Id}）");
+            return true;
+        }
+        catch (Exception ex) { App.Log("启动更新恢复失败: " + ex.Message); return false; }
+    }
+
     private static string ResultFile => Path.Combine(Path.GetTempPath(), "Qisland-update", "result.txt");
 
     /// <summary>以 --update-failed 启动（替换脚本回滚后拉起的旧版）：读脚本留下的结果，记日志并在岛上报错。</summary>
@@ -187,6 +229,9 @@ public sealed class Updater
         var tmp = Path.Combine(Path.GetTempPath(), "Qisland-update");
         try
         {
+            // 上次覆盖中断留下的清单和备份是还原的唯一依据，恢复完成前不能清掉
+            if (File.Exists(ResultFile) && UpdateScript.IsInterrupted(File.ReadAllText(ResultFile)))
+                throw new InvalidOperationException("上次更新中断尚未恢复，请重启 Qisland 完成恢复");
             if (Directory.Exists(tmp)) Directory.Delete(tmp, true);
             Directory.CreateDirectory(tmp);
             var zip = Path.Combine(tmp, "pkg.zip");

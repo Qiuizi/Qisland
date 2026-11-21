@@ -7,95 +7,37 @@ namespace Qisland.Core;
 /// 自动更新的替换脚本（PowerShell，-EncodedCommand 传入，不再经过 cmd 的代码页）：
 /// 1. 等旧进程退出，校验候选包的入口、必需文件和 ProductVersion；不合格时不动安装目录；
 /// 2. 生成“相对路径 + 新旧 SHA256”的变更清单，只备份会被改写或删除的文件；
-/// 3. 逐项覆盖并校验；启动新进程前先写 pending，等新进程落就绪标记后才写 ok；
+///    只覆盖新包里有的文件；删除仅限旧版安装清单（qisland-files.json）证明属于 Qisland、内容未被改动、
+///    且新包里已不存在的文件；没有可信清单时一个文件都不删，用户自己放进安装目录的文件永远保留；
+/// 3. 覆盖前写 applying，逐项覆盖并校验；中途被杀时下次启动按清单还原（BuildRecover）；
+///    启动新进程前先写 pending，等新进程落就绪标记后才写 ok；
 /// 4. 任何失败都按清单逐文件还原并校验 SHA256，成功才写 rolled-back，失败写 rollback-failed。
 /// 脚本内容用 UTF-16LE Base64 编码，中文路径不会受 cmd 代码页影响。
 /// </summary>
 public static class UpdateScript
 {
     public const int DefaultReadyTimeoutSeconds = 20;
+    public const string InstallManifestName = "qisland-files.json";
 
-    private static string Ps(string text) => "'" + text.Replace("'", "''") + "'";
-
-    public static string NormalizeVersion(string version)
+    /// <summary>result 文件停在 applying：覆盖进行到一半时进程被杀或断电，下次启动要按清单还原。</summary>
+    public static bool IsInterrupted(string? resultText)
     {
-        var value = version.Trim();
-        if (value.StartsWith('v') || value.StartsWith('V')) value = value[1..];
-        var plus = value.IndexOf('+');
-        return (plus >= 0 ? value[..plus] : value).Trim();
+        var t = (resultText ?? "").Trim();
+        return t == "applying" || t.StartsWith("applying ", StringComparison.Ordinal);
     }
 
-    /// <summary>覆盖前校验候选安装包；失败时抛出 InvalidDataException，安装目录不应有任何改动。</summary>
-    public static void ValidateCandidate(string from, string targetVersion, string exe = "Qisland.exe")
+    /// <summary>applying 后面记着正在覆盖的脚本进程号；脚本还活着说明覆盖仍在进行，不是中断。</summary>
+    public static int? ApplyingPid(string? resultText)
     {
-        if (!Directory.Exists(from))
-            throw new InvalidDataException("候选目录不存在");
-
-        var entry = Path.Combine(from, exe);
-        if (!File.Exists(entry))
-            throw new InvalidDataException($"候选包缺少 {exe}");
-
-        foreach (var name in RequiredFiles())
-        {
-            if (!File.Exists(Path.Combine(from, name)))
-                throw new InvalidDataException($"候选包缺少 {name}");
-        }
-
-        var expected = NormalizeVersion(targetVersion);
-        var actual = FileVersionInfo.GetVersionInfo(entry).ProductVersion?.Trim() ?? "";
-        if (!string.Equals(actual, expected, StringComparison.Ordinal))
-            throw new InvalidDataException($"候选包版本是 {actual}，要更新到 {expected}");
+        var t = (resultText ?? "").Trim();
+        return IsInterrupted(t) && t.Length > 9 && int.TryParse(t[9..].Trim(), out var pid) ? pid : null;
     }
 
-    private static string[] RequiredFiles() =>
-    [
-        "Qisland.Core.dll",
-        "Qisland.runtimeconfig.json",
-        "Qisland.deps.json",
-    ];
+    /// <summary>PowerShell 不在乎缩进和空行；去掉它们，长路径加大量文件时 -EncodedCommand 也留有余量。</summary>
+    private static string Compact(string script) =>
+        string.Join("\n", script.Replace("\r\n", "\n").Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0)) + "\n";
 
-    /// <summary>生成可交给 powershell.exe -EncodedCommand 的脚本；路径作为 PowerShell 单引号字面量写入。</summary>
-    public static string Build(
-        int pid,
-        string from,
-        string appDir,
-        string backupDir,
-        string resultFile,
-        string targetVersion,
-        string exe = "Qisland.exe",
-        string? manifestFile = null,
-        string? readyFile = null,
-        int readyTimeoutSeconds = DefaultReadyTimeoutSeconds)
-    {
-        from = Path.GetFullPath(from).TrimEnd('\\');
-        appDir = Path.GetFullPath(appDir).TrimEnd('\\');
-        backupDir = Path.GetFullPath(backupDir).TrimEnd('\\');
-        resultFile = Path.GetFullPath(resultFile);
-        var resultDir = Path.GetDirectoryName(resultFile)!;
-        manifestFile ??= Path.Combine(resultDir, "manifest.json");
-        readyFile ??= Path.Combine(resultDir, "ready.txt");
-        manifestFile = Path.GetFullPath(manifestFile);
-        readyFile = Path.GetFullPath(readyFile);
-        targetVersion = NormalizeVersion(targetVersion);
-        if (readyTimeoutSeconds < 1) readyTimeoutSeconds = 1;
-
-        return $$"""
-$ErrorActionPreference = 'Stop'
-$pidToWait = {{pid}}
-$from = {{Ps(from)}}
-$appDir = {{Ps(appDir)}}
-$backupDir = {{Ps(backupDir)}}
-$resultFile = {{Ps(resultFile)}}
-$manifestFile = {{Ps(manifestFile)}}
-$readyFile = {{Ps(readyFile)}}
-$expectedVersion = {{Ps(targetVersion)}}
-$exeName = {{Ps(exe)}}
-$entryExe = 'Qisland.exe'
-$requiredFiles = @('Qisland.exe', 'Qisland.Core.dll', 'Qisland.runtimeconfig.json', 'Qisland.deps.json')
-$readyTimeoutSeconds = {{readyTimeoutSeconds}}
-$script:manifest = @()
-$script:manifestReady = $false
-
+    private const string CommonFunctions = """
 function Write-Result([string]$text) {
     try {
         $dir = [IO.Path]::GetDirectoryName($resultFile)
@@ -186,6 +128,110 @@ function Restore-Plan {
     }
     return $errors.ToArray()
 }
+function Read-InstallManifest([string]$path) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    try { $doc = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($path, [Text.Encoding]::UTF8)) }
+    catch { Write-HelperLog "install manifest unreadable: $($_.Exception.Message)"; return $null }
+    if ($null -eq $doc -or $doc.format -ne 'qisland-files/1' -or $null -eq $doc.files) { Write-HelperLog 'install manifest format unknown'; return $null }
+    $map = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($f in @($doc.files)) {
+        if ($null -eq $f) { continue }
+        $p = ([string]$f.path).Replace('/', '\')
+        $h = ([string]$f.sha256).ToLowerInvariant()
+        if (-not $p -or [IO.Path]::IsPathRooted($p) -or $p.Contains(':') -or $p -match '(^|\\)\.\.(\\|$)' -or $h -notmatch '^[0-9a-f]{64}$') {
+            Write-HelperLog "install manifest entry rejected: $p"
+            return $null
+        }
+        if ($p -ieq $installManifestName) { continue }
+        $map[$p] = $h
+    }
+    return ,$map
+}
+""";
+
+    private static string Ps(string text) => "'" + text.Replace("'", "''") + "'";
+
+    public static string NormalizeVersion(string version)
+    {
+        var value = version.Trim();
+        if (value.StartsWith('v') || value.StartsWith('V')) value = value[1..];
+        var plus = value.IndexOf('+');
+        return (plus >= 0 ? value[..plus] : value).Trim();
+    }
+
+    /// <summary>覆盖前校验候选安装包；失败时抛出 InvalidDataException，安装目录不应有任何改动。</summary>
+    public static void ValidateCandidate(string from, string targetVersion, string exe = "Qisland.exe")
+    {
+        if (!Directory.Exists(from))
+            throw new InvalidDataException("候选目录不存在");
+
+        var entry = Path.Combine(from, exe);
+        if (!File.Exists(entry))
+            throw new InvalidDataException($"候选包缺少 {exe}");
+
+        foreach (var name in RequiredFiles())
+        {
+            if (!File.Exists(Path.Combine(from, name)))
+                throw new InvalidDataException($"候选包缺少 {name}");
+        }
+
+        var expected = NormalizeVersion(targetVersion);
+        var actual = FileVersionInfo.GetVersionInfo(entry).ProductVersion?.Trim() ?? "";
+        if (!string.Equals(actual, expected, StringComparison.Ordinal))
+            throw new InvalidDataException($"候选包版本是 {actual}，要更新到 {expected}");
+    }
+
+    private static string[] RequiredFiles() =>
+    [
+        "Qisland.Core.dll",
+        "Qisland.runtimeconfig.json",
+        "Qisland.deps.json",
+    ];
+
+    /// <summary>生成可交给 powershell.exe -EncodedCommand 的脚本；路径作为 PowerShell 单引号字面量写入。</summary>
+    public static string Build(
+        int pid,
+        string from,
+        string appDir,
+        string backupDir,
+        string resultFile,
+        string targetVersion,
+        string exe = "Qisland.exe",
+        string? manifestFile = null,
+        string? readyFile = null,
+        int readyTimeoutSeconds = DefaultReadyTimeoutSeconds)
+    {
+        from = Path.GetFullPath(from).TrimEnd('\\');
+        appDir = Path.GetFullPath(appDir).TrimEnd('\\');
+        backupDir = Path.GetFullPath(backupDir).TrimEnd('\\');
+        resultFile = Path.GetFullPath(resultFile);
+        var resultDir = Path.GetDirectoryName(resultFile)!;
+        manifestFile ??= Path.Combine(resultDir, "manifest.json");
+        readyFile ??= Path.Combine(resultDir, "ready.txt");
+        manifestFile = Path.GetFullPath(manifestFile);
+        readyFile = Path.GetFullPath(readyFile);
+        targetVersion = NormalizeVersion(targetVersion);
+        if (readyTimeoutSeconds < 1) readyTimeoutSeconds = 1;
+
+        return Compact($$"""
+$ErrorActionPreference = 'Stop'
+$pidToWait = {{pid}}
+$from = {{Ps(from)}}
+$appDir = {{Ps(appDir)}}
+$backupDir = {{Ps(backupDir)}}
+$resultFile = {{Ps(resultFile)}}
+$manifestFile = {{Ps(manifestFile)}}
+$readyFile = {{Ps(readyFile)}}
+$expectedVersion = {{Ps(targetVersion)}}
+$exeName = {{Ps(exe)}}
+$entryExe = 'Qisland.exe'
+$requiredFiles = @('Qisland.exe', 'Qisland.Core.dll', 'Qisland.runtimeconfig.json', 'Qisland.deps.json')
+$readyTimeoutSeconds = {{readyTimeoutSeconds}}
+$installManifestName = {{Ps(InstallManifestName)}}
+$script:manifest = @()
+$script:manifestReady = $false
+{{CommonFunctions}}
+
 function Stop-WithResult([string]$text) {
     Write-Result $text
     Start-Old
@@ -235,22 +281,39 @@ try {
 
 try {
     $candidate = Get-FileMap $from
-    $installed = Get-FileMap $appDir
-    $paths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($path in $candidate.Keys) { $paths.Add($path) | Out-Null }
-    foreach ($path in $installed.Keys) { $paths.Add($path) | Out-Null }
+    $candidate.Remove($installManifestName) | Out-Null
+    $trusted = Read-InstallManifest (Join-Path $appDir $installManifestName)
+    $newHashes = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $listed = @()
+    foreach ($path in (@($candidate.Keys) | Sort-Object)) {
+        $newHashes[$path] = Get-Sha256 $candidate[$path]
+        $listed += [ordered]@{ path = $path; sha256 = $newHashes[$path] }
+    }
+    $stagedInstall = $manifestFile + '.files.json'
+    $stagedDir = [IO.Path]::GetDirectoryName($stagedInstall)
+    if ($stagedDir) { [IO.Directory]::CreateDirectory($stagedDir) | Out-Null }
+    [IO.File]::WriteAllText($stagedInstall,
+        (ConvertTo-Json -InputObject ([ordered]@{ format = 'qisland-files/1'; version = $expectedVersion; files = @($listed) }) -Depth 4),
+        [Text.UTF8Encoding]::new($false))
+    $candidate[$installManifestName] = $stagedInstall
+    $newHashes[$installManifestName] = Get-Sha256 $stagedInstall
 
-    foreach ($path in (@($paths) | Sort-Object)) {
+    foreach ($path in (@($candidate.Keys) | Sort-Object)) {
+        $target = Join-Path $appDir $path
         $oldHash = ''
-        $newHash = ''
-        if ($installed.ContainsKey($path)) { $oldHash = Get-Sha256 $installed[$path] }
-        if ($candidate.ContainsKey($path)) { $newHash = Get-Sha256 $candidate[$path] }
+        if (Test-Path -LiteralPath $target -PathType Leaf) { $oldHash = Get-Sha256 $target }
+        $newHash = $newHashes[$path]
         if ($oldHash -eq $newHash) { continue }
-        $script:manifest += [pscustomobject]@{
-            path = $path
-            old = $oldHash
-            new = $newHash
-            action = $(if ($newHash) { 'copy' } else { 'delete' })
+        $script:manifest += [pscustomobject]@{ path = $path; old = $oldHash; new = $newHash; action = 'copy' }
+    }
+    if ($null -ne $trusted) {
+        foreach ($path in (@($trusted.Keys) | Sort-Object)) {
+            if ($candidate.ContainsKey($path)) { continue }
+            $target = Join-Path $appDir $path
+            if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { continue }
+            $oldHash = Get-Sha256 $target
+            if ($oldHash -ne $trusted[$path]) { Write-HelperLog "keep modified file: $path"; continue }
+            $script:manifest += [pscustomobject]@{ path = $path; old = $oldHash; new = ''; action = 'delete' }
         }
     }
 
@@ -280,12 +343,16 @@ try {
     Stop-WithResult "backup-failed $($_.Exception.Message)"
 }
 
+$abortAfter = 0
+if ($env:QISLAND_UPDATE_TEST_ABORT_AFTER) { $abortAfter = [int]$env:QISLAND_UPDATE_TEST_ABORT_AFTER }
+$applied = 0
 $applyError = $null
 try {
+    Write-Result "applying $PID"
     foreach ($entry in $script:manifest) {
         $target = Join-Path $appDir $entry.path
         if ($entry.action -eq 'copy') {
-            $source = Join-Path $from $entry.path
+            $source = $candidate[$entry.path]
             $dir = [IO.Path]::GetDirectoryName($target)
             if ($dir) { [IO.Directory]::CreateDirectory($dir) | Out-Null }
             Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop
@@ -300,6 +367,8 @@ try {
                 throw "删除后文件仍存在：$($entry.path)"
             }
         }
+        $applied++
+        if ($abortAfter -gt 0 -and $applied -ge $abortAfter) { [Environment]::Exit(9) }
     }
 } catch {
     $applyError = $_.Exception.Message
@@ -352,7 +421,71 @@ try {
 
 Write-Result 'ok'
 exit 0
-""";
+""");
+    }
+
+    /// <summary>
+    /// 恢复脚本：上次覆盖停在 applying（进程被杀/断电）时，等当前进程退出，按变更清单逐文件还原并校验 SHA256，
+    /// 成功写 rolled-back interrupted，再以 --update-failed 拉起旧版；清单读不出时写 rollback-failed，不做任何猜测性删除。
+    /// </summary>
+    public static string BuildRecover(int pid, string appDir, string backupDir, string resultFile, string manifestFile,
+        string exe = "Qisland.exe", bool waitForPid = true)
+    {
+        appDir = Path.GetFullPath(appDir).TrimEnd('\\');
+        backupDir = Path.GetFullPath(backupDir).TrimEnd('\\');
+        resultFile = Path.GetFullPath(resultFile);
+        manifestFile = Path.GetFullPath(manifestFile);
+        return Compact($$"""
+$ErrorActionPreference = 'Stop'
+$pidToWait = {{pid}}
+$appDir = {{Ps(appDir)}}
+$backupDir = {{Ps(backupDir)}}
+$resultFile = {{Ps(resultFile)}}
+$manifestFile = {{Ps(manifestFile)}}
+$readyFile = ''
+$exeName = {{Ps(exe)}}
+$installManifestName = {{Ps(InstallManifestName)}}
+$script:manifest = @()
+{{CommonFunctions}}
+if ({{(waitForPid ? "$true" : "$false")}}) {
+    try {
+        $old = [Diagnostics.Process]::GetProcessById($pidToWait)
+        if (-not $old.WaitForExit(60000)) { Write-HelperLog 'recover: process still running'; exit 1 }
+    } catch { }
+}
+try {
+    $parsed = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($manifestFile, [Text.Encoding]::UTF8))
+    $script:manifest = @(@($parsed) | Where-Object { $null -ne $_ -and $_.path })
+    foreach ($entry in $script:manifest) { Get-RelativePath $appDir (Join-Path $appDir $entry.path) | Out-Null }
+} catch {
+    Write-Result "rollback-failed interrupted | manifest $($_.Exception.Message)"
+    Start-Old
+    exit 1
+}
+$errors = @(Restore-Plan)
+if ($errors.Count -eq 0) { Write-Result 'rolled-back interrupted' }
+else { Write-Result "rollback-failed interrupted | $($errors -join '; ')" }
+Start-Old
+exit 0
+""");
+    }
+
+    public static Process StartRecover(int pid, string appDir, string backupDir, string resultFile, string manifestFile,
+        string exe = "Qisland.exe", bool waitForPid = true)
+    {
+        var psi = new ProcessStartInfo("powershell.exe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+        };
+        psi.ArgumentList.Add("-NoProfile");
+        psi.ArgumentList.Add("-NonInteractive");
+        psi.ArgumentList.Add("-ExecutionPolicy");
+        psi.ArgumentList.Add("Bypass");
+        psi.ArgumentList.Add("-EncodedCommand");
+        psi.ArgumentList.Add(Encode(BuildRecover(pid, appDir, backupDir, resultFile, manifestFile, exe, waitForPid)));
+        return Process.Start(psi)!;
     }
 
     /// <summary>Windows PowerShell 的 -EncodedCommand 要 UTF-16LE Base64；脚本里的中文路径因此不受代码页影响。</summary>

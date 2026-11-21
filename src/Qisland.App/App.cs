@@ -106,6 +106,8 @@ public sealed partial class App : Application
             _window.Show();
             return;
         }
+        // 上次自动更新覆盖到一半被杀/断电：先交给恢复脚本按清单还原，本进程退出
+        if (Updater.RecoverInterruptedUpdate()) { Shutdown(); return; }
         Autostart.InstallCrashRestart();
         Autostart.EnsureDefault();
         if (args.Contains("--restarted")) Log("已自动重启");
