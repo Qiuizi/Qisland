@@ -17,9 +17,30 @@ namespace Qisland.App;
 public static class SelectionGrabber
 {
     /// <param name="Focus">划词时前台窗口里有焦点的控件句柄（「替换原文」前核对用）。</param>
-    public sealed record Grab(string? Text, IntPtr Window, string? Refused, IntPtr Focus = default);
+    public sealed record Grab(string? Text, IntPtr Window, string? Refused, IntPtr Focus = default, int ProcessId = 0, DateTime CapturedAt = default)
+    {
+        public PasteTargetSnapshot Target => new(
+            Window.ToInt64(),
+            Focus.ToInt64(),
+            ProcessId,
+            CapturedAt == default ? DateTime.Now : CapturedAt);
+    }
 
-    public enum PasteOutcome { Pasted, Copied, Failed }
+    public enum PasteOutcome { Pasted, Copied, TargetChanged, Failed }
+
+    public const string TargetChangedMessage = "目标窗口已变化，已复制，请手动粘贴";
+
+    internal interface ISelectionPasteHost
+    {
+        PasteTargetSnapshot ForegroundTarget();
+        uint ClipboardSequenceNumber { get; }
+        bool ModifiersAreDown();
+        Task DelayAsync(int milliseconds);
+        bool SetClipboardText(string text);
+        void SendPaste();
+    }
+
+    internal readonly record struct PasteAttemptResult(PasteOutcome Outcome, uint Sequence);
 
     /// <summary>剪贴板历史在这个时间之前的变化都忽略（临时复制 / 粘贴 / 还原）。</summary>
     public static DateTime SuppressClipUntil { get; private set; } = DateTime.MinValue;
@@ -27,20 +48,22 @@ public static class SelectionGrabber
     public static async Task<Grab> Get()
     {
         var fg = GetForegroundWindow();
-        if (fg == IntPtr.Zero) return new(null, fg, "没有前台窗口");
-        if (Win32Password(fg)) return new(null, fg, "焦点在密码框里，不读取");
+        var capturedAt = DateTime.Now;
+        var pid = ProcessIdOf(fg);
+        if (fg == IntPtr.Zero) return new(null, fg, "没有前台窗口", CapturedAt: capturedAt);
+        if (Win32Password(fg)) return new(null, fg, "焦点在密码框里，不读取", ProcessId: pid, CapturedAt: capturedAt);
 
         var (isPassword, uiaText) = await Task.Run(UiaSelection).WaitAsync(TimeSpan.FromMilliseconds(700)).ContinueWith(t => t.IsCompletedSuccessfully ? t.Result : (false, null));
-        if (isPassword) return new(null, fg, "焦点在密码框里，不读取");
+        if (isPassword) return new(null, fg, "焦点在密码框里，不读取", ProcessId: pid, CapturedAt: capturedAt);
         var focus = FocusOf(fg);
-        if (!string.IsNullOrWhiteSpace(uiaText)) return new(uiaText, fg, null, focus);
+        if (!string.IsNullOrWhiteSpace(uiaText)) return new(uiaText, fg, null, focus, pid, capturedAt);
 
         // 终端里没选中时 Ctrl+C 是「中断」：绝不替你按
-        if (IsTerminal(fg)) return new(null, fg, "终端里请先选中文字（不会替你按 Ctrl+C）");
+        if (IsTerminal(fg)) return new(null, fg, "终端里请先选中文字（不会替你按 Ctrl+C）", focus, pid, capturedAt);
 
         // 等你松开快捷键的修饰键，不然 Ctrl+C 会变成 Ctrl+Alt+C
         for (var i = 0; i < 40 && ModifiersDown(); i++) await Task.Delay(25);
-        if (GetForegroundWindow() != fg) return new(null, fg, "窗口切走了");
+        if (GetForegroundWindow() != fg) return new(null, fg, "窗口切走了", focus, pid, capturedAt);
 
         var backup = Backup();
         var seq = GetClipboardSequenceNumber();
@@ -60,16 +83,20 @@ public static class SelectionGrabber
         // 只在剪贴板还是这次 Ctrl+C 的结果时还原；期间别的程序又复制了东西就不覆盖它
         if (PasteGuard.ShouldRestoreClipboard(copied, GetClipboardSequenceNumber())) Restore(backup);
         SuppressClipUntil = DateTime.Now.AddMilliseconds(800);
-        return string.IsNullOrWhiteSpace(text) ? new(null, fg, "没有选中文字", focus) : new(text, fg, null, focus);
+        return string.IsNullOrWhiteSpace(text)
+            ? new(null, fg, "没有选中文字", focus, pid, capturedAt)
+            : new(text, fg, null, focus, pid, capturedAt);
     }
 
     /// <summary>把文字粘贴到 target 窗口（岛不抢焦点，所以一般还是原来那个窗口），然后还原剪贴板。不按回车。</summary>
-    public static async Task<bool> PasteInto(IntPtr target, string text)
+    public static async Task<PasteOutcome> PasteInto(PasteTargetSnapshot target, string text)
     {
-        if (target == IntPtr.Zero) return false;
-        if (GetForegroundWindow() != target && !Launcher.ForceForeground(target)) return false;
-        if (Win32Password(target)) return false;
-        return await PasteNow(text);
+        if (target.Window == 0) return SetPrivateText(text) ? PasteOutcome.Copied : PasteOutcome.Failed;
+        var window = new IntPtr(target.Window);
+        if (GetForegroundWindow() != window && !Launcher.ForceForeground(window))
+            return SetPrivateText(text) ? PasteOutcome.TargetChanged : PasteOutcome.Failed;
+        if (Win32Password(window)) return SetPrivateText(text) ? PasteOutcome.Copied : PasteOutcome.Failed;
+        return await PasteNow(text, target);
     }
 
     /// <summary>
@@ -92,24 +119,61 @@ public static class SelectionGrabber
             App.Log("替换原文: 窗口 / 焦点 / 选区变了，改为复制");
             return SetPrivateText(text) ? PasteOutcome.Copied : PasteOutcome.Failed;
         }
-        return await PasteNow(text) ? PasteOutcome.Pasted : PasteOutcome.Failed;
+        return await PasteNow(text, origin.Target);
     }
 
-    private static async Task<bool> PasteNow(string text)
+    private static async Task<PasteOutcome> PasteNow(string text, PasteTargetSnapshot target, ISelectionPasteHost? host = null)
     {
+        host ??= WindowsPasteHost;
         var backup = Backup();
         SuppressClipUntil = DateTime.Now.AddSeconds(3);
-        if (!SetPrivateText(text)) return false;
-        var ours = GetClipboardSequenceNumber();
-        for (var i = 0; i < 40 && ModifiersDown(); i++) await Task.Delay(25);
-        SendChord(0x56); // V
-        await Task.Delay(350);   // 让目标程序读完剪贴板再还原
+        var result = await RunPasteAsync(text, target, host);
+        if (result.Outcome != PasteOutcome.Pasted)
+        {
+            SuppressClipUntil = DateTime.Now.AddMilliseconds(800);
+            return result.Outcome;
+        }
+        await host.DelayAsync(350);   // 让目标程序读完剪贴板再还原
         // 期间剪贴板被别人改过（序号不是我们放进去的那个）就不还原，免得把用户新复制的内容冲掉
-        if (PasteGuard.ShouldRestoreClipboard(ours, GetClipboardSequenceNumber())) Restore(backup);
+        if (PasteGuard.ShouldRestoreClipboard(result.Sequence, host.ClipboardSequenceNumber)) Restore(backup);
         else App.Log("粘贴后剪贴板已被其他程序改动，不还原");
         SuppressClipUntil = DateTime.Now.AddMilliseconds(800);
-        return true;
+        return PasteOutcome.Pasted;
     }
+
+    internal static Task<PasteAttemptResult> PasteForTestAsync(string text, PasteTargetSnapshot target, ISelectionPasteHost host) =>
+        RunPasteAsync(text, target, host);
+
+    private static async Task<PasteAttemptResult> RunPasteAsync(string text, PasteTargetSnapshot target, ISelectionPasteHost host)
+    {
+        if (!host.SetClipboardText(text)) return new(PasteOutcome.Failed, 0);
+        var ours = host.ClipboardSequenceNumber;
+        for (var i = 0; i < 40 && host.ModifiersAreDown(); i++) await host.DelayAsync(25);
+        if (host.ModifiersAreDown()) return new(PasteOutcome.TargetChanged, ours);
+
+        // 最后一次检查后立刻发送，中间不再 await / 等待。
+        var now = host.ForegroundTarget();
+        var current = host.ClipboardSequenceNumber;
+        if (PasteGuard.DecideTarget(target, now, ours, current) != PasteDecision.Paste)
+            return new(PasteOutcome.TargetChanged, ours);
+        host.SendPaste();
+        return new(PasteOutcome.Pasted, ours);
+    }
+
+    private static readonly ISelectionPasteHost WindowsPasteHost = new WindowsSelectionPasteHost();
+
+    private sealed class WindowsSelectionPasteHost : ISelectionPasteHost
+    {
+        public PasteTargetSnapshot ForegroundTarget() => TargetOf(GetForegroundWindow());
+        public uint ClipboardSequenceNumber => GetClipboardSequenceNumber();
+        public bool ModifiersAreDown() => ModifiersDown();
+        public Task DelayAsync(int milliseconds) => Task.Delay(milliseconds);
+        public bool SetClipboardText(string text) => SetPrivateText(text);
+        public void SendPaste() => SendChord(0x56);
+    }
+
+    public static PasteTargetSnapshot TargetOf(IntPtr window) =>
+        new(window.ToInt64(), FocusOf(window).ToInt64(), ProcessIdOf(window), DateTime.Now);
 
     /// <summary>复制到剪贴板，标记为「不进剪贴板历史 / 不上云」。</summary>
     public static bool SetPrivateText(string text)
@@ -188,6 +252,17 @@ public static class SelectionGrabber
             return GetGUIThreadInfo(tid, ref info) ? info.hwndFocus : IntPtr.Zero;
         }
         catch { return IntPtr.Zero; }
+    }
+
+    private static int ProcessIdOf(IntPtr window)
+    {
+        try
+        {
+            if (window == IntPtr.Zero) return 0;
+            GetWindowThreadProcessId(window, out var pid);
+            return checked((int)pid);
+        }
+        catch { return 0; }
     }
 
     private static bool Win32Password(IntPtr fg)

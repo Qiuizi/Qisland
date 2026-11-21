@@ -3,6 +3,9 @@ namespace Qisland.Core;
 /// <summary>划词时记下的现场：前台窗口、焦点控件（句柄数值）和选中的文字。</summary>
 public sealed record SelectionSnapshot(long Window, long Focus, string? Text);
 
+/// <summary>粘贴目标：前台窗口、焦点控件、进程和抓取时间。</summary>
+public sealed record PasteTargetSnapshot(long Window, long Focus, int ProcessId, DateTime CapturedAt);
+
 public enum PasteDecision { Paste, CopyInstead }
 
 /// <summary>
@@ -16,6 +19,16 @@ public static class PasteGuard
         if (original.Window == 0 || now.Window != original.Window) return PasteDecision.CopyInstead;
         if (original.Focus != 0 && now.Focus != original.Focus) return PasteDecision.CopyInstead;
         if (string.IsNullOrWhiteSpace(now.Text) || Norm(now.Text) != Norm(original.Text)) return PasteDecision.CopyInstead;
+        return PasteDecision.Paste;
+    }
+
+    /// <summary>写剪贴板后、发送按键前的最后一次检查：目标四要素和剪贴板序号都必须没变。</summary>
+    public static PasteDecision DecideTarget(PasteTargetSnapshot original, PasteTargetSnapshot now, uint ourSequence, uint currentSequence)
+    {
+        if (original.Window == 0 || now.Window != original.Window) return PasteDecision.CopyInstead;
+        if (original.Focus == 0 || now.Focus != original.Focus) return PasteDecision.CopyInstead;
+        if (original.ProcessId <= 0 || now.ProcessId != original.ProcessId) return PasteDecision.CopyInstead;
+        if (ourSequence == 0 || currentSequence != ourSequence) return PasteDecision.CopyInstead;
         return PasteDecision.Paste;
     }
 

@@ -126,12 +126,16 @@ public sealed partial class IslandWindow
         card.Engine = "豆包";
         if (!Launcher.Open("doubao")) { card.Error = "没找到豆包客户端"; ShowAiCard(card, 5); return; }
         var h = await ForegroundWait.For("Doubao", 4000);
-        if (h == IntPtr.Zero || !await SelectionGrabber.PasteInto(h, card.Source))
+        var outcome = h == IntPtr.Zero ? SelectionGrabber.PasteOutcome.Failed : await SelectionGrabber.PasteInto(SelectionGrabber.TargetOf(h), card.Source);
+        if (outcome == SelectionGrabber.PasteOutcome.Failed)
         {
             SelectionGrabber.SetPrivateText(card.Source);
             card.Note = "豆包没到前台，文字已复制，到豆包里按 Ctrl+V";
         }
-        else card.Note = "已粘贴到豆包输入框，没有发送";
+        else if (outcome is SelectionGrabber.PasteOutcome.TargetChanged or SelectionGrabber.PasteOutcome.Copied)
+            card.Note = SelectionGrabber.TargetChangedMessage;
+        else
+            card.Note = "已粘贴到豆包输入框，没有发送";
         ShowAiCard(card, 4);
     }
 
@@ -231,9 +235,13 @@ public sealed partial class IslandWindow
                     if (outcome == SelectionGrabber.PasteOutcome.Pasted) CloseAiCard();
                     else
                     {
-                        if (outcome == SelectionGrabber.PasteOutcome.Failed) SelectionGrabber.SetPrivateText(c.Result);
+                        if (outcome == SelectionGrabber.PasteOutcome.Failed)
+                        {
+                            SelectionGrabber.SetPrivateText(c.Result);
+                            c.Note = "没能写入剪贴板，请重试";
+                        }
+                        else c.Note = SelectionGrabber.TargetChangedMessage;
                         c.Error = null;
-                        c.Note = "选区或输入框变了（或原窗口回不到前台），没有粘贴；译文已复制，自己粘贴一下";
                         RefreshAiCard();
                     }
                 }));
