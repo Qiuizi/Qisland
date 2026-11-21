@@ -76,9 +76,10 @@ public sealed class ApiServer : IDisposable
     }
 
     internal int BoundPort => ((IPEndPoint)_listener.LocalEndpoint).Port;
+    /// <summary>还没结束的处理任务数。任务已完成、但「从集合里移除」的续延还没跑到时不算（停机等待看的是 IsCompleted，两边口径一致）。</summary>
     internal int ActiveHandlers
     {
-        get { lock (_handlersGate) return _handlers.Count; }
+        get { lock (_handlersGate) return _handlers.Count(t => !t.IsCompleted); }
     }
 
     /// <summary>还记在跟踪集合里的连接数（测试用，确认每条退出路径都清理了）。</summary>
