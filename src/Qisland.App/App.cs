@@ -53,6 +53,7 @@ public sealed partial class App : Application
     private DateTime _day = DateTime.Today;
     private readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromSeconds(1) };
     private int _tickN;
+    private int _quitting;
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
 
     public static string DataDir { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Qisland");
@@ -129,10 +130,12 @@ public sealed partial class App : Application
 
         var approvalKey = ApprovalKeyFile.Rotate(DataDir, out var keyError);
         if (approvalKey == null) Log("审批密钥: " + keyError);
+        var apiReady = false;
         try
         {
-            _api = new ApiServer(Port, _store, a => Dispatcher.BeginInvoke(a), approvalKey);
+            _api = new ApiServer(Port, _store, a => { _ = Dispatcher.InvokeAsync(a); }, approvalKey);
             _api.Start();
+            apiReady = true;
         }
         catch (Exception ex) { Log("API 端口占用: " + ex.Message); }
 
@@ -143,6 +146,7 @@ public sealed partial class App : Application
 
         StartProviders();
         _window.SettleNow();
+        if (args.Contains("--updated")) SignalUpdateReady(apiReady);
         WatchPowerAndSession();
         CleanDebugDumps();
         try { var n = ChangeLedger.Sync().Count; if (n > 0) Log($"改动账本: 对其他软件有 {n} 处改动（托盘 → 对其他软件的改动）"); } catch (Exception ex) { Log("改动账本: " + ex.Message); }
@@ -235,7 +239,7 @@ public sealed partial class App : Application
         catch (Exception ex) { Log("作业: " + ex.Message); }
         try
         {
-            _approvals = new ApprovalBroker(a => Dispatcher.BeginInvoke(a));
+            _approvals = new ApprovalBroker(a => { _ = Dispatcher.InvokeAsync(a); });
             _window.Approvals = _approvals; _approvals.Changed += _window.OnApprovalsChanged;
             if (_api != null) _api.Approval = _approvals.Request;
             if (_api != null) _api.AgentEvent = a => _window?.OnAgentEvent(a);
@@ -826,16 +830,37 @@ public sealed partial class App : Application
         };
     }
 
-    private void Quit()
+    private async void Quit()
     {
+        if (Interlocked.Exchange(ref _quitting, 1) != 0) return;
+        _approvals?.CancelAll();
+        if (_api != null)
+        {
+            var stopped = await _api.StopAsync(TimeSpan.FromSeconds(1.5));
+            Log(stopped ? "API 已停机" : "API 停机超时，已强制关闭连接");
+        }
         if (_tray != null) { _tray.Visible = false; _tray.Dispose(); }
-        _api?.Dispose();
         _volume?.Dispose();
         _privacy?.Dispose();
         _net?.Dispose();
         _bt?.Stop();
         _inboxWatcher?.Dispose();
         Shutdown();
+    }
+
+    /// <summary>更新脚本启动新版本后，等窗口和 API 都起来再落就绪标记。</summary>
+    private void SignalUpdateReady(bool apiReady)
+    {
+        if (!apiReady || _window?.IsVisible != true) return;
+        var path = Environment.GetEnvironmentVariable("QISLAND_UPDATE_READY");
+        if (string.IsNullOrWhiteSpace(path)) return;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, $"v{Updater.Current}\n{DateTime.Now:O}\n");
+            Log("更新就绪标记已写入");
+        }
+        catch (Exception ex) { Log("更新就绪标记写入失败: " + ex.Message); }
     }
 
     private void Demo()

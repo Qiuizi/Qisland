@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using System.Windows.Threading;
 using Qisland.Core;
 
 namespace Qisland.App;
@@ -30,10 +32,15 @@ public sealed class ApiServer : IDisposable
     private readonly SemaphoreSlim _overflowSlots = new(OverflowReserve, OverflowReserve);
     private readonly object _handlersGate = new();
     private readonly HashSet<Task> _handlers = [];
+    private readonly object _clientsGate = new();
+    private readonly HashSet<TcpClient> _clients = [];
     private readonly TimeSpan _receiveTimeout;
     private readonly TimeSpan _approvalTimeout;
+    private readonly object _stopGate = new();
+    private Task<bool>? _stopTask;
     private Task? _acceptTask;
     private int _disposed;
+    private int _cleaned;
     private const int ApprovalReserve = 8;
     private const int OverflowReserve = 32;
     private static readonly TimeSpan OverflowReceiveTimeout = TimeSpan.FromMilliseconds(500);
@@ -75,7 +82,7 @@ public sealed class ApiServer : IDisposable
     {
         if (_acceptTask != null) return;
         _listener.Start();
-        _acceptTask = AcceptLoop();
+        _acceptTask = Task.Run(AcceptLoop);
     }
 
     private async Task AcceptLoop()
@@ -83,8 +90,9 @@ public sealed class ApiServer : IDisposable
         while (!_cts.IsCancellationRequested)
         {
             TcpClient client;
-            try { client = await _listener.AcceptTcpClientAsync(_cts.Token); }
-            catch { return; }
+            try { client = await _listener.AcceptTcpClientAsync(_cts.Token).ConfigureAwait(false); }
+            catch { break; }
+            lock (_clientsGate) _clients.Add(client);
             var task = Handle(client);
             lock (_handlersGate) _handlers.Add(task);
             _ = task.ContinueWith(done =>
@@ -101,47 +109,47 @@ public sealed class ApiServer : IDisposable
             var normalSlot = _slots.Wait(0);
             if (!normalSlot && !_overflowSlots.Wait(0))
             {
-                await Reject(client);
+                await Reject(client).ConfigureAwait(false);
                 return;
             }
             var approvalSlot = false;
             try
             {
-                if (!normalSlot && !await WaitForData(client, OverflowReceiveTimeout))
+                if (!normalSlot && !await WaitForData(client, OverflowReceiveTimeout, _cts.Token).ConfigureAwait(false))
                 {
-                    await Reject(client);
+                    await Reject(client).ConfigureAwait(false);
                     return;
                 }
                 var stream = client.GetStream();
                 using var receive = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
                 receive.CancelAfter(normalSlot ? _receiveTimeout : TimeSpan.FromSeconds(2));
-                var (method, path, body, headers) = await ReadRequest(stream, receive.Token);
+                var (method, path, body, headers) = await ReadRequest(stream, receive.Token).ConfigureAwait(false);
                 var clean = path.Split('?')[0].TrimEnd('/');
                 if (method == "POST" && IsApprovalPath(clean))
                 {
                     // 普通连接再多也不能挡住审批：审批走独立的小池子，满了才回 503
                     if (!_approvalSlots.Wait(0))
                     {
-                        await Response(stream, 503, "{\"ok\":false,\"error\":\"too many approval requests\"}");
+                        await Response(stream, 503, "{\"ok\":false,\"error\":\"too many approval requests\"}").ConfigureAwait(false);
                         return;
                     }
                     approvalSlot = true;
-                    var (code, json) = await ApprovalRoute(clean, headers, body);
-                    await Response(stream, code, json);
+                    var (code, json) = await ApprovalRoute(clean, headers, body).ConfigureAwait(false);
+                    await Response(stream, code, json).ConfigureAwait(false);
                     return;
                 }
                 if (!normalSlot)
                 {
                     // 已经超过普通连接上限；等读完请求再拒绝，避免把审批请求误伤在入口
-                    await Response(stream, 503, "{\"ok\":false,\"error\":\"too many connections\"}");
+                    await Response(stream, 503, "{\"ok\":false,\"error\":\"too many connections\"}").ConfigureAwait(false);
                     return;
                 }
                 var (normalCode, normalJson) = SafeRoute(method, path, body);
-                await Response(stream, normalCode, normalJson);
+                await Response(stream, normalCode, normalJson).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                if (!normalSlot) await Reject(client);
+                if (!normalSlot) await Reject(client).ConfigureAwait(false);
             }
             catch { /* 客户端断开就算了 */ }
             finally
@@ -149,17 +157,18 @@ public sealed class ApiServer : IDisposable
                 if (approvalSlot) _approvalSlots.Release();
                 if (normalSlot) _slots.Release();
                 else _overflowSlots.Release();
+                lock (_clientsGate) _clients.Remove(client);
             }
         }
     }
 
-    private static async Task<bool> WaitForData(TcpClient client, TimeSpan timeout)
+    private static async Task<bool> WaitForData(TcpClient client, TimeSpan timeout, CancellationToken ct)
     {
         var end = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < end)
         {
             try { if (client.Available > 0) return true; } catch { return false; }
-            await Task.Delay(10);
+            await Task.Delay(10, ct).ConfigureAwait(false);
         }
         try { return client.Available > 0; } catch { return false; }
     }
@@ -172,8 +181,8 @@ public sealed class ApiServer : IDisposable
         var head = $"HTTP/1.1 {code} {reason}\r\n{type}Content-Length: {payload.Length}\r\nConnection: close\r\n\r\n";
         using var write = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
         write.CancelAfter(TimeSpan.FromSeconds(5));
-        await stream.WriteAsync(Encoding.ASCII.GetBytes(head), write.Token);
-        await stream.WriteAsync(payload, write.Token);
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(head), write.Token).ConfigureAwait(false);
+        await stream.WriteAsync(payload, write.Token).ConfigureAwait(false);
     }
 
     private async Task Reject(TcpClient client)
@@ -181,7 +190,7 @@ public sealed class ApiServer : IDisposable
         try
         {
             var stream = client.GetStream();
-            await Response(stream, 503, "{\"ok\":false,\"error\":\"too many connections\"}");
+            await Response(stream, 503, "{\"ok\":false,\"error\":\"too many connections\"}").ConfigureAwait(false);
         }
         catch { }
     }
@@ -193,7 +202,7 @@ public sealed class ApiServer : IDisposable
         int headerEnd = -1;
         while (headerEnd < 0 && total < buf.Length)
         {
-            var n = await s.ReadAsync(buf.AsMemory(total), ct);
+            var n = await s.ReadAsync(buf.AsMemory(total), ct).ConfigureAwait(false);
             if (n == 0) break;
             total += n;
             headerEnd = IndexOf(buf, total, "\r\n\r\n"u8);
@@ -218,7 +227,7 @@ public sealed class ApiServer : IDisposable
         Array.Copy(buf, headerEnd + 4, bodyBytes, 0, have);
         while (have < len)
         {
-            var n = await s.ReadAsync(bodyBytes.AsMemory(have), ct);
+            var n = await s.ReadAsync(bodyBytes.AsMemory(have), ct).ConfigureAwait(false);
             if (n == 0) break;
             have += n;
         }
@@ -253,7 +262,7 @@ public sealed class ApiServer : IDisposable
         if (!AgentPolicy.CanApproveOnIsland(source)) return (204, "");
 
         string decision;
-        try { decision = await Approval(source, body).WaitAsync(_approvalTimeout, _cts.Token); }
+        try { decision = await Approval(source, body).WaitAsync(_approvalTimeout, _cts.Token).ConfigureAwait(false); }
         catch (TimeoutException) { return (504, "{\"ok\":false,\"error\":\"审批等待超时\"}"); }
         catch { return (500, "{\"ok\":false,\"error\":\"审批处理失败\"}"); }
         if (decision is not ("allow" or "deny")) return (204, "");
@@ -350,18 +359,104 @@ public sealed class ApiServer : IDisposable
         return (404, "{\"ok\":false,\"error\":\"not found\"}");
     }
 
-    public void Dispose()
+    /// <summary>
+    /// 异步停机。先取消监听和在途请求；到期仍未收尾的连接会被强制关闭。
+    /// 返回 true 表示所有传输任务都在期限内结束。
+    /// </summary>
+    public Task<bool> StopAsync(TimeSpan timeout)
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        _cts.Cancel();
-        try { _listener.Stop(); } catch { }
-        try { _acceptTask?.GetAwaiter().GetResult(); } catch { }
-        Task[] handlers;
-        lock (_handlersGate) handlers = _handlers.ToArray();
-        try { Task.WhenAll(handlers).GetAwaiter().GetResult(); } catch { }
+        lock (_stopGate)
+        {
+            if (timeout < TimeSpan.Zero) timeout = TimeSpan.Zero;
+            return _stopTask ??= StopCoreAsync(timeout);
+        }
+    }
+
+    private async Task<bool> StopCoreAsync(TimeSpan timeout)
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            _cts.Cancel();
+            try { _listener.Stop(); } catch { }
+        }
+
+        var watch = Stopwatch.StartNew();
+        var graceful = await WaitForTask(_acceptTask, Remaining(timeout, watch)).ConfigureAwait(false);
+        if (graceful)
+        {
+            Task[] handlers;
+            lock (_handlersGate) handlers = _handlers.ToArray();
+            graceful = await WaitForAll(handlers, Remaining(timeout, watch)).ConfigureAwait(false);
+        }
+
+        if (!graceful)
+        {
+            TcpClient[] clients;
+            lock (_clientsGate) clients = _clients.ToArray();
+            foreach (var client in clients)
+            {
+                try { client.Close(); } catch { }
+            }
+            // 给被强制断开的处理任务一点收尾时间，但不让调用方跨过总期限。
+            await Task.WhenAny(Task.WhenAll(SnapshotTransportTasks()), Task.Delay(Remaining(timeout, watch))).ConfigureAwait(false);
+        }
+
+        CleanupIfDone();
+        return graceful;
+    }
+
+    private Task[] SnapshotTransportTasks()
+    {
+        var tasks = new List<Task>();
+        if (_acceptTask != null) tasks.Add(_acceptTask);
+        lock (_handlersGate) tasks.AddRange(_handlers);
+        return tasks.ToArray();
+    }
+
+    private void CleanupIfDone()
+    {
+        var tasks = SnapshotTransportTasks();
+        if (tasks.Any(t => !t.IsCompleted) || Interlocked.Exchange(ref _cleaned, 1) != 0) return;
         _slots.Dispose();
         _approvalSlots.Dispose();
         _overflowSlots.Dispose();
         _cts.Dispose();
+    }
+
+    private static TimeSpan Remaining(TimeSpan timeout, Stopwatch watch)
+    {
+        var left = timeout - watch.Elapsed;
+        return left > TimeSpan.Zero ? left : TimeSpan.Zero;
+    }
+
+    private static async Task<bool> WaitForTask(Task? task, TimeSpan timeout)
+    {
+        if (task == null || task.IsCompleted) return true;
+        if (timeout <= TimeSpan.Zero) return false;
+        return await Task.WhenAny(task, Task.Delay(timeout)).ConfigureAwait(false) == task;
+    }
+
+    private static async Task<bool> WaitForAll(Task[] tasks, TimeSpan timeout)
+    {
+        if (tasks.Length == 0 || tasks.All(t => t.IsCompleted)) return true;
+        if (timeout <= TimeSpan.Zero) return false;
+        var all = Task.WhenAll(tasks);
+        return await Task.WhenAny(all, Task.Delay(timeout)).ConfigureAwait(false) == all;
+    }
+
+    /// <summary>
+    /// 回收资源。UI 线程上只发起异步停机，绝不同步等待；
+    /// 非 UI 线程保留同步语义，兼容原有调用方。
+    /// </summary>
+    public void Dispose()
+    {
+        var dispatcher = Dispatcher.FromThread(Thread.CurrentThread);
+        if (dispatcher?.CheckAccess() == true)
+        {
+            _ = StopAsync(TimeSpan.FromSeconds(2));
+            return;
+        }
+
+        try { StopAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult(); } catch { }
     }
 }
