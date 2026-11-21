@@ -40,6 +40,17 @@ public sealed class ActivityStore
     public bool RemoveExternal(string id) =>
         _items.TryGetValue(id, out var live) && live.External && Remove(id);
 
+    /// <summary>
+    /// 按存储里记录的外部归属撤回：候选 ID 依次试，删掉第一条确实由外部写入的，返回它的 ID；一条都没有返回 null。
+    /// 普通推送存的是 ext: 前缀，Agent 事件存的是协议自己的 ID，所以调用方会同时给出原样和加前缀两种写法。
+    /// </summary>
+    public string? RemoveExternalFirst(IEnumerable<string> candidates)
+    {
+        foreach (var id in candidates)
+            if (RemoveExternal(id)) return id;
+        return null;
+    }
+
     private static IslandActivity? ToActivity(PushDraft d, double? progress, string? dispatch)
     {
         if (string.IsNullOrWhiteSpace(d.Id) || string.IsNullOrWhiteSpace(d.Title)) return null;

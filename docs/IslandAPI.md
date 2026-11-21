@@ -21,7 +21,7 @@
 |---|---|---|
 | POST | `/v1/island/push` | 推送 / 更新一张卡片（v1 基础字段） |
 | POST | `/v3/island/push` | 推送 / 更新（和 v1 同一个解析入口） |
-| DELETE | `/v1/island/push/{id}` | 移除一张卡片（只能移除外部推送的卡片） |
+| DELETE | `/v1/island/push/{id}` | 移除一张卡片（只能移除外部推送的卡片）；删到 `200`，没有这张 `404` |
 | GET | `/v1/island/active`（或 `/v3/island/active`） | 只读：查询当前的外部卡片（JSON 数组） |
 | GET | `/v1/health`（或 `/health`） | 健康检查，不需要 Token |
 

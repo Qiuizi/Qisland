@@ -16,7 +16,7 @@
 
 - 普通卡片的 `id` 会放进 `ext:` 命名空间：推 `"id":"demo-1"`，岛上的 id 是 `ext:demo-1`，响应里的 `id` 也是它。再推同一个 `id` 就是更新；`DELETE /v1/island/push/demo-1` 和 `DELETE /v1/island/push/ext:demo-1` 删的是同一张。
 - 接入消息（Agent 会话、JARVIS、信息站、课程快照）的 id 由 Qisland 生成（如 `agent:codex:t1`、`jarvis:task-1`）；和 Qisland 内部条目撞 id 时这条会被忽略。
-- `DELETE` 只能删外部活动，删内部条目不会生效。
+- `DELETE` 按存储里记录的外部归属撤回：先按原样的 `id` 找（Agent 事件用协议自己的 id），再找 `ext:` 命名空间里的同名卡片；删到了回 `200`（`{"ok":true,"removed":"实际删掉的 id"}`），没有这条或那是内部活动回 `404`（`{"ok":false,"error":"no such external activity"}`），内部条目永远不会被删。
 - 卡片里的 `source` 只是显示用的来源标签，不会触发 Qisland 内部的动作（比如写成 `download`、`otp` 不会打开下载文件夹或复制验证码）。认得出的接入消息保留各自的跳转（Codex 会话链接、终端等）。
 
 消息可以带一个顶层 `$type` 说明自己是什么：
@@ -52,7 +52,7 @@
 
 | 方法 | 路径 | 作用 |
 |---|---|---|
-| DELETE | `/v1/island/push/{id}` | 去掉一条（只能删外部卡片） |
+| DELETE | `/v1/island/push/{id}` | 去掉一条（只能删外部卡片）；删到 `200`，没有这条 `404` |
 | GET | `/v1/island/active`（或 `/v3/island/active`） | 只读：当前外部卡片，JSON 数组，每项 `id` / `source` / `type` / `priority` / `progress` / `expires_at`；设了 Token 并带对 Token 时另有 `title` / `body`（没设 Token 时不返回标题和正文） |
 | GET | `/v1/health`（或 `/health`、`/v1/status`） | 健康检查，不要 Token，返回 `{"ok":true,"app":"Qisland","product":"Qisland"}` |
 

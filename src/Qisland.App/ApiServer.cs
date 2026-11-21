@@ -184,7 +184,9 @@ public sealed class ApiServer : IDisposable
                 }
                 var (normalCode, normalJson) = method == "GET" && clean is "/v1/island/active" or "/v3/island/active"
                     ? await ActiveRoute(full: _apiToken != null).ConfigureAwait(false)
-                    : SafeRoute(method, path, body);
+                    : method == "DELETE" && clean.StartsWith("/v1/island/push/", StringComparison.Ordinal)
+                        ? await DeleteRoute(clean["/v1/island/push/".Length..]).ConfigureAwait(false)
+                        : SafeRoute(method, path, body);
                 await Response(stream, normalCode, normalJson).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -364,6 +366,34 @@ public sealed class ApiServer : IDisposable
         catch { return (500, "{\"ok\":false,\"error\":\"读取失败\"}"); }
     }
 
+    /// <summary>
+    /// DELETE /v1/island/push/{id}：按存储里记录的外部归属撤回。先试原样的 ID（Agent 事件用协议自己的 ID），
+    /// 再试 ext: 命名空间里的同名卡片（普通推送）；只删外部写入的条目。删到了 200，没有（或是内部活动）404。
+    /// 结果要等 UI 线程上真的删完才知道，所以和 /active 一样到 UI 线程上执行、最多等 3 秒。
+    /// </summary>
+    private async Task<(int, string)> DeleteRoute(string rawId)
+    {
+        string id;
+        try { id = Uri.UnescapeDataString(rawId); }
+        catch (UriFormatException) { return (400, "{\"ok\":false,\"error\":\"bad id\"}"); }
+        if (string.IsNullOrWhiteSpace(id)) return (400, "{\"ok\":false,\"error\":\"bad id\"}");
+        var candidates = new[] { id, ExternalActivity.Namespace(id) }.Distinct(StringComparer.Ordinal).ToArray();
+        var done = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _post(() =>
+        {
+            try { done.TrySetResult(_store.RemoveExternalFirst(candidates)); }
+            catch (Exception ex) { done.TrySetException(ex); }
+        });
+        string? removed;
+        try { removed = await done.Task.WaitAsync(TimeSpan.FromSeconds(3), _cts.Token).ConfigureAwait(false); }
+        catch (TimeoutException) { return (503, "{\"ok\":false,\"error\":\"busy\"}"); }
+        catch (OperationCanceledException) { throw; }
+        catch { return (500, "{\"ok\":false,\"error\":\"删除失败\"}"); }
+        return removed != null
+            ? (200, JsonSerializer.Serialize(new { ok = true, removed }))
+            : (404, "{\"ok\":false,\"error\":\"no such external activity\"}");
+    }
+
     /// <summary>请求内容不合要求时回 400，不让异常把连接直接断掉。</summary>
     private (int, string) SafeRoute(string method, string path, string body)
     {
@@ -444,13 +474,6 @@ public sealed class ApiServer : IDisposable
             return (200, "{\"ok\":true}");
         }
 
-        if (method == "DELETE" && path.StartsWith("/v1/island/push/", StringComparison.Ordinal))
-        {
-            // 只能撤回外部命名空间里的卡片；传 "demo" 或 "ext:demo" 都指同一张
-            var id = ExternalActivity.Namespace(Uri.UnescapeDataString(path["/v1/island/push/".Length..]));
-            _post(() => _store.RemoveExternal(id));
-            return (200, "{\"ok\":true}");
-        }
         return (404, "{\"ok\":false,\"error\":\"not found\"}");
     }
 
