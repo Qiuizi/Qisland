@@ -459,13 +459,13 @@ public sealed partial class XuexitongService
 
     internal static CoursePage ParseCoursePage(string html)
     {
-        var courses = ParseCourses(html);
+        var (courses, nodes, ended) = ScanCourses(html);
         if (courses.Count > 0) return new CoursePage(CoursePageKind.Courses, courses);
         if (!LooksLikeCoursePage(html)) return new CoursePage(CoursePageKind.Unknown, []);
-        // 课程链接都在、只是全部已结束：确实没有在上的课
-        if (CourseLink().IsMatch(html)) return new CoursePage(CoursePageKind.Empty, []);
-        // 明确写着「暂无课程」，或容器里一个条目都没有，才算空；容器里有条目却一门都没解析出来不是空
-        if (html.Contains("暂无课程", StringComparison.Ordinal) || !HasListEntries(html)) return new CoursePage(CoursePageKind.Empty, []);
+        // 每个课程节点都在自己的范围里确认写着「课程已结束」：确实没有在上的课
+        if (nodes > 0 && ended == nodes) return new CoursePage(CoursePageKind.Empty, []);
+        // 明确写着「暂无课程」，或容器里一个课程条目（li 或 div 课程卡片）都没有，才算空；有条目却一门都没解析出来不是空
+        if (html.Contains("暂无课程", StringComparison.Ordinal) || !HasCourseEntries(html)) return new CoursePage(CoursePageKind.Empty, []);
         return new CoursePage(CoursePageKind.Unparsed, []);
     }
 
@@ -491,6 +491,13 @@ public sealed partial class XuexitongService
 
     private static bool HasListEntries(string html) => Regex.IsMatch(html, @"<li[\s>]", RegexOptions.IgnoreCase);
 
+    /// <summary>课程列表里有没有条目：li，或 div 渲染的课程卡片（class 里有独立的 course / course-item / course-card，或带 courseid 属性）。</summary>
+    private static bool HasCourseEntries(string html) => CourseNodeStart().IsMatch(html);
+
+    /// <summary>一个课程节点的开头：li，或 class 里有独立 course / course-item / course-card 的元素，或带 courseid 属性的元素。</summary>
+    [GeneratedRegex(@"<li[\s>]|<[a-z]+\b[^>]*\bclass\s*=\s*[""'](?:[^""']*\s)?course(?:-item|-card)?(?=[\s""'])[^>]*>|<[a-z]+\b[^>]*\scourseid\s*=[^>]*>", RegexOptions.IgnoreCase)]
+    private static partial Regex CourseNodeStart();
+
     /// <summary>作业列表一条都没匹配上时：明确的空 → Empty；容器里有条目 → Unparsed（保留旧数据）；认不出 → Failed。</summary>
     internal static HomeworkCourseState ClassifyEmptyWorkList(string html)
     {
@@ -499,20 +506,40 @@ public sealed partial class XuexitongService
         return HasListEntries(html) ? HomeworkCourseState.Unparsed : HomeworkCourseState.Empty;
     }
 
-    private static List<Course> ParseCourses(string html)
+    /// <summary>
+    /// 按课程节点解析：每门课只看「它第一次出现的链接 → 下一门课的节点开头」这一段（最多 2500 字），
+    /// 「课程已结束」和课程名都只在这一段里找，不会读到下一门课的结束标记。
+    /// 返回在上的课、课程节点数、在自己范围里确认已结束的节点数。
+    /// </summary>
+    private static (List<Course> Courses, int Nodes, int Ended) ScanCourses(string html)
     {
+        var firsts = new List<Match>();
         var seen = new HashSet<string>();
-        var list = new List<Course>();
         foreach (Match m in CourseLink().Matches(html))
+            if (seen.Add(m.Groups[1].Value + "|" + m.Groups[2].Value)) firsts.Add(m);
+
+        var list = new List<Course>();
+        var ended = 0;
+        for (var i = 0; i < firsts.Count; i++)
         {
-            var key = m.Value;
-            if (!seen.Add(key)) continue;
-            var seg = html.Substring(m.Index + m.Length, Math.Min(2500, html.Length - m.Index - m.Length));
-            if (seg.Contains("课程已结束")) continue;
+            var m = firsts[i];
+            var start = m.Index + m.Length;
+            var end = Math.Min(html.Length, start + 2500);
+            if (i + 1 < firsts.Count)
+            {
+                var next = firsts[i + 1].Index;
+                end = Math.Min(end, next);
+                // 下一门课的节点开头（li / div 课程卡片）在它的链接之前：从那里截断，下一门课节点里的内容不算这门课的
+                var lastStart = -1;
+                foreach (Match n in CourseNodeStart().Matches(html[start..next])) lastStart = n.Index;
+                if (lastStart >= 0) end = Math.Min(end, start + lastStart);
+            }
+            var seg = html[start..Math.Max(start, end)];
+            if (seg.Contains("课程已结束", StringComparison.Ordinal)) { ended++; continue; }
             var nm = Regex.Match(seg, "course-name[^>]*title=\"([^\"]+)\"");
             list.Add(new Course(nm.Success ? WebUtility.HtmlDecode(nm.Groups[1].Value) : "学习通课程", m.Groups[1].Value, m.Groups[2].Value, m.Groups[3].Value));
         }
-        return list;
+        return (list, firsts.Count, ended);
     }
 
     // 「剩余 1天3小时」「剩余5小时20分钟」之类，只在这条作业的 li 片段里找
