@@ -196,9 +196,10 @@ public sealed class ApiServer : IDisposable
             catch { /* 客户端断开就算了 */ }
             finally
             {
-                if (approvalSlot) _approvalSlots.Release();
-                if (normalSlot) _slots.Release();
-                else _overflowSlots.Release();
+                // 停机超时后这些信号量可能已经释放；收尾阶段不能再抛异常打断跟踪集合的清理。
+                if (approvalSlot) { try { _approvalSlots.Release(); } catch { } }
+                if (normalSlot) { try { _slots.Release(); } catch { } }
+                else { try { _overflowSlots.Release(); } catch { } }
             }
         }
     }
@@ -380,11 +381,13 @@ public sealed class ApiServer : IDisposable
         var candidates = new[] { id, ExternalActivity.Namespace(id) }.Distinct(StringComparer.Ordinal).ToArray();
         try
         {
-            var (ran, removed) = await RunQueuedWriteAsync(() => _store.RemoveExternalFirst(candidates)).ConfigureAwait(false);
+            // 只把「从存储里删除」这件事放到 UI 线程上同步做完；界面刷新另外异步补，别让 HTTP 等 UI 订阅者。
+            var (ran, removed) = await RunQueuedWriteAsync(() => _store.RemoveExternalFirst(candidates, notify: false)).ConfigureAwait(false);
             if (!ran) return (503, "{\"ok\":false,\"error\":\"busy\"}");
-            return removed != null
-                ? (200, JsonSerializer.Serialize(new { ok = true, removed }))
-                : (404, "{\"ok\":false,\"error\":\"no such external activity\"}");
+            if (removed == null) return (404, "{\"ok\":false,\"error\":\"no such external activity\"}");
+            // 删除已经提交成功：先定 HTTP 结果，再让界面刷新在后台/UI 线程异步跑，不阻塞这条请求。
+            ScheduleUiRefresh();
+            return (200, JsonSerializer.Serialize(new { ok = true, removed }));
         }
         catch (OperationCanceledException) { throw; }
         catch { return (500, "{\"ok\":false,\"error\":\"删除失败\"}"); }
@@ -413,7 +416,12 @@ public sealed class ApiServer : IDisposable
             catch (Exception ex) { done.TrySetException(ex); }
         });
         var finished = await Task.WhenAny(done.Task, Task.Delay(TimeSpan.FromSeconds(3), _cts.Token)).ConfigureAwait(false);
-        if (finished != done.Task && job.TryCancel()) return (false, default);
+        if (finished != done.Task)
+        {
+            if (job.TryCancel()) return (false, default);
+            // UI 已经开始执行了：等它做完；但停机取消时不再无限等，把等待交给取消令牌。
+            return (true, await done.Task.WaitAsync(_cts.Token).ConfigureAwait(false));
+        }
         return (true, await done.Task.ConfigureAwait(false));
     }
 
@@ -422,6 +430,19 @@ public sealed class ApiServer : IDisposable
     {
         var job = new UiJob();
         _post(() => { if (job.TryStart()) work(); });
+    }
+
+    /// <summary>
+    /// 删除已提交后异步刷新界面：用 Dispatcher.BeginInvoke 投递一次 Changed，放到后台发起，
+    /// 这样即使 UI 线程正忙 / 订阅者很慢，也不会阻塞 HTTP 请求。
+    /// </summary>
+    private void ScheduleUiRefresh()
+    {
+        var raise = _store.RaiseChanged;
+        _ = Task.Run(() =>
+        {
+            try { _post(raise); } catch { }
+        });
     }
 
     /// <summary>请求内容不合要求时回 400，不让异常把连接直接断掉。</summary>
@@ -547,6 +568,8 @@ public sealed class ApiServer : IDisposable
             }
             // 给被强制断开的处理任务一点收尾时间，但不让调用方跨过总期限。
             await Task.WhenAny(Task.WhenAll(SnapshotTransportTasks()), Task.Delay(Remaining(timeout, watch))).ConfigureAwait(false);
+            // 停机已经超时：这些收不了尾的处理任务已被取消 / 强制断开，不再继续跟踪它们。
+            lock (_handlersGate) _handlers.RemoveWhere(t => !t.IsCompleted);
         }
 
         CleanupIfDone();

@@ -1,4 +1,4 @@
-﻿using Qisland.Core;
+using Qisland.Core;
 
 namespace Qisland.App;
 
@@ -37,19 +37,23 @@ public sealed class ActivityStore
     }
 
     /// <summary>外部入口删一条：只删外部写入的条目，内部活动原样保留。</summary>
-    public bool RemoveExternal(string id) =>
-        _items.TryGetValue(id, out var live) && live.External && Remove(id);
+    public bool RemoveExternal(string id, bool notify = true) =>
+        _items.TryGetValue(id, out var live) && live.External && Remove(id, notify);
 
     /// <summary>
     /// 按存储里记录的外部归属撤回：候选 ID 依次试，删掉第一条确实由外部写入的，返回它的 ID；一条都没有返回 null。
     /// 普通推送存的是 ext: 前缀，Agent 事件存的是协议自己的 ID，所以调用方会同时给出原样和加前缀两种写法。
+    /// notify=false 时只提交删除、不触发 Changed，调用方随后用 <see cref="RaiseChanged"/> 异步刷新界面。
     /// </summary>
-    public string? RemoveExternalFirst(IEnumerable<string> candidates)
+    public string? RemoveExternalFirst(IEnumerable<string> candidates, bool notify = true)
     {
         foreach (var id in candidates)
-            if (RemoveExternal(id)) return id;
+            if (RemoveExternal(id, notify)) return id;
         return null;
     }
+
+    /// <summary>配合 <c>notify: false</c> 的删除：把界面刷新补上（应在 UI 线程异步调用）。</summary>
+    public void RaiseChanged() => Changed?.Invoke();
 
     private static IslandActivity? ToActivity(PushDraft d, double? progress, string? dispatch)
     {
@@ -116,10 +120,10 @@ public sealed class ActivityStore
         try { Upsert(a, sticky, quiet: quiet); } finally { Changed = h; }
     }
 
-    public bool Remove(string id)
+    public bool Remove(string id, bool notify = true)
     {
         if (!_items.Remove(id)) return false;
-        Changed?.Invoke();
+        if (notify) Changed?.Invoke();
         return true;
     }
 

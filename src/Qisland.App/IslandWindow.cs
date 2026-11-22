@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -151,7 +151,9 @@ public sealed partial class IslandWindow : Window
         Content = _root;
         LayoutUpdated += (_, _) => Stats.Count("layout");
 
-        _store.Changed += OnStoreChanged;
+        // 数据变化后的重建放到 Dispatcher 队列里异步做：存储的删除/写入在 UI 线程上提交后要能立刻返回，
+        // 不被这里的界面重建（以及它可能很慢的布局）拖住（例如 API 的 DELETE 请求）。
+        _store.Changed += () => Dispatcher.BeginInvoke(new Action(OnStoreChanged));
         // 真实软件图标在后台读好后，重建一次用到图标的地方
         AppIcons.Loaded += () => Dispatcher.BeginInvoke(() =>
         {
