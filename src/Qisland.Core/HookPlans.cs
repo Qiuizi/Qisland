@@ -93,8 +93,9 @@ public static class HookPlans
 
     private static readonly JsonSerializerOptions Canon = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
-    /// <summary>一条 hook 的身份：事件名 + 这条 hook 对象的紧凑 JSON（命令、超时等任何一处变了身份就不同）。</summary>
-    public static string HookIdentity(string evt, JsonNode hook) => evt + "\u001f" + hook.ToJsonString(Canon);
+    /// <summary>一条 hook 的身份：事件名 + 所在组的 matcher + 这条 hook 对象的紧凑 JSON（任何一处变了身份就不同）。</summary>
+    public static string HookIdentity(string evt, string matcher, JsonNode hook) =>
+        evt + "\u001f" + matcher + "\u001f" + hook.ToJsonString(Canon);
 
     /// <summary>插件文件的身份：内容的 SHA256。</summary>
     public static string FileIdentity(string? text) =>
@@ -117,9 +118,13 @@ public static class HookPlans
             foreach (var (name, v) in ev)
             {
                 if (v is not JsonArray arr) continue;
-                if (style == HookStyle.Cursor) ids.AddRange(arr.Where(IsOurs).Select(h => HookIdentity(name, h!)));
+                if (style == HookStyle.Cursor) ids.AddRange(arr.Where(IsOurs).Select(h => HookIdentity(name, "", h!)));
                 else foreach (var g in arr)
-                    if (g?["hooks"] is JsonArray hs) ids.AddRange(hs.Where(IsOurs).Select(h => HookIdentity(name, h!)));
+                    if (g?["hooks"] is JsonArray hs)
+                    {
+                        var matcher = g["matcher"]?.ToString() ?? "";
+                        ids.AddRange(hs.Where(IsOurs).Select(h => HookIdentity(name, matcher, h!)));
+                    }
             }
         }
         catch { }
@@ -162,19 +167,20 @@ public static class HookPlans
     {
         removed = 0;
         var budget = only == null ? null : new IdentityBudget(only);
-        bool Drop(string evt, JsonNode? h) => IsOurs(h) && (budget == null || budget.Take(HookIdentity(evt, h!)));
+        bool Drop(string evt, string matcher, JsonNode? h) => IsOurs(h) && (budget == null || budget.Take(HookIdentity(evt, matcher, h!)));
         var root = ParseRoot(json);
         if (root["hooks"] is not JsonObject ev) return root.ToJsonString(Pretty);
         foreach (var name in ev.Select(kv => kv.Key).ToList())
         {
             if (ev[name] is not JsonArray arr) continue;
             if (style == HookStyle.Cursor)
-                foreach (var h in arr.Where(h => Drop(name, h)).ToList()) { arr.Remove(h); removed++; }
+                foreach (var h in arr.Where(h => Drop(name, "", h)).ToList()) { arr.Remove(h); removed++; }
             else
                 foreach (var g in arr.ToList())
                 {
                     if (g?["hooks"] is not JsonArray hs) continue;
-                    foreach (var h in hs.Where(h => Drop(name, h)).ToList()) { hs.Remove(h); removed++; }
+                    var matcher = g["matcher"]?.ToString() ?? "";
+                    foreach (var h in hs.Where(h => Drop(name, matcher, h)).ToList()) { hs.Remove(h); removed++; }
                     if (hs.Count == 0) arr.Remove(g);
                 }
             if (arr.Count == 0) ev.Remove(name);

@@ -459,13 +459,16 @@ public sealed partial class XuexitongService
 
     internal static CoursePage ParseCoursePage(string html)
     {
-        var (courses, nodes, ended) = ScanCourses(html);
-        if (courses.Count > 0) return new CoursePage(CoursePageKind.Courses, courses);
+        var (courses, _, ended) = ScanCourses(html);
         if (!LooksLikeCoursePage(html)) return new CoursePage(CoursePageKind.Unknown, []);
-        // 每个课程节点都在自己的范围里确认写着「课程已结束」：确实没有在上的课
-        if (nodes > 0 && ended == nodes) return new CoursePage(CoursePageKind.Empty, []);
-        // 明确写着「暂无课程」，或容器里一个课程条目（li 或 div 课程卡片）都没有，才算空；有条目却一门都没解析出来不是空
-        if (html.Contains("暂无课程", StringComparison.Ordinal) || !HasCourseEntries(html)) return new CoursePage(CoursePageKind.Empty, []);
+        // 用容器里的实际条目数做分母：只要有条目解析不出来（链接格式认不出 / 卡片是没有特定 class 的 div），
+        // 就不是「真的没课」，返回 Unparsed 保留旧数据；不能因为 ended 追平了「成功匹配的链接数」就当成 Empty。
+        var entries = CountCourseEntries(html);
+        var recognized = courses.Count + ended;
+        if (entries > 0 && recognized < entries) return new CoursePage(CoursePageKind.Unparsed, []);
+        if (courses.Count > 0) return new CoursePage(CoursePageKind.Courses, courses);
+        // 容器里没有条目，或每个条目都在自己的范围里确认写着「课程已结束」：确实没有在上的课
+        if (recognized == entries || html.Contains("暂无课程", StringComparison.Ordinal)) return new CoursePage(CoursePageKind.Empty, []);
         return new CoursePage(CoursePageKind.Unparsed, []);
     }
 
@@ -491,8 +494,34 @@ public sealed partial class XuexitongService
 
     private static bool HasListEntries(string html) => Regex.IsMatch(html, @"<li[\s>]", RegexOptions.IgnoreCase);
 
-    /// <summary>课程列表里有没有条目：li，或 div 渲染的课程卡片（class 里有独立的 course / course-item / course-card，或带 courseid 属性）。</summary>
-    private static bool HasCourseEntries(string html) => CourseNodeStart().IsMatch(html);
+    /// <summary>容器里的实际条目数：课程列表容器的直接子元素个数（li、div 课程卡片等，不管链接格式认不认得）。</summary>
+    private static int CountCourseEntries(string html)
+    {
+        var container = Regex.Match(html, @"<(?<tag>[a-zA-Z][a-zA-Z0-9]*)\b[^>]*\bclass\s*=\s*[""'][^""']*\bcourse-list\b[^""']*[""'][^>]*>", RegexOptions.IgnoreCase);
+        if (!container.Success)
+            container = Regex.Match(html, @"<(?<tag>[a-zA-Z][a-zA-Z0-9]*)\b[^>]*\bid\s*=\s*[""']courseList[""'][^>]*>", RegexOptions.IgnoreCase);
+        if (!container.Success) return 0;
+        var depth = 1;   // 已经进到容器里面
+        var count = 0;
+        var tags = new Regex(@"<(?<close>/)?(?<name>[a-zA-Z][a-zA-Z0-9]*)\b[^>]*?>", RegexOptions.IgnoreCase);
+        foreach (Match tag in tags.Matches(html, container.Index + container.Length))
+        {
+            var name = tag.Groups["name"].Value;
+            if (tag.Groups["close"].Success)
+            {
+                depth--;
+                if (depth <= 0) break;   // 容器的结束标签
+                continue;
+            }
+            if (tag.Value.EndsWith("/>", StringComparison.Ordinal) || IsVoidTag(name)) continue;
+            if (depth == 1) count++;   // 容器的直接子元素才是一条课程条目
+            depth++;
+        }
+        return count;
+    }
+
+    private static bool IsVoidTag(string name) =>
+        name.ToLowerInvariant() is "area" or "base" or "br" or "col" or "embed" or "hr" or "img" or "input" or "link" or "meta" or "param" or "source" or "track" or "wbr";
 
     /// <summary>一个课程节点的开头：li，或 class 里有独立 course / course-item / course-card 的元素，或带 courseid 属性的元素。</summary>
     [GeneratedRegex(@"<li[\s>]|<[a-z]+\b[^>]*\bclass\s*=\s*[""'](?:[^""']*\s)?course(?:-item|-card)?(?=[\s""'])[^>]*>|<[a-z]+\b[^>]*\scourseid\s*=[^>]*>", RegexOptions.IgnoreCase)]

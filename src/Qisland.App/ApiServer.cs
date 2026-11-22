@@ -369,7 +369,7 @@ public sealed class ApiServer : IDisposable
     /// <summary>
     /// DELETE /v1/island/push/{id}：按存储里记录的外部归属撤回。先试原样的 ID（Agent 事件用协议自己的 ID），
     /// 再试 ext: 命名空间里的同名卡片（普通推送）；只删外部写入的条目。删到了 200，没有（或是内部活动）404。
-    /// 结果要等 UI 线程上真的删完才知道，所以和 /active 一样到 UI 线程上执行、最多等 3 秒。
+    /// 排队动作有 Pending/Running/Cancelled 状态：HTTP 等超时就取消，UI 恢复后也不会再删；UI 已经开跑就等它做完返回真实结果。
     /// </summary>
     private async Task<(int, string)> DeleteRoute(string rawId)
     {
@@ -378,20 +378,50 @@ public sealed class ApiServer : IDisposable
         catch (UriFormatException) { return (400, "{\"ok\":false,\"error\":\"bad id\"}"); }
         if (string.IsNullOrWhiteSpace(id)) return (400, "{\"ok\":false,\"error\":\"bad id\"}");
         var candidates = new[] { id, ExternalActivity.Namespace(id) }.Distinct(StringComparer.Ordinal).ToArray();
-        var done = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _post(() =>
+        try
         {
-            try { done.TrySetResult(_store.RemoveExternalFirst(candidates)); }
-            catch (Exception ex) { done.TrySetException(ex); }
-        });
-        string? removed;
-        try { removed = await done.Task.WaitAsync(TimeSpan.FromSeconds(3), _cts.Token).ConfigureAwait(false); }
-        catch (TimeoutException) { return (503, "{\"ok\":false,\"error\":\"busy\"}"); }
+            var (ran, removed) = await RunQueuedWriteAsync(() => _store.RemoveExternalFirst(candidates)).ConfigureAwait(false);
+            if (!ran) return (503, "{\"ok\":false,\"error\":\"busy\"}");
+            return removed != null
+                ? (200, JsonSerializer.Serialize(new { ok = true, removed }))
+                : (404, "{\"ok\":false,\"error\":\"no such external activity\"}");
+        }
         catch (OperationCanceledException) { throw; }
         catch { return (500, "{\"ok\":false,\"error\":\"删除失败\"}"); }
-        return removed != null
-            ? (200, JsonSerializer.Serialize(new { ok = true, removed }))
-            : (404, "{\"ok\":false,\"error\":\"no such external activity\"}");
+    }
+
+    /// <summary>一条排队动作的状态：Pending → Running（UI 开始执行）或 Pending → Cancelled（HTTP 超时先取消）。</summary>
+    private sealed class UiJob
+    {
+        private int _state;   // 0 = Pending，1 = Running，2 = Cancelled
+        public bool TryStart() => Interlocked.CompareExchange(ref _state, 1, 0) == 0;
+        public bool TryCancel() => Interlocked.CompareExchange(ref _state, 2, 0) == 0;
+    }
+
+    /// <summary>
+    /// 把写操作排进 UI 队列并最多等 3 秒：超时先抢到 Pending 就设成 Cancelled，动作永远不执行；
+    /// UI 已经开始执行（抢到 Running）就等它做完，返回真实结果。
+    /// </summary>
+    private async Task<(bool Ran, T? Value)> RunQueuedWriteAsync<T>(Func<T> work)
+    {
+        var job = new UiJob();
+        var done = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _post(() =>
+        {
+            if (!job.TryStart()) return;   // 已取消：这次排队动作永远不执行
+            try { done.TrySetResult(work()); }
+            catch (Exception ex) { done.TrySetException(ex); }
+        });
+        var finished = await Task.WhenAny(done.Task, Task.Delay(TimeSpan.FromSeconds(3), _cts.Token)).ConfigureAwait(false);
+        if (finished != done.Task && job.TryCancel()) return (false, default);
+        return (true, await done.Task.ConfigureAwait(false));
+    }
+
+    /// <summary>不等待结果的写入口（返回 200 的老入口）：同样走 Pending/Running/Cancelled 状态，只是没人取消。</summary>
+    private void EnqueueUiWrite(Action work)
+    {
+        var job = new UiJob();
+        _post(() => { if (job.TryStart()) work(); });
     }
 
     /// <summary>请求内容不合要求时回 400，不让异常把连接直接断掉。</summary>
@@ -417,7 +447,7 @@ public sealed class ApiServer : IDisposable
             if (!r.Ok) return (400, $"{{\"ok\":false,\"error\":{JsonSerializer.Serialize(r.Error)}}}");
             var drafts = r.Cards;
             // 外部入口：只写外部命名空间 / 自己写过的条目，内部活动由 ActivityStore 拒绝
-            _post(() => { foreach (var (d, p) in drafts) _store.UpsertExternal(d, p); });
+            EnqueueUiWrite(() => { foreach (var (d, p) in drafts) _store.UpsertExternal(d, p); });
             return (200, $"{{\"ok\":true,\"accepted\":{drafts.Count}}}");
         }
 
@@ -462,7 +492,7 @@ public sealed class ApiServer : IDisposable
             var r = IslandPayload.Decode(body, PayloadRoute.Push);
             if (!r.Ok) return (400, $"{{\"ok\":false,\"error\":{JsonSerializer.Serialize(r.Error)}}}");
             var drafts = r.Cards;
-            _post(() => { foreach (var (d, progress) in drafts) _store.UpsertExternal(d, progress); });
+            EnqueueUiWrite(() => { foreach (var (d, progress) in drafts) _store.UpsertExternal(d, progress); });
             var id = drafts.Count == 1 ? JsonSerializer.Serialize(drafts[0].Draft.Id) : "null";
             return (200, $"{{\"ok\":true,\"accepted\":{drafts.Count},\"id\":{id}}}");
         }
@@ -470,7 +500,7 @@ public sealed class ApiServer : IDisposable
         if (method == "POST" && path.StartsWith("/v1/agent/", StringComparison.Ordinal))
         {
             var a = AgentEventParser.Parse(body, path["/v1/agent/".Length..]);
-            if (a is not null) _post(() => { if (_store.UpsertExternal(a)) AgentEvent?.Invoke(a); });
+            if (a is not null) EnqueueUiWrite(() => { if (_store.UpsertExternal(a)) AgentEvent?.Invoke(a); });
             return (200, "{\"ok\":true}");
         }
 

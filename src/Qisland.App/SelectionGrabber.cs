@@ -100,7 +100,7 @@ public static class SelectionGrabber
         // 备份不可靠（剪贴板被占用 / 读失败 / 有存不下来的格式）：不做临时复制，免得还原不回去把用户的剪贴板弄丢
         if (backup.State == BackupState.Unavailable)
             return (null, "剪贴板暂时没法可靠备份，没有模拟复制（可以先手动复制再试）");
-        var seq = host.ClipboardSequenceNumber;
+        var seq = host.ClipboardSequenceNumber;   // 发 Ctrl+C 之前先记下序号
         SuppressClipUntil = DateTime.Now.AddSeconds(3);
         if (!host.SendCopy())
         {
@@ -114,6 +114,13 @@ public static class SelectionGrabber
             await host.DelayAsync(25);
             var now = host.ClipboardSequenceNumber;
             if (now == seq) continue;
+            // 只变了一次（正好 +1）才能确认是这次 Ctrl+C 造成的；发起之后、第一次轮询之前就跳了多下，
+            // 分不清读到的是选区还是用户刚复制的内容：既不读取，也不拿旧备份去覆盖
+            if (now != unchecked(seq + 1))
+            {
+                SuppressClipUntil = DateTime.Now.AddMilliseconds(800);
+                return (null, "划词时剪贴板变动了不止一次，分不清哪份是选区，没有读取也没有还原（避免冲掉你刚复制的内容）");
+            }
             // 第一次变化立刻记下序号：这就是这次 Ctrl+C 的结果。之后再变（等待期间、读的同时）都算额外变化
             copied = now;
             await host.DelayAsync(30);   // 给复制方一点时间写完

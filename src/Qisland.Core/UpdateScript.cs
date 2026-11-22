@@ -150,7 +150,14 @@ function Test-Content([string]$path, [string]$expected) {
 }
 function Restore-Plan {
     $errors = [Collections.Generic.List[string]]::new()
-    foreach ($entry in $script:manifest) {
+    $m = $script:manifest
+    foreach ($e in $m) {
+        if (-not $e.old -or (Test-Content ($appDir+'\'+$e.path) $e.old)) { continue }
+        try { $h = Get-Sha256 ($backupDir+'\'+$e.path) } catch { $h = '' }
+        if ($h -ne $e.old) { $errors.Add($e.path) }
+    }
+    if ($errors.Count) { return $errors }
+    foreach ($entry in $m) {
         $target = Join-Path $appDir $entry.path
         if (Test-Content $target $entry.old) { continue }
         try {
@@ -166,13 +173,13 @@ function Restore-Plan {
             $errors.Add("$($entry.path): $($_.Exception.Message)")
         }
     }
-    foreach ($entry in $script:manifest) {
+    foreach ($entry in $m) {
         $target = Join-Path $appDir $entry.path
         if (-not (Test-Content $target $entry.old)) {
             $errors.Add("$($entry.path): SHA256 不一致")
         }
     }
-    return $errors.ToArray()
+    return $errors
 }
 function Read-InstallManifest([string]$path) {
     if (-not (Test-File $path)) { return $null }
@@ -527,10 +534,14 @@ try {
     exit 1
 }
 $errors = @(Restore-Plan)
-if ($errors.Count -eq 0) { Write-Result 'rolled-back interrupted' }
-else { Write-Result "rollback-failed interrupted | $($errors -join '; ')" }
+if ($errors.Count -eq 0) {
+    Write-Result 'rolled-back interrupted'
+    Start-Old
+    exit 0
+}
+Write-Result "rollback-failed interrupted | $($errors -join '; ')"
 Start-Old
-exit 0
+exit 1
 """);
     }
 

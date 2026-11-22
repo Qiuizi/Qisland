@@ -23,6 +23,19 @@ public static class ApiTokenFile
     /// <summary>只有 Token 文件有效时才返回 Token；没配置、读不了、内容无效都返回 null（调用方因此不会带 Token，服务端会按状态处理）。</summary>
     public static string? Read(string dataDir) => Load(dataDir) is { State: ApiTokenState.Enabled } c ? c.Token : null;
 
+    // 可注入的文件读取（测试里换成假的来模拟权限 / IO 异常；正式环境就是 System.IO.File）。
+    internal interface ITokenFileReader
+    {
+        string ReadAllText(string path);
+    }
+
+    private sealed class DefaultTokenFileReader : ITokenFileReader
+    {
+        public string ReadAllText(string path) => File.ReadAllText(path, Encoding.UTF8);
+    }
+
+    private static readonly ITokenFileReader DefaultReader = new DefaultTokenFileReader();
+
     /// <summary>
     /// 区分三种状态：
     /// 文件不存在 → NotConfigured（不校验，和以前一样）；
@@ -30,15 +43,17 @@ public static class ApiTokenFile
     /// 文件存在但读不了（被占用、没权限、路径是目录）、为空、或内容不是一段不含空白的可见 ASCII → Invalid。
     /// Invalid 时服务端拒绝所有普通读写（健康检查除外），绝不退化成「不校验」。错误信息里只有路径和原因，不含文件内容。
     /// </summary>
-    public static ApiTokenConfig Load(string dataDir)
+    public static ApiTokenConfig Load(string dataDir) => Load(dataDir, DefaultReader);
+
+    internal static ApiTokenConfig Load(string dataDir, ITokenFileReader reader)
     {
         string path;
         try { path = PathFor(dataDir); }
         catch (Exception ex) { return ApiTokenConfig.Invalid($"Token 文件路径无效（{ex.GetType().Name}）"); }
-        if (Directory.Exists(path)) return ApiTokenConfig.Invalid($"{path} 是一个目录，不是 Token 文件");
-        if (!File.Exists(path)) return ApiTokenConfig.None;
         string text;
-        try { text = File.ReadAllText(path, Encoding.UTF8); }
+        try { text = reader.ReadAllText(path); }
+        catch (FileNotFoundException) { return ApiTokenConfig.None; }
+        catch (DirectoryNotFoundException) { return ApiTokenConfig.None; }
         catch (Exception ex) { return ApiTokenConfig.Invalid($"读不了 Token 文件 {path}（{ex.GetType().Name}）"); }
         var token = text.Trim();
         if (token.Length == 0) return ApiTokenConfig.Invalid($"Token 文件 {path} 是空的");
