@@ -30,6 +30,9 @@ public static class SelectionGrabber
 
     public const string TargetChangedMessage = "目标窗口已变化，已复制，请手动粘贴";
 
+    /// <summary>第一次检测到序号变化后 30ms 内序号还在变：分不清是选区还是同一进程的另一次复制，直接跳过。</summary>
+    public const string UncertainClipboardMessage = "复制过程中剪贴板变化，已跳过";
+
     /// <summary>剪贴板备份的结果：Saved 备份到了内容；Empty 剪贴板本来就是空的；Unavailable 没法可靠备份（被占用 / 读失败 / 有存不下来的格式）。</summary>
     internal enum BackupState { Saved, Empty, Unavailable }
 
@@ -112,32 +115,52 @@ public static class SelectionGrabber
             SuppressClipUntil = DateTime.Now.AddMilliseconds(800);
             return (null, "模拟 Ctrl+C 没有发出去（按键被系统拒绝），剪贴板没动");
         }
+        // 真实软件复制一次常会跳多下序号（清空剪贴板 + 写入每种格式都会让序号变化），不能靠「正好 +1」判断。
+        var sent = host.ClipboardSequenceNumber;   // SendCopy 返回时的序号（有些环境下复制已经同步落盘）
         string? text = null;
         uint copied = 0;
+        var detected = false;
         for (var i = 0; i < 24; i++)
         {
             await host.DelayAsync(25);
             var now = host.ClipboardSequenceNumber;
             if (now == seq) continue;
-            // 真实软件复制一次常会跳多下序号（清空剪贴板 + 写入每种格式都会让序号变化），不能靠「正好 +1」判断。
-            // 第一次变化时立刻核对剪贴板所有者的进程：是目标进程才认为是本次复制；不一致或取不到就既不读取也不还原。
-            var owner = host.ClipboardOwnerProcessId;
-            if (owner == null || owner != targetPid)
+            // 复制在 SendCopy 里已经同步落盘（sent != seq），到第一次轮询之间序号又变了：
+            // 说明同一个进程又写了一次，分不清哪一次是选区 → 归属不确定。
+            if (sent != seq && now != sent)
             {
                 SuppressClipUntil = DateTime.Now.AddMilliseconds(800);
-                return (null, "划词时剪贴板被别的程序改动了，没有读取也没有还原（避免冲掉你刚复制的内容）");
+                return (null, UncertainClipboardMessage);
             }
-            // 第一次变化立刻记下序号：这就是这次 Ctrl+C 的结果。之后再变（等待期间、读的同时）都算额外变化
             copied = now;
-            await host.DelayAsync(30);   // 给复制方一点时间写完
-            if (host.ClipboardSequenceNumber == copied) text = host.ReadText();
-            if (host.ClipboardSequenceNumber != copied)
-            {
-                // 额外变化：分不清读到的是选区还是用户刚复制的内容，既不读取，也不拿旧备份去覆盖
-                SuppressClipUntil = DateTime.Now.AddMilliseconds(800);
-                return (null, "划词时剪贴板又被改动了，没有读取也没有还原（避免冲掉你刚复制的内容）");
-            }
+            detected = true;
             break;
+        }
+        if (!detected)
+        {
+            SuppressClipUntil = DateTime.Now.AddMilliseconds(800);
+            return (null, null);
+        }
+        // 剪贴板所有者必须还是目标进程：它只能确认内容来自哪个程序，分不清是哪一次复制。
+        var owner = host.ClipboardOwnerProcessId;
+        if (owner == null || owner != targetPid)
+        {
+            SuppressClipUntil = DateTime.Now.AddMilliseconds(800);
+            return (null, "划词时剪贴板被别的程序改动了，没有读取也没有还原（避免冲掉你刚复制的内容）");
+        }
+        // 第一次检测到序号变化后，等 30ms 再读一次序号：这段时间里序号还在变，就判「归属不确定」。
+        await host.DelayAsync(30);   // 给复制方一点时间写完
+        if (host.ClipboardSequenceNumber != copied)
+        {
+            SuppressClipUntil = DateTime.Now.AddMilliseconds(800);
+            return (null, UncertainClipboardMessage);
+        }
+        text = host.ReadText();
+        // 读取的同时又变了，同样不确定：既不返回内容，也不拿旧备份去覆盖
+        if (host.ClipboardSequenceNumber != copied)
+        {
+            SuppressClipUntil = DateTime.Now.AddMilliseconds(800);
+            return (null, UncertainClipboardMessage);
         }
         // 只在剪贴板还是这次 Ctrl+C 的结果时还原；期间别的程序又复制了东西就不覆盖它
         if (PasteGuard.ShouldRestoreClipboard(copied, host.ClipboardSequenceNumber)) host.Restore(backup);
