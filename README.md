@@ -11,7 +11,7 @@
 ![.NET](https://img.shields.io/badge/.NET-8-512bd4?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-30d158?style=flat-square)
 
-[下载 v4.1.0](https://github.com/Qiuizi/Qisland/releases/tag/v4.1.0) · [宣传片](docs/media/qisland-v3.mp4) · [介绍页](https://qiuizi.github.io/Qisland/) · [更新日志](CHANGELOG.md)
+[下载 v4.1.0](https://github.com/Qiuizi/Qisland/releases/tag/v4.1.0) · [宣传片](docs/assets/media/qisland-4.1.mp4) · [介绍页](https://qiuizi.github.io/Qisland/) · [更新日志](CHANGELOG.md)
 
 </div>
 
@@ -80,7 +80,7 @@ Qisland 是给 Windows 做的「灵动岛」。它最早是为一个大学生自
 | **Codex 审批** | **展开后（液态玻璃）** |
 | <img src="docs/assets/shots/4.1.0/glass/17-codex-approval.png" width="420" alt="Codex 审批卡"> | <img src="docs/assets/shots/4.1.0/liquid/14-lyrics-home.png" width="420" alt="液态玻璃：展开的歌词页"> |
 
-截图由程序自己的 `--snapshot` 模式用演示数据渲染，磨砂玻璃和液态玻璃各有一套。完整演示见 [宣传片](docs/media/qisland-v3.mp4)。
+截图由程序自己的 `--snapshot` 模式用演示数据渲染，磨砂玻璃和液态玻璃各有一套。完整演示见 [宣传片](docs/assets/media/qisland-4.1.mp4)。
 
 ## 隐私与边界
 
