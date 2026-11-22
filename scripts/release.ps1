@@ -1,4 +1,4 @@
-﻿<#
+<#
 一键发版：核对工作区和提交 → 改版本号 → 跑全部测试 → 发布并校验产物 → 打包 → 只提交版本号文件并打标签 → 推到 GitHub → 建 Release。
 岛上的自动更新会在 6 小时内（或托盘「检查更新」时）发现它。
 
@@ -77,7 +77,7 @@ try {
 
     # 2. 先完整编译一遍；编译失败不打包，并还原版本号
     Write-Host "编译…" -ForegroundColor Cyan
-    dotnet build Qisland.sln -c Release --nologo -v q
+    dotnet build Qisland.sln -c Release -p:ContinuousIntegrationBuild=true --nologo -v q
     if ($LASTEXITCODE -ne 0) { throw "编译失败，已停止发版" }
 
     # 3. 发布（依赖框架，体积小；用户需要 .NET 8 桌面运行时）。ContinuousIntegrationBuild：dll / pdb 里的源码路径记成 /_/，不带本机目录
