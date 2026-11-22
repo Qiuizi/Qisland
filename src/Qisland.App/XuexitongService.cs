@@ -459,17 +459,36 @@ public sealed partial class XuexitongService
 
     internal static CoursePage ParseCoursePage(string html)
     {
-        var (courses, _, ended) = ScanCourses(html);
         if (!LooksLikeCoursePage(html)) return new CoursePage(CoursePageKind.Unknown, []);
-        // 用容器里的实际条目数做分母：只要有条目解析不出来（链接格式认不出 / 卡片是没有特定 class 的 div），
-        // 就不是「真的没课」，返回 Unparsed 保留旧数据；不能因为 ended 追平了「成功匹配的链接数」就当成 Empty。
+        var (courses, nodes, _) = ScanCourses(html);
+        // 用容器里的实际条目数做分母（穿透一层 ul/ol/div 包装）：只要有条目解析不出来（链接格式认不出 /
+        // 卡片是没有特定 class 的 div），就不是「真的没课」，返回 Unparsed 保留旧数据。
         var entries = CountCourseEntries(html);
-        var recognized = courses.Count + ended;
-        if (entries > 0 && recognized < entries) return new CoursePage(CoursePageKind.Unparsed, []);
-        if (courses.Count > 0) return new CoursePage(CoursePageKind.Courses, courses);
-        // 容器里没有条目，或每个条目都在自己的范围里确认写着「课程已结束」：确实没有在上的课
-        if (recognized == entries || html.Contains("暂无课程", StringComparison.Ordinal)) return new CoursePage(CoursePageKind.Empty, []);
-        return new CoursePage(CoursePageKind.Unparsed, []);
+        var recognized = nodes;   // 每个解析成功的链接 = 一门在上的课，或一门已结束的课
+        if (courses.Count > 0 && entries <= recognized) return new CoursePage(CoursePageKind.Courses, courses);
+        return ClassifyList(looksLikeContainer: true, ContainsEmptyCourseText(html), entries, recognized) == ListVerdict.Empty
+            ? new CoursePage(CoursePageKind.Empty, [])
+            : new CoursePage(CoursePageKind.Unparsed, []);
+    }
+
+    private static bool ContainsEmptyCourseText(string html) =>
+        html.Contains("暂无课程", StringComparison.Ordinal) || html.Contains("暂无课程数据", StringComparison.Ordinal);
+
+    private static bool ContainsEmptyWorkText(string html) =>
+        html.Contains("暂无作业", StringComparison.Ordinal) || html.Contains("暂无任务", StringComparison.Ordinal);
+
+    private enum ListVerdict { Empty, Unparsed, Unknown }
+
+    /// <summary>
+    /// 课程 / 作业共用的判空：页面明确写着空状态文案 → Empty；容器认不出来 → Unknown；
+    /// 容器里每个条目都确认解析成功（entries == recognized）→ 可以当成 Empty（调用方自行处理「有内容」的情况）；
+    /// 只要有条目解析不了（entries &gt; recognized）→ Unparsed，保留旧数据。
+    /// </summary>
+    private static ListVerdict ClassifyList(bool looksLikeContainer, bool explicitEmpty, int entries, int recognized)
+    {
+        if (explicitEmpty) return ListVerdict.Empty;
+        if (!looksLikeContainer) return ListVerdict.Unknown;
+        return entries > recognized ? ListVerdict.Unparsed : ListVerdict.Empty;
     }
 
     internal static bool LooksLikeCoursePage(string html) =>
@@ -492,19 +511,45 @@ public sealed partial class XuexitongService
     [GeneratedRegex(@"stucoursemiddle\?courseid=(\d+)&(?:amp;)?clazzid=(\d+)&(?:amp;)?cpi=(\d+)")]
     private static partial Regex CourseLink();
 
-    private static bool HasListEntries(string html) => Regex.IsMatch(html, @"<li[\s>]", RegexOptions.IgnoreCase);
+    private static readonly Regex CourseContainer = new(
+        @"<(?<tag>[a-zA-Z][a-zA-Z0-9]*)\b[^>]*\bclass\s*=\s*[""'][^""']*\bcourse-list\b[^""']*[""'][^>]*>", RegexOptions.IgnoreCase);
+    private static readonly Regex CourseListIdContainer = new(
+        @"<(?<tag>[a-zA-Z][a-zA-Z0-9]*)\b[^>]*\bid\s*=\s*[""']courseList[""'][^>]*>", RegexOptions.IgnoreCase);
+    private static readonly Regex WorkContainer = new(
+        @"<(?<tag>[a-zA-Z][a-zA-Z0-9]*)\b[^>]*\bclass\s*=\s*[""'][^""']*\bwork-list\b[^""']*[""'][^>]*>", RegexOptions.IgnoreCase);
+    private static readonly Regex WorkListIdContainer = new(
+        @"<(?<tag>[a-zA-Z][a-zA-Z0-9]*)\b[^>]*\bid\s*=\s*[""']workList[""'][^>]*>", RegexOptions.IgnoreCase);
 
-    /// <summary>容器里的实际条目数：课程列表容器的直接子元素个数（li、div 课程卡片等，不管链接格式认不认得）。</summary>
-    private static int CountCourseEntries(string html)
+    /// <summary>课程容器里的实际条目数（不管链接格式认不认得），统计时会穿透一层 ul/ol/div 包装。</summary>
+    private static int CountCourseEntries(string html) => CountContainerEntries(html, CourseContainer, CourseListIdContainer);
+
+    /// <summary>作业容器里的实际条目数（li、div 条目都算），统计时会穿透一层 ul/ol/div 包装。</summary>
+    private static int CountWorkEntries(string html) => CountContainerEntries(html, WorkContainer, WorkListIdContainer);
+
+    private static int CountContainerEntries(string html, Regex byClass, Regex byId)
     {
-        var container = Regex.Match(html, @"<(?<tag>[a-zA-Z][a-zA-Z0-9]*)\b[^>]*\bclass\s*=\s*[""'][^""']*\bcourse-list\b[^""']*[""'][^>]*>", RegexOptions.IgnoreCase);
-        if (!container.Success)
-            container = Regex.Match(html, @"<(?<tag>[a-zA-Z][a-zA-Z0-9]*)\b[^>]*\bid\s*=\s*[""']courseList[""'][^>]*>", RegexOptions.IgnoreCase);
+        var container = byClass.Match(html);
+        if (!container.Success) container = byId.Match(html);
         if (!container.Success) return 0;
-        var depth = 1;   // 已经进到容器里面
+        var count = CountTopChildren(html, container.Index + container.Length, out var onlyName, out var onlyInnerStart);
+        // 只有一个 ul/ol/div 包装层时，再往里数一层（容器 → ul → li / 容器 → div → div 条目）
+        if (count == 1 && onlyName?.ToLowerInvariant() is "ul" or "ol" or "div")
+        {
+            var inner = CountTopChildren(html, onlyInnerStart, out _, out _);
+            if (inner > 0) return inner;
+        }
+        return count;
+    }
+
+    /// <summary>数某个元素内部的直接子元素个数；只有一个子元素时顺便把它的名字和内容起点带出来。</summary>
+    private static int CountTopChildren(string html, int start, out string? onlyName, out int onlyInnerStart)
+    {
+        onlyName = null;
+        onlyInnerStart = 0;
         var count = 0;
+        var depth = 1;   // 已经进到容器里面
         var tags = new Regex(@"<(?<close>/)?(?<name>[a-zA-Z][a-zA-Z0-9]*)\b[^>]*?>", RegexOptions.IgnoreCase);
-        foreach (Match tag in tags.Matches(html, container.Index + container.Length))
+        foreach (Match tag in tags.Matches(html, start))
         {
             var name = tag.Groups["name"].Value;
             if (tag.Groups["close"].Success)
@@ -514,7 +559,12 @@ public sealed partial class XuexitongService
                 continue;
             }
             if (tag.Value.EndsWith("/>", StringComparison.Ordinal) || IsVoidTag(name)) continue;
-            if (depth == 1) count++;   // 容器的直接子元素才是一条课程条目
+            if (depth == 1)
+            {
+                count++;
+                if (count == 1) { onlyName = name; onlyInnerStart = tag.Index + tag.Length; }
+                else onlyName = null;
+            }
             depth++;
         }
         return count;
@@ -530,9 +580,15 @@ public sealed partial class XuexitongService
     /// <summary>作业列表一条都没匹配上时：明确的空 → Empty；容器里有条目 → Unparsed（保留旧数据）；认不出 → Failed。</summary>
     internal static HomeworkCourseState ClassifyEmptyWorkList(string html)
     {
-        if (html.Contains("暂无作业", StringComparison.Ordinal) || html.Contains("暂无任务", StringComparison.Ordinal)) return HomeworkCourseState.Empty;
-        if (!LooksLikeEmptyWorkList(html)) return HomeworkCourseState.Failed;
-        return HasListEntries(html) ? HomeworkCourseState.Unparsed : HomeworkCourseState.Empty;
+        var explicitEmpty = ContainsEmptyWorkText(html);
+        if (!explicitEmpty && !LooksLikeEmptyWorkList(html)) return HomeworkCourseState.Failed;
+        // 作业一条也没匹配上时：明确空文案 → Empty；容器里还有条目（li 或 div）→ Unparsed 保留旧数据；否则 Empty。
+        return ClassifyList(looksLikeContainer: true, explicitEmpty, CountWorkEntries(html), recognized: 0) switch
+        {
+            ListVerdict.Empty => HomeworkCourseState.Empty,
+            ListVerdict.Unparsed => HomeworkCourseState.Unparsed,
+            _ => HomeworkCourseState.Failed,
+        };
     }
 
     /// <summary>
