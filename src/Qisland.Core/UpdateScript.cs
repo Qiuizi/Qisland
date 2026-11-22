@@ -25,13 +25,29 @@ public static class UpdateScript
     /// </summary>
     public readonly record struct Status(string State, int? Pid, string? UpdateId);
 
+    public const string RollbackFailedState = "rollback-failed";
+    /// <summary>rollback-failed 最多自动重试 3 次；次数记在状态行里，超过就不再重试。</summary>
+    public const int MaxRollbackRetries = 3;
+
     public static Status ParseStatus(string? resultText)
     {
         var parts = (resultText ?? "").Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 0) return new("", null, null);
+        // rollback-failed 的格式是「rollback-failed <updateId> <重试次数> ...」：第二个字段是 updateId，不是脚本 PID。
+        if (parts[0] == RollbackFailedState)
+            return new(RollbackFailedState, null, parts.Length > 1 && IsValidUpdateId(parts[1]) ? parts[1] : null);
         int? pid = parts.Length > 1 && int.TryParse(parts[1], out var n) ? n : null;
         var id = parts.Length > 2 && IsValidUpdateId(parts[2]) ? parts[2] : null;
         return new(parts[0], pid, id);
+    }
+
+    public static bool IsRollbackFailed(string? resultText) => ParseStatus(resultText).State == RollbackFailedState;
+
+    /// <summary>rollback-failed 已经自动重试过几次（状态行第二、三个字段：updateId、次数）。</summary>
+    public static int RollbackRetryCount(string? resultText)
+    {
+        var parts = (resultText ?? "").Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length > 2 && parts[0] == RollbackFailedState && int.TryParse(parts[2], out var n) ? n : 0;
     }
 
     /// <summary>result 文件停在 applying 或 pending：覆盖进行到一半、或新进程还没确认就绪时脚本被杀/断电，下次启动要按清单还原。</summary>
@@ -300,7 +316,7 @@ function Rollback-And-StartOld([string]$reason) {
     if ($errors.Count -eq 0) {
         Write-Result "rolled-back $reason"
     } else {
-        Write-Result "rollback-failed $reason | $($errors -join '; ')"
+        Write-Result "rollback-failed $updateId 0 $reason | $($errors -join '; ')"
     }
     Start-Old
     exit 1
@@ -505,6 +521,8 @@ $readyFile = ''
 $exeName = {{Ps(exe)}}
 $installManifestName = {{Ps(InstallManifestName)}}
 $script:manifest = @()
+$script:rollbackFailed = $false
+$script:retry = 0
 {{CommonFunctions}}
 if ({{(waitForPid ? "$true" : "$false")}}) {
     try {
@@ -522,14 +540,36 @@ try {
     }
     $status = ''
     try { $status = [IO.File]::ReadAllText($resultFile, [Text.Encoding]::UTF8).Trim() } catch { }
-    if (-not $status.EndsWith(" $updateId")) {
-        Write-Log "recover: status no longer points at $updateId, left untouched"
+    $statusParts = @($status -split '\s+')
+    $statusState = if ($statusParts.Count -ge 1) { $statusParts[0] } else { '' }
+    if ($statusState -eq 'applying' -or $statusState -eq 'pending') {
+        if (-not $status.EndsWith(" $updateId")) {
+            Write-Log "recover: status no longer points at $updateId, left untouched"
+            exit 2
+        }
+    } elseif ($statusState -eq '{{RollbackFailedState}}') {
+        if ($statusParts.Count -lt 2 -or $statusParts[1] -ne $updateId) {
+            Write-Log "recover: rollback-failed status belongs to another update, left untouched"
+            exit 2
+        }
+        $script:rollbackFailed = $true
+        $retry = 0
+        if ($statusParts.Count -ge 3) { [void][int]::TryParse($statusParts[2], [ref]$retry) }
+        if ($retry -ge {{MaxRollbackRetries}}) {
+            Write-Log "recover: rollback retry limit reached, no more automatic retry"
+            exit 3
+        }
+        $script:retry = $retry
+    } else {
+        Write-Log "recover: status is not recoverable, left untouched"
         exit 2
     }
     $script:manifest = @(@($parsed.entries) | Where-Object { $null -ne $_ -and $_.path })
     foreach ($entry in $script:manifest) { Get-RelativePath $appDir (Join-Path $appDir $entry.path) | Out-Null }
 } catch {
-    Write-Result "rollback-failed interrupted | manifest $($_.Exception.Message)"
+    if ($script:rollbackFailed) { $failLine = "rollback-failed $updateId $($script:retry + 1) interrupted | manifest $($_.Exception.Message)" }
+    else { $failLine = "rollback-failed $updateId 0 interrupted | manifest $($_.Exception.Message)" }
+    Write-Result $failLine
     Start-Old
     exit 1
 }
@@ -539,7 +579,8 @@ if ($errors.Count -eq 0) {
     Start-Old
     exit 0
 }
-Write-Result "rollback-failed interrupted | $($errors -join '; ')"
+if ($script:rollbackFailed) { $nextRetry = $script:retry + 1 } else { $nextRetry = 0 }
+Write-Result "rollback-failed $updateId $nextRetry interrupted | $($errors -join '; ')"
 Start-Old
 exit 1
 """);

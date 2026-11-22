@@ -63,6 +63,12 @@ public sealed class Updater
     public async Task<bool> Check(bool manual)
     {
         if (_busy) return true;
+        // 上次回滚还没完成：禁止发起新更新，只在岛上提示，不再去查新版本
+        if (UpdateScript.IsRollbackFailed(ReadResultText()))
+        {
+            Say("上次更新回滚未完成", "请重启 Qisland 完成恢复后再检查更新", ActivityKind.Warning);
+            return false;
+        }
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/repos/{Repo}/releases?per_page=15");
@@ -179,13 +185,26 @@ public sealed class Updater
         string? text;
         try { text = File.Exists(resultFile) ? File.ReadAllText(resultFile) : null; }
         catch { return null; }
-        if (!UpdateScript.IsInterrupted(text) || !File.Exists(manifestFile)) return null;
-        if (UpdateScript.ApplyingPid(text) is int scriptPid && IsAlivePowerShell(scriptPid)) return null;
         // 状态、清单、备份必须属于同一次更新、同一个安装目录；对不上就什么都不做，绝不把别处的备份写进来
         var status = UpdateScript.ParseStatus(text);
-        if (status.UpdateId is not { } updateId) return null;
-        if (!UpdateScript.ManifestMatches(manifestFile, updateId, appDir, backupDir)) return null;
-        return UpdateScript.StartRecover(pid, appDir, backupDir, resultFile, manifestFile, updateId, exe, waitForPid);
+        if (status.State is "applying" or "pending")
+        {
+            if (!File.Exists(manifestFile)) return null;
+            if (UpdateScript.ApplyingPid(text) is int scriptPid && IsAlivePowerShell(scriptPid)) return null;
+            if (status.UpdateId is not { } updateId) return null;
+            if (!UpdateScript.ManifestMatches(manifestFile, updateId, appDir, backupDir)) return null;
+            return UpdateScript.StartRecover(pid, appDir, backupDir, resultFile, manifestFile, updateId, exe, waitForPid);
+        }
+        if (status.State == UpdateScript.RollbackFailedState)
+        {
+            // 上次回滚失败但占用已解除：重新校验备份后再试一次；最多自动重试 3 次，超过就只在岛上报错
+            if (UpdateScript.RollbackRetryCount(text) >= UpdateScript.MaxRollbackRetries) return null;
+            if (status.UpdateId is not { } updateId) return null;
+            if (!File.Exists(manifestFile)) return null;
+            if (!UpdateScript.ManifestMatches(manifestFile, updateId, appDir, backupDir)) return null;
+            return UpdateScript.StartRecover(pid, appDir, backupDir, resultFile, manifestFile, updateId, exe, waitForPid);
+        }
+        return null;
     }
 
     private static bool IsAlivePowerShell(int pid)
@@ -208,6 +227,21 @@ public sealed class Updater
         return Path.Combine(Path.GetTempPath(), "Qisland-update", key);
     }
 
+    /// <summary>
+    /// 发起新更新前的守卫：只要还有没解决的更新中断 / 回滚失败，就拒绝发起新更新，并保留更新工作区
+    /// （目录、清单、备份都不能删）。拦下来时抛出 InvalidOperationException，界面按「更新没成功」提示。
+    /// </summary>
+    internal static void EnsureNoPendingRecovery(string resultFile, string tempDir)
+    {
+        string? text = null;
+        try { if (File.Exists(resultFile)) text = File.ReadAllText(resultFile); } catch { }
+        if (UpdateScript.IsInterrupted(text))
+            throw new InvalidOperationException("上次更新中断尚未恢复，请重启 Qisland 完成恢复");
+        if (UpdateScript.IsRollbackFailed(text))
+            throw new InvalidOperationException("上次更新回滚未完成，请重启 Qisland 完成恢复");
+        if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+    }
+
     /// <summary>App 启动时调用：发现中断的覆盖就拉起恢复脚本，返回 true 表示本进程应立即退出。</summary>
     public static bool RecoverInterruptedUpdate()
     {
@@ -223,6 +257,11 @@ public sealed class Updater
     }
 
     private static string ResultFile => Path.Combine(UpdateTemp, "result.txt");
+
+    private static string? ReadResultText()
+    {
+        try { return File.Exists(ResultFile) ? File.ReadAllText(ResultFile) : null; } catch { return null; }
+    }
 
     /// <summary>以 --update-failed 启动（替换脚本回滚后拉起的旧版）：读脚本留下的结果，记日志并在岛上报错。</summary>
     public void ReportFailedUpdate()
@@ -241,10 +280,8 @@ public sealed class Updater
         var tmp = UpdateTemp;
         try
         {
-            // 上次覆盖中断留下的清单和备份是还原的唯一依据，恢复完成前不能清掉
-            if (File.Exists(ResultFile) && UpdateScript.IsInterrupted(File.ReadAllText(ResultFile)))
-                throw new InvalidOperationException("上次更新中断尚未恢复，请重启 Qisland 完成恢复");
-            if (Directory.Exists(tmp)) Directory.Delete(tmp, true);
+            // 上次覆盖中断 / 上次回滚失败留下的清单和备份是恢复的唯一依据，恢复完成前不能清掉
+            EnsureNoPendingRecovery(ResultFile, tmp);
             Directory.CreateDirectory(tmp);
             var zip = Path.Combine(tmp, "pkg.zip");
             void Progress(double p, string body) =>
