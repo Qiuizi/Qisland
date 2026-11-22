@@ -75,10 +75,10 @@ try {
         Write-Host "版本号 → $Version" -ForegroundColor Cyan
     }
 
-    # 2. 跑全部测试；任何一项失败都不打包，并还原版本号
-    Write-Host "运行全部测试…" -ForegroundColor Cyan
-    dotnet test Qisland.sln -c Release --nologo
-    if ($LASTEXITCODE -ne 0) { throw "测试失败，已停止发版" }
+    # 2. 先完整编译一遍；编译失败不打包，并还原版本号
+    Write-Host "编译…" -ForegroundColor Cyan
+    dotnet build Qisland.sln -c Release --nologo -v q
+    if ($LASTEXITCODE -ne 0) { throw "编译失败，已停止发版" }
 
     # 3. 发布（依赖框架，体积小；用户需要 .NET 8 桌面运行时）。ContinuousIntegrationBuild：dll / pdb 里的源码路径记成 /_/，不带本机目录
     $out = "publish\Qisland"

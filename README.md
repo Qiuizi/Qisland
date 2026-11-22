@@ -156,7 +156,7 @@ dotnet publish src\Qisland.App\Qisland.App.csproj -c Release -r win-x64 --self-c
 dotnet test tests\Qisland.Core.Tests
 ```
 
-`src/Qisland.App` 是主程序，`src/Qisland.Core` 是不依赖 WPF 的解析和数据模型（课表 / 日历重复规则、验证码等，带单元测试）。
+`src/Qisland.App` 是主程序，`src/Qisland.Core` 是不依赖 WPF 的解析和数据模型（课表 / 日历重复规则、验证码等）。
 
 ## 致谢
 
