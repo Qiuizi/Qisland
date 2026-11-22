@@ -410,11 +410,17 @@ public sealed partial class XuexitongService
                     snap.Course(c.Id, c.Name, kind);
                     continue;
                 }
+                // 先数清这门课容器里的作业条目总数：解析成功的条目少于总数，就说明只解析出了一部分。
+                var totalEntries = CountWorkEntries(wl);
+                var partial = matches.Count < totalEntries;
+                var parsedKeys = new HashSet<string>(StringComparer.Ordinal);
                 foreach (Match m in matches)
                 {
                     var url = WebUtility.HtmlDecode(Uri.UnescapeDataString(m.Groups[1].Value));
                     var title = WebUtility.HtmlDecode(m.Groups[2].Value.Trim());
                     var state = m.Groups[3].Value.Trim();
+                    // 记下这次识别到的条目键（和 HomeworkItem.AlertKey 的规则一致），用来判断旧条目是否已被新结果覆盖
+                    parsedKeys.Add(url.StartsWith("http") ? $"{Platform}|{url}" : $"{Platform}|{c.Name}|{title}");
                     if (state.Contains("待批阅"))
                     {
                         // 交了没批：只用列表上现成的剩余时间，不为它多发详情请求
@@ -440,7 +446,16 @@ public sealed partial class XuexitongService
                     if (dl is { } d) { if (d > now) snap.Add(fresh); }
                     else if (snap.KeepItem(fresh)) App.Log($"学习通: 课程 {c.Name} 有一份作业读不出截止时间，沿用上次的数据");
                 }
-                snap.Course(c.Id, c.Name, HomeworkCourseState.Parsed);
+                if (partial)
+                {
+                    // 只解析出一部分：识别出来的正常更新；认不出来的那部分保留旧缓存，不能整体替换
+                    snap.CoursePartial(c.Id, c.Name, parsedKeys);
+                    App.Log($"学习通: 课程 {c.Name} 的作业列表有 {totalEntries - matches.Count} 条认不出来，保留对应旧作业");
+                }
+                else
+                {
+                    snap.Course(c.Id, c.Name, HomeworkCourseState.Parsed);
+                }
             }
             catch (Exception ex) when (ex is not StaleSession and not AntiSpiderException)
             {

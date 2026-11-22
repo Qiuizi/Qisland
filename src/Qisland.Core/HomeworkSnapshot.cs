@@ -41,6 +41,18 @@ public sealed class HomeworkSnapshot(IReadOnlyList<HomeworkItem> previous)
         foreach (var old in previous.Where(i => SameCourse(i, courseId, courseName))) Keep(old);
     }
 
+    /// <summary>
+    /// 部分成功：识别出的作业已经通过 <see cref="Add"/> 写入；旧缓存里「这次没识别出来」的条目按课程认领保留，
+    /// 不能因为只解析出一部分就把整门课的旧数据丢掉。parsedAlertKeys 是这次识别到的条目键。
+    /// </summary>
+    public void CoursePartial(string courseId, string courseName, IReadOnlyCollection<string> parsedAlertKeys)
+    {
+        _states[HomeworkCourseState.Parsed] = _states.GetValueOrDefault(HomeworkCourseState.Parsed) + 1;
+        foreach (var old in previous.Where(i => SameCourse(i, courseId, courseName)))
+            if (!parsedAlertKeys.Contains(old.AlertKey))
+                Keep(old);
+    }
+
     /// <summary>某一条作业缺字段（比如截止时间读不出来）：沿用同一份作业的旧条目。返回是否找到了。</summary>
     public bool KeepItem(HomeworkItem fresh)
     {
