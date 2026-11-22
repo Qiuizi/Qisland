@@ -233,12 +233,30 @@ public sealed class Updater
     /// </summary>
     internal static void EnsureNoPendingRecovery(string resultFile, string tempDir)
     {
-        string? text = null;
-        try { if (File.Exists(resultFile)) text = File.ReadAllText(resultFile); } catch { }
-        if (UpdateScript.IsInterrupted(text))
+        string? text;
+        try
+        {
+            text = File.ReadAllText(resultFile);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            text = null;   // 状态文件确实不存在：没有待恢复的事务，允许清理
+        }
+        catch (Exception ex)
+        {
+            // 状态文件在、但读不出来（被锁 / 权限 / IO 错误）：状态未知，绝不能当成“没有事务”去清理
+            App.Log("读更新状态失败，已暂停更新: " + ex.Message);
+            throw new InvalidOperationException("更新状态暂时无法读取，已暂停更新", ex);
+        }
+
+        var state = UpdateScript.ParseStatus(text).State;
+        if (state is "applying" or "pending")
             throw new InvalidOperationException("上次更新中断尚未恢复，请重启 Qisland 完成恢复");
-        if (UpdateScript.IsRollbackFailed(text))
+        if (state == UpdateScript.RollbackFailedState)
             throw new InvalidOperationException("上次更新回滚未完成，请重启 Qisland 完成恢复");
+        // 只有已明确结束、不会再需要恢复资料的状态才允许清理；其余未知状态一律暂停更新
+        if (text != null && state is not ("ok" or "rolled-back" or "backup-failed" or "candidate-invalid"))
+            throw new InvalidOperationException("更新状态暂时无法读取，已暂停更新");
         if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
     }
 
