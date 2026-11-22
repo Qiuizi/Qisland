@@ -1,0 +1,6 @@
+{
+  "ready": false,
+  "video": "assets/media/qisland-4.1.mp4",
+  "poster": "assets/media/qisland-4.1-poster.jpg",
+  "note": "放入 qisland-4.1.mp4 与 qisland-4.1-poster.jpg 后将 ready 设为 true"
+}
