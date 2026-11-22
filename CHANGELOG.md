@@ -126,4 +126,4 @@ v4.0.0 代码审查问题修复，每条都有对应的单元测试。
 
 ## v3.0.0
 
-见 [docs/release-notes-v3.0.0.md](docs/release-notes-v3.0.0.md)。
+详细说明见 [v3.0.0 Release](https://github.com/Qiuizi/Qisland/releases/tag/v3.0.0)。
