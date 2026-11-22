@@ -58,6 +58,10 @@ public static class SelectionGrabber
         string? ReadText();
         ClipboardBackup Backup();
         void Restore(ClipboardBackup backup);
+        /// <summary>发 Ctrl+C 前目标窗口的进程 ID（= GetForegroundWindow + GetWindowThreadProcessId）；测试替身可不覆盖。</summary>
+        int ForegroundProcessId => 0;
+        /// <summary>当前剪贴板所有者的进程 ID（= GetClipboardOwner + GetWindowThreadProcessId）；取不到为 null。测试替身可不覆盖。</summary>
+        int? ClipboardOwnerProcessId => 0;
     }
 
     internal readonly record struct PasteAttemptResult(PasteOutcome Outcome, uint Sequence);
@@ -100,7 +104,8 @@ public static class SelectionGrabber
         // 备份不可靠（剪贴板被占用 / 读失败 / 有存不下来的格式）：不做临时复制，免得还原不回去把用户的剪贴板弄丢
         if (backup.State == BackupState.Unavailable)
             return (null, "剪贴板暂时没法可靠备份，没有模拟复制（可以先手动复制再试）");
-        var seq = host.ClipboardSequenceNumber;   // 发 Ctrl+C 之前先记下序号
+        var targetPid = host.ForegroundProcessId;   // 发 Ctrl+C 之前记下目标窗口进程
+        var seq = host.ClipboardSequenceNumber;      // 以及剪贴板序号
         SuppressClipUntil = DateTime.Now.AddSeconds(3);
         if (!host.SendCopy())
         {
@@ -114,12 +119,13 @@ public static class SelectionGrabber
             await host.DelayAsync(25);
             var now = host.ClipboardSequenceNumber;
             if (now == seq) continue;
-            // 只变了一次（正好 +1）才能确认是这次 Ctrl+C 造成的；发起之后、第一次轮询之前就跳了多下，
-            // 分不清读到的是选区还是用户刚复制的内容：既不读取，也不拿旧备份去覆盖
-            if (now != unchecked(seq + 1))
+            // 真实软件复制一次常会跳多下序号（清空剪贴板 + 写入每种格式都会让序号变化），不能靠「正好 +1」判断。
+            // 第一次变化时立刻核对剪贴板所有者的进程：是目标进程才认为是本次复制；不一致或取不到就既不读取也不还原。
+            var owner = host.ClipboardOwnerProcessId;
+            if (owner == null || owner != targetPid)
             {
                 SuppressClipUntil = DateTime.Now.AddMilliseconds(800);
-                return (null, "划词时剪贴板变动了不止一次，分不清哪份是选区，没有读取也没有还原（避免冲掉你刚复制的内容）");
+                return (null, "划词时剪贴板被别的程序改动了，没有读取也没有还原（避免冲掉你刚复制的内容）");
             }
             // 第一次变化立刻记下序号：这就是这次 Ctrl+C 的结果。之后再变（等待期间、读的同时）都算额外变化
             copied = now;
@@ -238,6 +244,21 @@ public static class SelectionGrabber
         }
         public ClipboardBackup Backup() => SelectionGrabber.Backup();
         public void Restore(ClipboardBackup backup) => SelectionGrabber.Restore(backup);
+        public int ForegroundProcessId => ProcessIdOf(GetForegroundWindow());
+        public int? ClipboardOwnerProcessId
+        {
+            get
+            {
+                try
+                {
+                    var owner = GetClipboardOwner();
+                    if (owner == IntPtr.Zero) return null;
+                    GetWindowThreadProcessId(owner, out var pid);
+                    return pid == 0 ? null : checked((int)pid);
+                }
+                catch { return null; }
+            }
+        }
     }
 
     public static PasteTargetSnapshot TargetOf(IntPtr window) =>
@@ -411,6 +432,7 @@ public static class SelectionGrabber
     private struct GuiThreadInfo { public int cbSize, flags; public IntPtr hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret; public Rect rcCaret; }
 
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern IntPtr GetClipboardOwner();
     [DllImport("user32.dll")] private static extern uint GetClipboardSequenceNumber();
     [DllImport("user32.dll")] private static extern int CountClipboardFormats();
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vk);
