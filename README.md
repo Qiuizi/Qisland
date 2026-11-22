@@ -6,18 +6,20 @@
 
 **该知道的，抬眼就知道。**
 
-![version](https://img.shields.io/badge/version-4.0.0-ff9f0a?style=flat-square)
+![version](https://img.shields.io/badge/version-4.1.0-ff9f0a?style=flat-square)
 ![platform](https://img.shields.io/badge/Windows-10%20%7C%2011-0a84ff?style=flat-square)
 ![.NET](https://img.shields.io/badge/.NET-8-512bd4?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-30d158?style=flat-square)
 
-[下载 v4.0.0](https://github.com/Qiuizi/Qisland/releases/latest) · [宣传片](docs/media/qisland-v3.mp4) · [介绍页](https://qiuizi.github.io/Qisland/) · [v4 更新说明](docs/release-notes-v4.0.0.md) · [更新日志](CHANGELOG.md)
+[下载 v4.1.0](https://github.com/Qiuizi/Qisland/releases/tag/v4.1.0) · [宣传片](docs/media/qisland-v3.mp4) · [介绍页](https://qiuizi.github.io/Qisland/) · [更新日志](CHANGELOG.md)
 
 </div>
 
 ---
 
 Qisland 是给 Windows 做的「灵动岛」。它最早是为一个大学生自己写的：课在哪上、作业几点截止、Agent 跑完没有、谁在用麦克风——这些答案都很短，却总要切窗口去看。Qisland 把它们收进屏幕顶上的一颗胶囊：平时只显示时间，有事才展开，事情过去就收回去。
+
+4.1.0 是 4.0.0 之后的一轮稳定性更新：自动更新失败可以回滚，本机接口可选用 Token，作业和日历在解析失败时保留旧数据。明细见 [更新日志](CHANGELOG.md)。
 
 ## 三个出发点
 
@@ -37,11 +39,7 @@ Qisland 是给 Windows 做的「灵动岛」。它最早是为一个大学生自
 
 ## 能做什么
 
-<!-- 截图占位：docs/assets/shots/20-agenda.png（课程组件里的日程卡片） -->
-<!-- 截图占位：docs/assets/shots/21-call.png（通话中胶囊） -->
-<!-- 截图占位：docs/assets/shots/22-privacy-dots.png（麦克风 / 摄像头圆点） -->
-
-**v4 新的手感**
+**外观与手感**
 - 两套玻璃皮肤：「磨砂玻璃」用 Windows 系统合成的背景模糊；「液态玻璃」参考 iOS 26——中间几乎透明，左上镜面亮边、内圈斜面、边缘一圈淡磨砂，岛里的卡片、通知列表和按钮也是同一套液态样式。托盘「外观」或设置窗里切换。
 - 点一下直达：点岛上任何一条（收起的胶囊也行），直接切到来源软件——系统通知回到发通知的应用，微信 / QQ 回到会话，终端里的 AI 会话回到那个终端，音乐回到播放器或浏览器标签页。
 - 岛仔同款弹簧动效，阴影四周均匀；可停在顶部、左侧或右侧，或者用极简模式只留一小段线。
@@ -68,21 +66,21 @@ Qisland 是给 Windows 做的「灵动岛」。它最早是为一个大学生自
 - 麦克风 / 摄像头被谁占用：开始时提示一下，用着时时间旁边留一个橙点 / 绿点。
 - 通话和会议：微信、QQ、腾讯会议、钉钉、飞书、Teams、Zoom 通话时显示「通话中 · 时长」，点一下回到通话窗口。
 - 专注：自己的专注计时或 Windows 11 专注会话期间，只放行审批、通话和一小时内截止的作业，结束后汇成一条摘要。
-- 蓝牙耳机连上 / 断开和电量；断网、换 Wi-Fi、校园网需要认证、系统代理开关；大写 / 数字锁定。
+- 蓝牙耳机连上 / 断开和电量；断网、换 Wi-Fi、系统代理开关；大写 / 数字锁定。
 - 音乐：接入系统媒体控制（SMTC）的音乐软件和浏览器视频，封面、进度、逐行歌词都在岛上，可暂停和切歌。
-- 通知里的验证码一键复制；天气（7 天、最多 5 个城市、天气提醒）、健康（喝水、久坐）、待办、剪贴板（可置顶）、倒计时、文件架等组件，开哪些、怎么排自己定。
+- 通知里的验证码一键复制；天气（7 天、最多 5 个地点、天气提醒）、健康（喝水、久坐）、待办、剪贴板（可置顶）、倒计时、文件架等组件，开哪些、怎么排自己定。
 
 托盘「岛上提示」里每一类都能单独关掉。
 
 ## 看起来是这样
 
-| 有事时 | 展开后 |
+| 有事时 | 展开后（磨砂玻璃） |
 |---|---|
-| <img src="docs/assets/shots/10-class-compact.png" width="380"><br><br><img src="docs/assets/shots/13-lyrics-compact.png" width="380"> | <img src="docs/assets/shots/03-home.png" width="420"> |
-| **Codex 审批** | **作业截止** |
-| <img src="docs/assets/shots/17-codex-approval.png" width="420"> | <img src="docs/assets/shots/15-homework-home.png" width="420"> |
+| <img src="docs/assets/shots/4.1.0/glass/10-class-compact.png" width="380" alt="上课中紧凑态"><br><br><img src="docs/assets/shots/4.1.0/glass/13-lyrics-compact.png" width="380" alt="歌词紧凑态"> | <img src="docs/assets/shots/4.1.0/glass/14-lyrics-home.png" width="420" alt="磨砂玻璃：展开的歌词页"> |
+| **Codex 审批** | **展开后（液态玻璃）** |
+| <img src="docs/assets/shots/4.1.0/glass/17-codex-approval.png" width="420" alt="Codex 审批卡"> | <img src="docs/assets/shots/4.1.0/liquid/14-lyrics-home.png" width="420" alt="液态玻璃：展开的歌词页"> |
 
-截图由程序自己的 `--snapshot` 模式用演示数据渲染。完整演示见 [宣传片](docs/media/qisland-v3.mp4)。
+截图由程序自己的 `--snapshot` 模式用演示数据渲染，磨砂玻璃和液态玻璃各有一套。完整演示见 [宣传片](docs/media/qisland-v3.mp4)。
 
 ## 隐私与边界
 
@@ -99,7 +97,7 @@ Qisland 是给 Windows 做的「灵动岛」。它最早是为一个大学生自
 
 ## 安装
 
-需要 Windows 10 或 11 和 [.NET 8 桌面运行时](https://dotnet.microsoft.com/download/dotnet/8.0)。从 [Releases](https://github.com/Qiuizi/Qisland/releases/latest) 下载压缩包，解压后运行 `Qisland.exe`。有新版时岛上会提示，点一下自动更新。
+需要 Windows 10 或 11 和 [.NET 8 桌面运行时](https://dotnet.microsoft.com/download/dotnet/8.0)。从 [v4.1.0 Release](https://github.com/Qiuizi/Qisland/releases/tag/v4.1.0) 下载 `Qisland-4.1.0-win-x64.zip`，解压后运行 `Qisland.exe`。有新版时岛上会提示，点一下自动更新；更新失败会回滚到旧版。
 
 - Codex 审批：托盘 → Codex → 「在岛上批准 Codex 请求」，或运行 `scripts\install-codex-hooks.ps1`。
 - DeepSeek Harness：装上 [integrations/dsh-qisland-bridge](integrations/dsh-qisland-bridge)，见 [docs/deepseek-harness.md](docs/deepseek-harness.md)。
@@ -113,11 +111,11 @@ Qisland 是给 Windows 做的「灵动岛」。它最早是为一个大学生自
 - `Ctrl+Alt+Q`：全屏时把岛叫回来，平时临时隐藏；也可以把鼠标推到岛正上方的屏幕顶边停一下。
 - 托盘右键：设置、导入课表、扫码登录、日历订阅、岛上提示开关、外观、停靠、动效、开机自启、改动账本。
 - 配置都是 `%APPDATA%\Qisland\` 下的纯文本（`todo.md`、`widgets.txt`、`countdown.txt` 等），可以直接改。
-- 天气地点写在 `weather.txt`（如 `北京 39.90,116.41`），留空就按网络位置自动判断；学校的雨课堂有专属域名的，写进 `yuketang-host.txt`。
+- 天气地点写在 `weather.txt`（一行一个：地名 经度,纬度），留空就按网络位置自动判断；雨课堂如果用的是专属域名，写进 `yuketang-host.txt`。
 
 ## Island API
 
-本机 `http://127.0.0.1:9840`，无需鉴权（只接受本机连接）。
+本机 `http://127.0.0.1:9840`，只接受本机连接。默认无需鉴权。若在 `%APPDATA%\Qisland\api-token.txt` 里写了 Token，除健康检查外的普通请求要带 `X-Qisland-Token`。
 
 ```bash
 # 推一张卡片（同 id 再推就是更新）
@@ -130,10 +128,11 @@ curl -X DELETE http://127.0.0.1:9840/v1/island/push/build
 
 | 接口 | 作用 |
 |---|---|
-| `POST /v1/island/push` | 推送或更新卡片。必填 `title`；可选 `id`、`body`、`subtitle`、`icon`、`type`（info / success / warning / error）、`priority`（low / normal / high）、`progress`（0–1 或 0–100）、`duration_seconds`、`open_uri`、`source` |
+| `POST /v1/island/push` | 推送或更新卡片。必填 `title`；可选 `id`、`body`、`subtitle`、`icon`、`type`（info / success / warning / error）、`priority`（low / normal / high）、`progress`（0–1 或 0–100）、`duration_seconds`、`open_uri`、`source`。外部推送放在 `ext:` 命名空间，不会覆盖 Qisland 自己的活动 |
 | `DELETE /v1/island/push/{id}` | 移除卡片 |
+| `GET /v1/island/active` | 只读：当前外部卡片。未配置 Token 时不返回标题和正文 |
 | `POST /v1/agent/{来源}` | Agent hook 事件（Claude Code / Codex 脚本在用） |
-| `GET /v1/status` | 健康检查 |
+| `GET /v1/health`（或 `/v1/status`） | 健康检查，不需要 Token |
 | `GET /v1/perf` | CPU、内存、帧率、各监听器的事件计数 |
 
 更多见 [docs/push-api.md](docs/push-api.md)。
@@ -144,6 +143,8 @@ curl -X DELETE http://127.0.0.1:9840/v1/island/push/build
 - 蓝牙电量只有通过免提协议上报电量的耳机才有。
 - 笔记本亮度键由固件处理，系统亮度弹窗屏蔽不掉。
 - 雨课堂、学习通改版时可能读不到作业，只影响这一项。
+- 学习通的页面结构如果识别不了，可能丢掉旧条目。
+- 划词时，同一进程在几毫秒内连续复制两次，可能被误判为选区。
 - 液态玻璃的边缘磨砂是几圈叠出来的近似渐变，做不出真正的折射；Win10 上玻璃退回定时截屏模糊，背后画面变化快时会稍有滞后。
 - 只在少数几台机器上测过，遇到问题欢迎提 [Issue](https://github.com/Qiuizi/Qisland/issues)。
 
@@ -152,8 +153,7 @@ curl -X DELETE http://127.0.0.1:9840/v1/island/push/build
 ```powershell
 git clone https://github.com/Qiuizi/Qisland.git
 cd Qisland
-dotnet publish src\Qisland.App\Qisland.App.csproj -c Release -r win-x64 --self-contained false -o app
-dotnet test tests\Qisland.Core.Tests
+dotnet publish src\Qisland.App\Qisland.App.csproj -c Release -r win-x64 --self-contained false -p:PublishReadyToRun=true -o app
 ```
 
 `src/Qisland.App` 是主程序，`src/Qisland.Core` 是不依赖 WPF 的解析和数据模型（课表 / 日历重复规则、验证码等）。
