@@ -1,4 +1,4 @@
-// Qisland v2 · 正式版交互：时钟、纯 transform 顶栏岛变形、Codex/DeepSeek 100s 审批演示、推送接口模拟
+// Qisland v2 · 正式版交互：时钟、可交互顶栏岛、导航与圆点同步、停靠切换、Codex/DeepSeek/Claude 审批演示、推送接口模拟
 (function () {
   'use strict';
 
@@ -27,6 +27,21 @@
   tick();
   setInterval(tick, 15000);
 
+  /* ---------- 顶栏岛可访问性与激活态同步 ---------- */
+  function syncIslandInteract() {
+    if (!island) return;
+    var active = island.classList.contains('on');
+    var st = island.dataset.state || 'idle';
+    $$('.isl', island).forEach(function (el) {
+      var cur = active && el.dataset.v === st;
+      el.classList.toggle('is-current', cur);
+      $$('button', el).forEach(function (btn) {
+        btn.tabIndex = cur ? 0 : -1;
+        btn.setAttribute('aria-hidden', cur ? 'false' : 'true');
+      });
+    });
+  }
+
   /* ---------- 首屏胶囊滚动（无布局读取） ---------- */
   var heroH = hero ? hero.offsetHeight : 700;
   function measureHero() {
@@ -54,6 +69,7 @@
     if (isOn !== lastOn) {
       island.classList.toggle('on', isOn);
       lastOn = isOn;
+      syncIslandInteract();
     }
     var isScrolled = y > 12;
     if (isScrolled !== lastScrolled) {
@@ -69,30 +85,80 @@
   }, { passive: true });
   onScroll();
 
-  /* ---------- 顶栏岛状态切换 + 临时演示反馈 ---------- */
+  /* ---------- 顶栏岛状态、导航高亮与右侧章节圆点 ---------- */
   var currentSectionState = 'idle';
+  var currentSectionId = 'hero';
   var flashTimer = 0;
+
+  function setIslandState(st) {
+    if (!island) return;
+    island.dataset.state = st;
+    syncIslandInteract();
+  }
+
   function flashIsland(state, ms) {
     clearTimeout(flashTimer);
-    island.dataset.state = state;
+    setIslandState(state);
     if (ms) {
       flashTimer = setTimeout(function () {
-        island.dataset.state = currentSectionState;
+        flashTimer = 0;
+        setIslandState(currentSectionState);
       }, ms);
     }
   }
 
-  var sections = $$('[data-island]');
+  var navLinks = $$('.nav a[href^="#"]');
+  var railDots = $$('.rail-dot');
+  var navMap = {
+    hero: '',
+    features: '#features',
+    music: '#features',
+    agent: '#agent',
+    homework: '#features',
+    schedule: '#features',
+    api: '#api',
+    glass: '#features',
+    small: '#features',
+    perf: '#features',
+    privacy: '#privacy',
+    film: '#privacy',
+    download: ''
+  };
+
+  function syncNavHighlight(secId) {
+    currentSectionId = secId || 'hero';
+    var targetHref = navMap[currentSectionId] || '';
+    navLinks.forEach(function (a) {
+      if (a.getAttribute('href') === targetHref) a.setAttribute('aria-current', 'location');
+      else a.removeAttribute('aria-current');
+    });
+    railDots.forEach(function (dot) {
+      if (dot.dataset.sec === currentSectionId) dot.setAttribute('aria-current', 'location');
+      else dot.removeAttribute('aria-current');
+    });
+  }
+
+  function smoothScrollTo(el) {
+    if (!el) return;
+    el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' });
+  }
+
+  // 监测所有带 id 的章节（用于导航/圆点高亮及顶栏岛状态）
+  var allBands = $$('main > section[id]');
   if ('IntersectionObserver' in window) {
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) {
         if (e.isIntersecting) {
-          currentSectionState = e.target.dataset.island || 'idle';
-          if (!flashTimer) island.dataset.state = currentSectionState;
+          var id = e.target.id;
+          syncNavHighlight(id);
+          if (e.target.dataset.island) {
+            currentSectionState = e.target.dataset.island;
+            if (!flashTimer) setIslandState(currentSectionState);
+          }
         }
       });
     }, { rootMargin: '-42% 0px -54% 0px' });
-    sections.forEach(function (s) { io.observe(s); });
+    allBands.forEach(function (s) { io.observe(s); });
 
     var rv = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) {
@@ -106,6 +172,7 @@
   } else {
     $$('.rv, .tiers, .dock').forEach(function (el) { el.classList.add('in'); });
   }
+  syncNavHighlight('hero');
 
   requestAnimationFrame(function () {
     setTimeout(function () { root.classList.add('loaded'); }, reduce ? 0 : 280);
@@ -165,17 +232,18 @@
     claude: {
       name: 'Claude Code',
       title: 'PowerShell · claude',
-      src: 'Claude Code 等你确认',
-      cmd: '这类请求只能在终端里确认',
+      src: 'Claude Code 等待确认',
+      cmd: '请在终端窗口确认（岛上仅作提醒，不支持允许或拒绝）',
       ask: [
         '<span class="p">PS&gt;</span> claude',
         '<span class="d">› 整理一下 README</span>',
         '• 想要编辑 README.md',
-        '<span class="w">? 是否允许 [y/N]</span> <span class="caret"></span>'
+        '<span class="term-yn" data-term-yn><span class="w">? 是否允许编辑 README.md [y/N]</span></span>'
       ]
     }
   };
 
+  var approveBox = $('#approveBox');
   var apCard = $('#apCard');
   var termBody = $('#termBody');
   var apSec = $('#apSec');
@@ -183,6 +251,9 @@
   var ringArc = $('#ringArc');
   var ringBox = $('.ring', apCard);
   var apBtns = $('#apBtns');
+  var btnAllow = $('[data-act="allow"]', apBtns);
+  var btnDeny = $('[data-act="deny"]', apBtns);
+  var btnTerm = $('[data-act="term"]', apBtns);
   var apResult = $('#apResult');
   var apReset = $('#apReset');
   var approveGrid = $('#approveGrid');
@@ -190,22 +261,50 @@
   var left = 100;
   var cd = 0;
   var apVisible = false;
+  var countdownStarted = false;
   var finished = false;
   var C = 97.4;
 
-  function renderTerm(extra) {
+  function renderTerm(extra, highlightYn) {
     if (!termBody) return;
-    termBody.innerHTML = AG[agent].ask.concat(extra || []).join('\n');
+    var lines = AG[agent].ask.slice();
+    if (extra && extra.length) lines = lines.concat(extra);
+    termBody.innerHTML = lines.join('\n');
+    if (highlightYn) {
+      var yn = $('[data-term-yn]', termBody);
+      if (yn) {
+        yn.classList.add('hl-yn');
+        var caret = document.createElement('span');
+        caret.className = 'caret';
+        caret.setAttribute('aria-hidden', 'true');
+        yn.appendChild(document.createTextNode(' '));
+        yn.appendChild(caret);
+      }
+    }
   }
+
   function setRing() {
     if (ringArc) ringArc.style.strokeDashoffset = String(C * (1 - left / 100));
     if (apSec) apSec.textContent = String(left);
   }
+
+  function ensureCountdown() {
+    if (cd || finished || agent === 'claude' || !apVisible) return;
+    countdownStarted = true;
+    cd = setInterval(function () {
+      if (!apVisible || document.hidden || finished || agent === 'claude') return;
+      left -= 1;
+      setRing();
+      if (left <= 0) finishAgent('timeout');
+    }, 1000);
+  }
+
   function startAgent(a) {
     agent = a;
     finished = false;
     left = 100;
     clearInterval(cd);
+    cd = 0;
     var A = AG[a];
     $('#termTitle').textContent = A.title;
     $('#apSrc').textContent = A.src;
@@ -213,7 +312,10 @@
     if (approveGrid) approveGrid.setAttribute('aria-labelledby', 'tab-' + a);
 
     var isClaude = a === 'claude';
-    apBtns.hidden = isClaude;
+    apBtns.hidden = false;
+    if (btnAllow) btnAllow.hidden = isClaude;
+    if (btnDeny) btnDeny.hidden = isClaude;
+    if (btnTerm) btnTerm.hidden = false;
     apLeft.hidden = isClaude;
     if (ringBox) ringBox.style.visibility = isClaude ? 'hidden' : 'visible';
     apResult.hidden = !isClaude;
@@ -221,26 +323,21 @@
 
     if (isClaude) {
       apResult.className = 'ap-result back';
-      apResult.textContent = '岛上只显示等待提示；能在岛上点允许 / 拒绝的只有 Codex 和 DeepSeek Harness。';
+      apResult.textContent = '岛上只弹出等待提示；点击「回终端」可定位到终端里的 [y/N] 确认行。';
     } else {
       apResult.className = 'ap-result';
       apResult.textContent = '';
     }
-    renderTerm();
+    renderTerm(null, false);
     setRing();
 
-    if (!isClaude) {
-      cd = setInterval(function () {
-        if (!apVisible || document.hidden || finished) return;
-        left -= 1;
-        setRing();
-        if (left <= 0) finishAgent('timeout');
-      }, 1000);
-    }
+    if (!isClaude && apVisible) ensureCountdown();
   }
+
   function finishAgent(act) {
     finished = true;
     clearInterval(cd);
+    cd = 0;
     apResult.hidden = false;
     apReset.hidden = false;
     var n = AG[agent].name;
@@ -254,12 +351,17 @@
       apResult.textContent = '已拒绝 · 命令没有执行';
       renderTerm(['<span class="no">✕ 已拒绝，命令没有执行</span>']);
       flashIsland('denied', 2600);
+    } else if (agent === 'claude') {
+      apResult.className = 'ap-result back';
+      apResult.textContent = '已在左侧终端高亮 [y/N] 确认行，请在终端中输入 y 或 n。';
+      renderTerm(null, true);
+      flashIsland('back', 2600);
     } else {
       apResult.className = 'ap-result back';
       apResult.textContent = act === 'timeout'
         ? '100 秒没点 · 已交回终端，从不默认同意'
         : '已交回终端，在那边确认';
-      renderTerm(['<span class="w">? 是否允许执行该命令 [y/N]</span> <span class="caret"></span>']);
+      renderTerm(['<span class="term-yn hl-yn"><span class="w">? 是否允许执行该命令 [y/N]</span> <span class="caret" aria-hidden="true"></span></span>']);
       flashIsland('back', 2600);
     }
   }
@@ -274,12 +376,88 @@
     });
     if ('IntersectionObserver' in window) {
       new IntersectionObserver(function (es) {
-        es.forEach(function (e) { apVisible = e.isIntersecting; });
-      }, { threshold: 0.25 }).observe(apCard);
+        es.forEach(function (e) {
+          apVisible = e.isIntersecting;
+          if (apVisible && !countdownStarted && !finished && agent !== 'claude') {
+            ensureCountdown();
+          } else if (apVisible && countdownStarted && !finished && agent !== 'claude') {
+            ensureCountdown();
+          }
+        });
+      }, { threshold: 0.2 }).observe(approveBox || apCard);
     } else {
       apVisible = true;
     }
     startAgent('codex');
+  }
+
+  /* ---------- 顶栏岛点击交互（Plan A：拒/允联动审批区；其他态跳到对应区域） ---------- */
+  if (island) {
+    $$('[data-island-act]', island).forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var act = btn.dataset.islandAct;
+        if (agent === 'claude') {
+          var codexTab = $('#tab-codex');
+          if (codexTab) {
+            $$('.approve-head [role="tab"]').forEach(function (t) {
+              t.setAttribute('aria-selected', String(t === codexTab));
+            });
+          }
+          startAgent('codex');
+        }
+        finishAgent(act);
+        smoothScrollTo(approveBox || $('#agent'));
+      });
+    });
+
+    $$('[data-island-jump]', island).forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.dataset.islandJump;
+        smoothScrollTo(document.getElementById(id));
+      });
+    });
+  }
+
+  /* ---------- 停靠位置切换器（自动轮播 + 手动点击永久锁定） ---------- */
+  var dockBox = $('#dockBox');
+  if (dockBox) {
+    var dockBtns = $$('.dock-btn', dockBox);
+    var dockPills = {
+      top: $('.d-top', dockBox),
+      left: $('.d-left', dockBox),
+      right: $('.d-right', dockBox)
+    };
+    var dockOrder = ['top', 'left', 'right'];
+    var dockIdx = 0;
+    var dockLocked = false;
+    var dockTimer = 0;
+
+    function applyDock(pos) {
+      dockBox.dataset.dockPos = pos;
+      dockBtns.forEach(function (b) {
+        b.setAttribute('aria-pressed', String(b.dataset.dock === pos));
+      });
+      dockOrder.forEach(function (k) {
+        if (dockPills[k]) dockPills[k].classList.toggle('is-active', k === pos);
+      });
+    }
+
+    dockBtns.forEach(function (b) {
+      b.addEventListener('click', function () {
+        dockLocked = true;
+        if (dockTimer) { clearInterval(dockTimer); dockTimer = 0; }
+        applyDock(b.dataset.dock);
+      });
+    });
+
+    applyDock('top');
+    if (!reduce) {
+      dockTimer = setInterval(function () {
+        if (dockLocked || document.hidden) return;
+        dockIdx = (dockIdx + 1) % dockOrder.length;
+        applyDock(dockOrder[dockIdx]);
+      }, 1700);
+    }
   }
 
   /* ---------- 2. 本机推送接口示例面板（curl / PowerShell / WSL2） ---------- */
@@ -345,6 +523,7 @@
   var islPushBar = $('#islPushBar');
   var lang = 'curl';
   var running = false;
+  var copyTimer = 0;
 
   function renderCode() {
     if (!codeBody) return;
@@ -355,6 +534,24 @@
     if (codeNote) codeNote.textContent = CODE[lang].note;
   }
 
+  function fallbackCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand && document.execCommand('copy');
+      document.body.removeChild(ta);
+      return !!ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
   if (codeBody) {
     renderCode();
     bindTablist('.code-bar [role="tablist"]', function (tab) {
@@ -363,18 +560,20 @@
     });
 
     copyBtn.addEventListener('click', function () {
-      var txt = codeBody.innerText.replace(/\u00a0/g, ' ');
-      var ok = function () {
-        copyBtn.textContent = '已复制';
-        setTimeout(function () { copyBtn.textContent = '复制'; }, 1600);
+      var txt = (codeBody.textContent || codeBody.innerText || '').replace(/\u00a0/g, ' ');
+      var showCopied = function () {
+        clearTimeout(copyTimer);
+        copyBtn.textContent = '已复制 ✓';
+        copyTimer = setTimeout(function () { copyBtn.textContent = '复制'; }, 2000);
       };
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(txt).then(ok).catch(function () {
-          copyBtn.textContent = '复制失败';
-          setTimeout(function () { copyBtn.textContent = '复制'; }, 1600);
+        navigator.clipboard.writeText(txt).then(showCopied, function () {
+          fallbackCopy(txt);
+          showCopied();
         });
       } else {
-        ok();
+        fallbackCopy(txt);
+        showCopied();
       }
     });
 
@@ -394,8 +593,9 @@
         if (simProg) simProg.style.setProperty('--sp', String(pct / 100));
         if (islPushText) islPushText.textContent = title + ' · ' + sub;
         if (islPushBar) islPushBar.style.setProperty('--p', String(pct / 100));
+        runBtn.textContent = '模拟中 ' + pct + '%';
       };
-      var stepMs = reduce ? 160 : 620;
+      var stepMs = reduce ? 160 : 560;
       var wait = function (ms) {
         return new Promise(function (r) { setTimeout(r, reduce ? Math.min(ms, 220) : ms); });
       };
@@ -421,22 +621,24 @@
           runState.textContent = '同 id 更新 · 200';
         }
         upd('构建完成', 'success', 100);
-        return wait(1300);
+        return wait(1100);
       }).then(function () {
         var steps = CODE[lang].steps;
         var last = steps.length > 1 ? steps[steps.length - 1] : [];
         hl(last);
         runState.textContent = last.length ? 'DELETE /v1/island/push/build · 200' : '卡片到期自动收回';
+        runBtn.textContent = '收回中…';
         if (simPill) simPill.dataset.active = 'false';
         flashTimer = 0;
-        island.dataset.state = currentSectionState;
-        return wait(1100);
+        setIslandState(currentSectionState);
+        return wait(900);
       }).then(function () {
         hl([]);
         runState.textContent = '就绪';
         runState.classList.remove('on');
         running = false;
         runBtn.disabled = false;
+        runBtn.textContent = '重新模拟';
       });
     });
   }

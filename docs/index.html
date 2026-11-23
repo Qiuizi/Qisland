@@ -40,21 +40,53 @@
     <img class="brand-mark" src="assets/logo-mark.svg" alt="Qisland" width="32" height="30">
   </a>
 
-  <div class="island" id="island" data-state="idle" aria-hidden="true">
-    <div class="isl" data-v="idle"><b class="clock" data-clock>14:40</b></div>
-    <div class="isl" data-v="music"><i class="cov"></i><span class="t">把没写完的作业吹成了诗</span><i class="eq"><s></s><s></s><s></s></i></div>
-    <div class="isl" data-v="agent"><i class="ico ico-term">&gt;_</i><span class="t">Codex 请求执行命令</span><i class="yn"><s class="n">拒</s><s class="y">允</s></i></div>
-    <div class="isl" data-v="allowed"><i class="ico ico-ok">✓</i><span class="t">已允许 · 继续运行</span></div>
-    <div class="isl" data-v="denied"><i class="ico ico-no">✕</i><span class="t">已拒绝 · 未执行</span></div>
-    <div class="isl" data-v="back"><i class="ico ico-term">↩</i><span class="t">已交回终端确认</span></div>
-    <div class="isl" data-v="hw"><i class="ico ico-hw">课</i><span class="t">离散数学 作业 4</span><em class="chip warn">3 小时</em></div>
-    <div class="isl" data-v="meet"><i class="dot-mic"></i><span class="t">项目组例会 · 10 分钟后</span><em class="chip go">加入</em></div>
-    <div class="isl" data-v="push"><i class="ico ico-push">⚙</i><span class="t" id="islPushText">构建中 · step 3/5</span><i class="prog"><s id="islPushBar"></s></i></div>
-    <div class="isl" data-v="glass"><span class="t">磨砂 · 液态 · 顶部 · 左 · 右</span></div>
-    <div class="isl" data-v="small"><span class="t">耳机已连接</span><em class="chip">80%</em></div>
-    <div class="isl" data-v="perf"><span class="t"><b class="lat">0.2–0.3%</b> 闲置 CPU</span></div>
-    <div class="isl" data-v="lock"><span class="t">只在本机</span><i class="lockdot"></i></div>
-    <div class="isl" data-v="dl"><span class="t">下载最新版本</span><i class="arr">↓</i></div>
+  <div class="island" id="island" data-state="idle">
+    <div class="isl" data-v="idle">
+      <button type="button" class="isl-main" data-island-jump="features" aria-label="跳到功能概览"><b class="clock" data-clock>14:40</b></button>
+    </div>
+    <div class="isl" data-v="music">
+      <button type="button" class="isl-main" data-island-jump="music" aria-label="跳到音乐歌词演示"><i class="cov"></i><span class="t">把没写完的作业吹成了诗</span><i class="eq"><s></s><s></s><s></s></i></button>
+    </div>
+    <div class="isl" data-v="agent">
+      <button type="button" class="isl-jump" data-island-jump="approveBox" aria-label="跳到 AI 编程助手审批演示"><i class="ico ico-term">&gt;_</i><span class="t">Codex 请求执行命令</span></button>
+      <span class="yn">
+        <button type="button" class="isl-btn n" data-island-act="deny" aria-label="在岛上拒绝命令">拒</button>
+        <button type="button" class="isl-btn y" data-island-act="allow" aria-label="在岛上允许命令">允</button>
+      </span>
+    </div>
+    <div class="isl" data-v="allowed">
+      <button type="button" class="isl-main" data-island-jump="approveBox" aria-label="跳到审批演示结果"><i class="ico ico-ok">✓</i><span class="t">已允许 · 继续运行</span></button>
+    </div>
+    <div class="isl" data-v="denied">
+      <button type="button" class="isl-main" data-island-jump="approveBox" aria-label="跳到审批演示结果"><i class="ico ico-no">✕</i><span class="t">已拒绝 · 未执行</span></button>
+    </div>
+    <div class="isl" data-v="back">
+      <button type="button" class="isl-main" data-island-jump="approveBox" aria-label="跳到审批演示结果"><i class="ico ico-term">↩</i><span class="t">已交回终端确认</span></button>
+    </div>
+    <div class="isl" data-v="hw">
+      <button type="button" class="isl-main" data-island-jump="homework" aria-label="跳到课业雷达"><i class="ico ico-hw">课</i><span class="t">离散数学 作业 4</span><em class="chip warn">3 小时</em></button>
+    </div>
+    <div class="isl" data-v="meet">
+      <button type="button" class="isl-main" data-island-jump="schedule" aria-label="跳到日程与会议"><i class="dot-mic"></i><span class="t">项目组例会 · 10 分钟后</span><em class="chip go">加入</em></button>
+    </div>
+    <div class="isl" data-v="push">
+      <button type="button" class="isl-main" data-island-jump="codePanel" aria-label="跳到本机推送接口演示"><i class="ico ico-push">⚙</i><span class="t" id="islPushText">构建中 · step 3/5</span><i class="prog"><s id="islPushBar"></s></i></button>
+    </div>
+    <div class="isl" data-v="glass">
+      <button type="button" class="isl-main" data-island-jump="dockBox" aria-label="跳到玻璃与停靠演示"><span class="t">磨砂 · 液态 · 顶部 · 左 · 右</span></button>
+    </div>
+    <div class="isl" data-v="small">
+      <button type="button" class="isl-main" data-island-jump="small" aria-label="跳到更多功能"><span class="t">耳机已连接</span><em class="chip">80%</em></button>
+    </div>
+    <div class="isl" data-v="perf">
+      <button type="button" class="isl-main" data-island-jump="perf" aria-label="跳到性能实测"><span class="t"><b class="lat">0.2–0.3%</b> 闲置 CPU</span></button>
+    </div>
+    <div class="isl" data-v="lock">
+      <button type="button" class="isl-main" data-island-jump="privacy" aria-label="跳到隐私说明"><span class="t">只在本机</span><i class="lockdot"></i></button>
+    </div>
+    <div class="isl" data-v="dl">
+      <button type="button" class="isl-main" data-island-jump="download" aria-label="跳到下载区域"><span class="t">下载最新版本</span><i class="arr">↓</i></button>
+    </div>
   </div>
 
   <nav class="nav" aria-label="主导航">
@@ -67,6 +99,23 @@
   </nav>
 </header>
 
+<!-- 桌面端右侧章节圆点导航（<=520px 隐藏） -->
+<nav class="rail" id="sectionRail" aria-label="章节导航">
+  <a class="rail-dot" href="#hero" data-sec="hero" aria-label="首屏"><span class="rail-tip">首屏</span></a>
+  <a class="rail-dot" href="#features" data-sec="features" aria-label="功能概览"><span class="rail-tip">功能</span></a>
+  <a class="rail-dot" href="#music" data-sec="music" aria-label="音乐歌词"><span class="rail-tip">音乐</span></a>
+  <a class="rail-dot" href="#agent" data-sec="agent" aria-label="AI 审批"><span class="rail-tip">审批</span></a>
+  <a class="rail-dot" href="#homework" data-sec="homework" aria-label="课业雷达"><span class="rail-tip">课业</span></a>
+  <a class="rail-dot" href="#schedule" data-sec="schedule" aria-label="日程与会议"><span class="rail-tip">日程</span></a>
+  <a class="rail-dot" href="#api" data-sec="api" aria-label="本机推送接口"><span class="rail-tip">接口</span></a>
+  <a class="rail-dot" href="#glass" data-sec="glass" aria-label="玻璃与停靠"><span class="rail-tip">手感</span></a>
+  <a class="rail-dot" href="#small" data-sec="small" aria-label="更多功能"><span class="rail-tip">小事</span></a>
+  <a class="rail-dot" href="#perf" data-sec="perf" aria-label="性能实测"><span class="rail-tip">性能</span></a>
+  <a class="rail-dot" href="#privacy" data-sec="privacy" aria-label="隐私"><span class="rail-tip">隐私</span></a>
+  <a class="rail-dot" href="#film" data-sec="film" aria-label="宣传片"><span class="rail-tip">宣传片</span></a>
+  <a class="rail-dot" href="#download" data-sec="download" aria-label="下载"><span class="rail-tip">下载</span></a>
+</nav>
+
 <main id="main">
 
 <!-- 1 首屏：青柠色海报 -->
@@ -78,7 +127,7 @@
     </h1>
     <div class="hero-foot">
       <div class="lead-col">
-        <p class="lead">Qisland 是 Windows 上的「灵动岛」。它住在屏幕顶上，平时只显示时间；歌在唱哪句、作业几点截止、哪条命令在等你批准，有事才展开。</p>
+        <p class="lead">Windows 上的灵动岛。平时只是时钟，歌词、作业截止、AI 命令审批，抬眼就看到。</p>
         <p class="kicker"><span class="tag tag-ink">4.1.0</span><span class="tag">Windows 10 / 11</span><span class="tag">.NET 8 桌面运行时</span><span class="tag">开源 · MIT</span></p>
       </div>
       <div class="cta">
@@ -181,7 +230,7 @@
     </div>
 
     <!-- 交互演示：Codex / DeepSeek Harness / Claude Code 100 秒审批 -->
-    <div class="approve-box rv" aria-label="AI 编程助手审批交互演示">
+    <div class="approve-box" id="approveBox" aria-label="AI 编程助手审批交互演示">
       <div class="approve-head">
         <span class="eyebrow eyebrow-sm">在线试一下</span>
         <div class="tabs-poster" role="tablist" aria-label="选择 AI 编程助手">
@@ -220,10 +269,10 @@
             </div>
           </div>
           <p class="ap-result" id="apResult" hidden></p>
-          <button type="button" class="ap-reset" id="apReset" hidden>再来一次</button>
+          <button type="button" class="ap-reset" id="apReset" hidden>再试一次</button>
         </div>
       </div>
-      <p class="approve-note">示意演示：终端内容为示例，不会执行任何命令。100 秒没点就交回终端，从不默认同意。</p>
+      <p class="approve-note">示意演示，不会执行真实命令；超时自动交回终端。</p>
     </div>
   </div>
 </section>
@@ -262,27 +311,25 @@
         <span class="num lat">01</span>
         <div><h3>日历订阅</h3><p>订阅 .ics 日历，会议开始前提醒，识别到会议链接就能一键入会。</p></div>
         <article class="feat-card feat-pink">
-          <span class="feat-mark">加入</span>
-          <h3>会议提醒</h3>
-          <p>会议开始前提醒，识别到链接就能一键加入。</p>
+          <span class="feat-mark">一键入会</span>
+          <h3>项目组例会 · 10 分钟后</h3>
+          <p>已识别会议链接</p>
         </article>
       </li>
       <li class="row rv">
         <span class="num lat">02</span>
-        <div><h3>谁在用麦克风</h3><p>有程序开始用麦克风或摄像头时提示一下，用着时时间旁边留一个小圆点。来电和会议也能识别。</p></div>
+        <div><h3>谁在用麦克风</h3><p>有程序在用麦克风或摄像头时，时间旁会亮一个小圆点。</p></div>
         <article class="feat-card feat-cobalt">
-          <span class="feat-mark"><i class="feat-dot" aria-hidden="true"></i>占用中</span>
-          <h3>麦克风 / 摄像头</h3>
-          <p>有程序开始用时提示一下，用着时时间旁边亮一个小圆点。</p>
+          <span class="feat-mark"><i class="feat-dot" aria-hidden="true"></i>麦克风占用</span>
+          <h3>某会议软件正在使用麦克风 · 04:12</h3>
         </article>
       </li>
       <li class="row rv">
         <span class="num lat">03</span>
         <div><h3>通话与专注</h3><p>通话中显示时长，点一下回到通话窗口。专注计时期间，其他通知先收着。</p></div>
         <article class="feat-card feat-lime">
-          <span class="feat-mark">通话中</span>
-          <h3>通话与专注</h3>
-          <p>通话时显示时长，点一下回到通话窗口。专注计时期间，其他通知先收着。</p>
+          <span class="feat-mark">专注中</span>
+          <h3>通话中 12:38 · 专注中，已收起 3 条通知</h3>
         </article>
       </li>
     </ol>
@@ -299,14 +346,15 @@
         <p class="body">本机 <code>http://127.0.0.1:9840</code>，只接受本机连接。脚本、CI、WSL 都能往岛上推卡片，同一个 <code>id</code> 再推就是更新——进度条就这样一格格往前走。</p>
       </div>
       <article class="feat-card feat-ink rv">
-        <span class="feat-mark">推送</span>
-        <h3>构建进度</h3>
-        <p>脚本把「构建中」进度卡推上岛，同一个 id 再推就是更新。</p>
+        <code class="feat-mark">POST /v1/island/push</code>
+        <h3>构建中 3/5 (60%)</h3>
+        <div class="feat-prog" aria-hidden="true"><span style="transform:scaleX(.6)"></span></div>
+        <p>支持进度条、优先级、点击跳转</p>
       </article>
     </div>
 
     <!-- 交互推送面板：curl / PowerShell / WSL2 -->
-    <div class="code-panel rv" aria-label="本机推送接口示例">
+    <div class="code-panel rv" id="codePanel" aria-label="本机推送接口示例">
       <div class="code-bar">
         <div class="tabs-poster tabs-dark" role="tablist" aria-label="选择推送示例语言">
           <button type="button" role="tab" id="tab-curl" aria-selected="true" aria-controls="codeBody" data-lang="curl">curl</button>
@@ -371,22 +419,22 @@
         <figcaption>液态玻璃 · 展开的歌词页</figcaption>
       </figure>
       <article class="feat-card feat-lime rv" style="--d:2">
-        <span class="feat-mark">左 · 右</span>
-        <h3>左右停靠</h3>
-        <p>岛可以停在屏幕顶部、左侧或右侧，带弹簧动效。</p>
+        <span class="feat-mark">顶 · 左 · 右</span>
+        <h3>三边停靠</h3>
+        <p>托盘或设置里切换屏幕边缘，带弹簧动效。</p>
       </article>
     </div>
     <div class="two two-b">
       <p class="body">「磨砂玻璃」用 Windows 系统合成的背景模糊；「液态玻璃」中间几乎透明，左上镜面亮边、边缘一圈淡磨砂，岛里的卡片和按钮也是同一套样式。岛可以停在顶部、左侧或右侧，带弹簧动效。</p>
-      <div class="dock" aria-label="停靠位置示意">
+      <div class="dock" id="dockBox" data-dock-pos="top" aria-label="停靠位置演示">
         <div class="screen">
-          <i class="d d-top"></i><i class="d d-left"></i><i class="d d-right"></i>
+          <i class="d d-top is-active"></i><i class="d d-left"></i><i class="d d-right"></i>
         </div>
-        <ul class="stickers inline">
-          <li class="stk stk-ink" style="--r:-4deg">顶部</li>
-          <li class="stk stk-white" style="--r:5deg">左侧</li>
-          <li class="stk stk-lime" style="--r:-3deg">右侧</li>
-        </ul>
+        <div class="dock-tabs" role="group" aria-label="切换停靠位置">
+          <button type="button" class="dock-btn" data-dock="top" aria-pressed="true">顶部</button>
+          <button type="button" class="dock-btn" data-dock="left" aria-pressed="false">左侧</button>
+          <button type="button" class="dock-btn" data-dock="right" aria-pressed="false">右侧</button>
+        </div>
       </div>
     </div>
   </div>
@@ -501,7 +549,7 @@
       <ol class="steps">
         <li><span class="lat">1</span><div><h3>下载</h3><p>到 GitHub Releases 下载 <code>Qisland-版本号-win-x64.zip</code></p></div></li>
         <li><span class="lat">2</span><div><h3>解压</h3><p>放到任意文件夹。</p></div></li>
-        <li><span class="lat">3</span><div><h3>运行</h3><p>双击 <code>Qisland.exe</code>，屏幕顶上就多了一座岛。</p></div></li>
+        <li><span class="lat">3</span><div><h3>运行</h3><p>双击 <code>Qisland.exe</code>，屏幕顶上就多了一座岛。首次启动如果提示缺少 <a class="inline-link" href="https://dotnet.microsoft.com/download/dotnet/8.0" target="_blank" rel="noopener noreferrer">.NET 8 桌面运行时</a>，按提示安装即可。</p></div></li>
       </ol>
     </div>
     <div class="cta">
