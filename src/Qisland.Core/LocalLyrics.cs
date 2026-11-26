@@ -56,6 +56,7 @@ public static partial class Krc
 
     [GeneratedRegex(@"^\[(\d+),(\d+)\](.*)$")] private static partial Regex LineRx();
     [GeneratedRegex(@"<\d+,\d+,\d+>")] private static partial Regex WordRx();
+    [GeneratedRegex(@"<(\d+),(\d+),\d+>([^<]*)")] private static partial Regex WordPartRx();
 
     /// <summary>KRC 文本 → 逐行歌词（带翻译）。也接受普通 LRC（汽水有时存 LRC）。</summary>
     public static List<LyricLine> Parse(string raw)
@@ -68,8 +69,16 @@ public static partial class Krc
             var m = LineRx().Match(line.Trim());
             if (!m.Success) continue;
             var text = WordRx().Replace(m.Groups[3].Value, "").Trim();
-            var at = TimeSpan.FromMilliseconds(Math.Max(0, long.Parse(m.Groups[1].Value) - offset));
-            lines.Add(new LyricLine(at, text));
+            var start = long.Parse(m.Groups[1].Value) - offset;
+            var at = TimeSpan.FromMilliseconds(Math.Max(0, start));
+            // 逐字：<相对行首的毫秒, 时长, 0>字
+            var words = new List<LyricWord>();
+            foreach (Match w in WordPartRx().Matches(m.Groups[3].Value))
+                if (w.Groups[3].Value.Length > 0)
+                    words.Add(new LyricWord(TimeSpan.FromMilliseconds(Math.Max(0, start + long.Parse(w.Groups[1].Value))), TimeSpan.FromMilliseconds(long.Parse(w.Groups[2].Value)), w.Groups[3].Value));
+            var ws = Lrc.TrimWords(words);
+            if (ws != null && string.Concat(ws.Select(x => x.Text)) != text) ws = null;
+            lines.Add(new LyricLine(at, text, null, ws));
         }
         // 翻译：[language:base64(JSON)]，content[].type == 1 的 lyricContent 按行对应
         if (Header(raw, "language") is { Length: > 0 } b64)

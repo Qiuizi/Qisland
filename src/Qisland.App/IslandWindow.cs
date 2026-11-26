@@ -1378,11 +1378,20 @@ public sealed partial class IslandWindow : Window
     private FrameworkElement MusicWithLyrics(MediaState m)
     {
         var card = MusicCard(m);
-        if (CardLyrics() is not { } ly) return card;
-        var sp = new StackPanel();
-        sp.Children.Add(card);
-        sp.Children.Add(ly);
-        return sp;
+        FrameworkElement content = card;
+        if (CardLyrics() is { } ly)
+        {
+            var sp = new StackPanel();
+            sp.Children.Add(card);
+            sp.Children.Add(ly);
+            content = sp;
+        }
+        // 封面取色的柔光垫在卡片（连同歌词）后面
+        if (MusicGlow(m) is not { } glow) return content;
+        var g = new Grid();
+        g.Children.Add(glow);
+        g.Children.Add(content);
+        return g;
     }
 
     private FrameworkElement MusicCard(MediaState m)
@@ -1428,8 +1437,14 @@ public sealed partial class IslandWindow : Window
             line.ColumnDefinitions.Add(new ColumnDefinition());
             line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var track = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = Theme.Fill, VerticalAlignment = VerticalAlignment.Center };
-            var fill = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = Theme.Primary, HorizontalAlignment = HorizontalAlignment.Left, Width = 3 };
-            track.Child = fill;
+            var fill = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = ProgressBrush(m), HorizontalAlignment = HorizontalAlignment.Left, Width = 3 };
+            // 悬停 / 拖动时进度条末端出现一个小圆点，拖到哪一眼看得见
+            var knob = new Ellipse { Width = 9, Height = 9, Fill = fill.Background, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Opacity = 0, IsHitTestVisible = false };
+            fill.Tag = knob;
+            var trackIn = new Grid { ClipToBounds = false };
+            trackIn.Children.Add(fill);
+            trackIn.Children.Add(knob);
+            track.Child = trackIn;
             track.SizeChanged += (_, _) => UpdateMediaProgress();
             // 进度条本身只有 3 px，外面包一层 14 px 高的透明热区，悬停时变粗，点击或拖动跳转
             var hit = new Grid { Height = 14, Background = Brushes.Transparent };
@@ -1437,8 +1452,8 @@ public sealed partial class IslandWindow : Window
             if (m.CanSeek)
             {
                 hit.Cursor = Cursors.Hand;
-                hit.MouseEnter += (_, _) => { track.Height = 5; fill.Height = 5; track.CornerRadius = fill.CornerRadius = new CornerRadius(2.5); };
-                hit.MouseLeave += (_, _) => { if (!hit.IsMouseCaptured) { track.Height = 3; fill.Height = 3; track.CornerRadius = fill.CornerRadius = new CornerRadius(1.5); } };
+                hit.MouseEnter += (_, _) => { track.Height = 5; fill.Height = 5; track.CornerRadius = fill.CornerRadius = new CornerRadius(2.5); KnobFade(knob, true); };
+                hit.MouseLeave += (_, _) => { if (!hit.IsMouseCaptured) { track.Height = 3; fill.Height = 3; track.CornerRadius = fill.CornerRadius = new CornerRadius(1.5); KnobFade(knob, false); } };
                 double Frac(MouseEventArgs e) => track.ActualWidth > 0 ? Math.Clamp(e.GetPosition(track).X / track.ActualWidth, 0, 1) : 0;
                 hit.MouseLeftButtonDown += (_, e) => { e.Handled = true; hit.CaptureMouse(); _seeking = Frac(e); UpdateMediaProgress(); };
                 hit.MouseMove += (_, e) => { if (hit.IsMouseCaptured) { _seeking = Frac(e); UpdateMediaProgress(); } };
@@ -1447,6 +1462,7 @@ public sealed partial class IslandWindow : Window
                     e.Handled = true;
                     if (!hit.IsMouseCaptured) return;
                     hit.ReleaseMouseCapture();
+                    if (!hit.IsMouseOver) { track.Height = 3; fill.Height = 3; track.CornerRadius = fill.CornerRadius = new CornerRadius(1.5); KnobFade(knob, false); }
                     var f = Frac(e);
                     _seeking = null;
                     Media?.Seek(f);
@@ -1466,15 +1482,16 @@ public sealed partial class IslandWindow : Window
         g.Children.Add(mid);
 
         var ctl = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        ctl.Children.Add(MediaButton("\uE892", 15, () => Media?.Previous()));
+        ctl.Children.Add(MediaButton("\uE892", 15, () => Skip(-1)));
         ctl.Children.Add(MediaButton(m.Playing ? "\uE769" : "\uE768", 19, () => Media?.Toggle()));
-        ctl.Children.Add(MediaButton("\uE893", 15, () => Media?.Next()));
+        ctl.Children.Add(MediaButton("\uE893", 15, () => Skip(1)));
         Grid.SetColumn(ctl, 2);
         g.Children.Add(ctl);
 
         g.Cursor = Cursors.Hand;
         AddHover(g);
         g.MouseLeftButtonUp += (_, e) => { e.Handled = true; Launcher.OpenMedia(m); };
+        TrackIn(m, art, mid);
         UpdateMediaProgress();
         return g;
     }
@@ -1539,8 +1556,17 @@ public sealed partial class IslandWindow : Window
         if (_mediaFill == null || Media?.Current is not { } m || m.Duration <= TimeSpan.Zero) return;
         var pos = _seeking is { } sk ? TimeSpan.FromSeconds(m.Duration.TotalSeconds * sk) : Media.LivePosition();
         if (_mediaFill.Parent is FrameworkElement track && track.ActualWidth > 0)
+        {
             _mediaFill.Width = Math.Max(3, track.ActualWidth * Math.Clamp(pos.TotalSeconds / m.Duration.TotalSeconds, 0, 1));
+            if (_mediaFill.Tag is FrameworkElement knob) knob.Margin = new Thickness(Math.Clamp(_mediaFill.Width - 4.5, -4.5, track.ActualWidth - 4.5), 0, 0, 0);
+        }
         if (_mediaTime != null) _mediaTime.Text = $"{Fmt(pos)} / {Fmt(m.Duration)}";
+    }
+
+    private static void KnobFade(UIElement knob, bool on)
+    {
+        if (ReducedMotion) { knob.BeginAnimation(OpacityProperty, null); knob.Opacity = on ? 1 : 0; return; }
+        knob.BeginAnimation(OpacityProperty, new DoubleAnimation(on ? 1 : 0, TimeSpan.FromMilliseconds(on ? 140 : 220)));
     }
 
     private static string Fmt(TimeSpan t) => t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss");

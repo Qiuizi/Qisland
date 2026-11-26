@@ -324,6 +324,10 @@ public sealed partial class SettingsWindow : Window
     private void LyricCalibration(StackPanel p)
     {
         var lyr = _app.LyricsSvc;
+        var look = new StackPanel();
+        look.Children.Add(FeatureRow(Features.MusicTint, "封面取色", "展开时音乐卡片后面垫一层封面主色的柔光，进度条也用这个颜色；颜色会压到不刺眼、不影响看字，黑白封面不上色"));
+        look.Children.Add(FeatureRow(Features.LyricWords, "逐字高亮歌词", "歌词带逐字时间时（酷狗本机歌词、带逐字标记的 LRC）一个字一个字扫过去；网易云、LRCLIB 只给逐行时间，照旧整句显示"));
+        p.Children.Add(Card(look));
         var inner = new StackPanel();
         var on = Features.On(Features.PlayerLyricOffset);
         inner.Children.Add(DialogKit.Row("按播放器校准歌词", "有的播放器报给系统的进度总是慢或快一截：在这里调，或按住 Ctrl 在岛上的歌词上滚滚轮，这个播放器放的每首歌都跟着走；和按歌的滚轮微调叠加。正数 = 歌词提前",

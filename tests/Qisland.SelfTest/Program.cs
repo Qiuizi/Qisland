@@ -208,6 +208,79 @@ void Eq<T>(T actual, T expected, string name)
     Eq(CompactStats.Serialize(CompactStats.Items.Mem | CompactStats.Items.Net), "mem,net", "选项序列化");
 }
 
+// ───────────── 4.3 第二波：封面取色 ─────────────
+{
+    byte[] Img(int w, int h, Func<int, int, (byte r, byte g, byte b)> f)
+    {
+        var a = new byte[w * h * 4];
+        for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) { var (r, g, b) = f(x, y); var i = (y * w + x) * 4; a[i] = b; a[i + 1] = g; a[i + 2] = r; a[i + 3] = 255; }
+        return a;
+    }
+    // 大面积深蓝 + 小块橙：主色应是蓝
+    var blue = Img(64, 64, (x, y) => x < 56 ? ((byte)30, (byte)60, (byte)160) : ((byte)240, (byte)140, (byte)20));
+    var d = ArtColor.Dominant(blue, 64, 64, 64 * 4);
+    Check(d is { } dc && dc.B > dc.R && dc.B > dc.G, "封面主色取面积大的蓝");
+    // 黑白灰封面：不上色
+    Check(ArtColor.Dominant(Img(32, 32, (x, y) => ((byte)(x * 8), (byte)(x * 8), (byte)(x * 8))), 32, 32, 128) == null, "黑白封面不取色");
+    Check(ArtColor.Dominant(new byte[10], 32, 32, 128) == null, "像素不够不崩");
+    // 红色跨 0°：两边的红合成一簇
+    var red = ArtColor.Dominant(Img(32, 32, (x, y) => x % 2 == 0 ? ((byte)220, (byte)30, (byte)50) : ((byte)220, (byte)50, (byte)30)), 32, 32, 128);
+    Check(red is { } rc && rc.R > 150 && rc.G < 80, "跨 0° 的红");
+
+    // 钳位：各种极端输入在深色 / 浅色岛上都落在柔和区间，并且和底色 ≥ 3:1
+    var extremes = new[] { new Rgb(255, 255, 0), new Rgb(0, 0, 255), new Rgb(10, 0, 20), new Rgb(255, 0, 255), new Rgb(0, 255, 0), new Rgb(250, 250, 250), new Rgb(128, 0, 0) };
+    foreach (var c in extremes)
+    {
+        var dk = ArtColor.Soften(c, true);
+        var (_, s1, l1) = ArtColor.ToHsl(dk);
+        Check(ArtColor.Contrast(dk, ArtColor.DarkBase) >= 3.0 && l1 <= 0.80 && s1 <= 0.62, $"深色岛钳位 {c}→{dk}");
+        var lt = ArtColor.Soften(c, false);
+        Check(ArtColor.Contrast(lt, ArtColor.LightBase) >= 3.0, $"浅色岛钳位 {c}→{lt}");
+        // 光晕最浓处（26%）叠在深色底上，白字对比度仍 ≥ 7:1（AAA）
+        var glow = ArtColor.Over(dk, 0.26, ArtColor.DarkBase);
+        Check(ArtColor.Contrast(new Rgb(0xF5, 0xF5, 0xF7), glow) >= 7, $"光晕下白字对比度 {c}");
+        // 浅色主题光晕 18% 叠在白底上，深色字 ≥ 7:1
+        var glowL = ArtColor.Over(lt, 0.18, ArtColor.LightBase);
+        Check(ArtColor.Contrast(new Rgb(0x1D, 0x1D, 0x1F), glowL) >= 7, $"浅色光晕下黑字对比度 {c}");
+    }
+    Eq(ArtColor.FromHsl(0, 1, 0.5), new Rgb(255, 0, 0), "HSL→RGB 红");
+    var (hh, ss, ll) = ArtColor.ToHsl(new Rgb(0, 128, 255));
+    Check(Math.Abs(hh - 210) < 1 && ss > 0.99 && Math.Abs(ll - 0.5) < 0.01, "RGB→HSL");
+    Check(Math.Abs(ArtColor.Contrast(new Rgb(0, 0, 0), new Rgb(255, 255, 255)) - 21) < 0.01, "黑白对比度 21");
+}
+
+// ───────────── 4.3 第二波：逐字歌词 ─────────────
+{
+    // 增强 LRC
+    var e = Lrc.Parse("[00:10.00]<00:10.00>你<00:10.50>好<00:11.00>世界<00:12.00>\n[00:13.00]<00:13.00>再见\n[00:15.00]普通的一句");
+    Eq(e.Count, 3, "增强 LRC 行数");
+    Eq(e[0].Text, "你好世界", "增强 LRC 去掉逐字时间");
+    Check(e[0].Words is { Count: 3 } w0 && w0[2].Text == "世界" && w0[2].Duration == TimeSpan.FromSeconds(1), "增强 LRC 逐字");
+    Check(e[1].Words is { Count: 1 } w1 && w1[0].Duration == TimeSpan.FromSeconds(2), "最后一个字唱到下一句");
+    Check(e[2].Words == null, "普通行没有逐字");
+    Eq(Lrc.WordAt(e[0].Words!, TimeSpan.FromSeconds(9.9)), (-1, 0.0), "逐字：还没开始");
+    Eq(Lrc.WordAt(e[0].Words!, TimeSpan.FromSeconds(10.25)), (0, 0.5), "逐字：第一个字唱一半");
+    Eq(Lrc.WordAt(e[0].Words!, TimeSpan.FromSeconds(12.5)), (3, 0.0), "逐字：唱完");
+    Check(Math.Abs(Lrc.CharProgress(e[0].Words!, TimeSpan.FromSeconds(11.5)) - 0.75) < 1e-9, "按字数的整句进度");
+    // 多时间标签的重复行不挂逐字
+    var rep = Lrc.Parse("[00:01.00][00:20.00]<00:01.00>啦<00:02.00>");
+    Check(rep.Count == 2 && rep.All(l => l.Words == null), "重复行不挂逐字");
+    // offset 也作用到逐字
+    var off = Lrc.Parse("[offset:+500]\n[00:10.00]<00:10.00>啊<00:11.00>");
+    Check(off[0].Words is { Count: 1 } ow && ow[0].At == TimeSpan.FromSeconds(9.5), "offset 作用到逐字");
+    // 翻译合并保留逐字
+    var tr = Lrc.Parse("[00:10.00]<00:10.00>Hello <00:10.50>world<00:11.00>", "[00:10.00]你好世界");
+    Check(tr[0].Translation == "你好世界" && tr[0].Words is { Count: 2 }, "翻译合并保留逐字");
+
+    // 酷狗 KRC（解密后的文本）
+    var krc = Krc.Parse("[ar:歌手]\n[ti:歌名]\n[offset:0]\n[1000,2000]<0,500,0>一<500,500,0>二<1000,1000,0>三四\n[4000,1000]<0,1000,0>五");
+    Eq(krc.Count, 2, "KRC 行数");
+    Eq(krc[0].Text, "一二三四", "KRC 整句");
+    Check(krc[0].Words is { Count: 3 } kw && kw[1].At == TimeSpan.FromMilliseconds(1500) && kw[2].Duration == TimeSpan.FromMilliseconds(1000), "KRC 逐字时间");
+    var krcOff = Krc.Parse("[offset:200]\n[1000,500]<100,400,0>啊");
+    Check(krcOff[0].At == TimeSpan.FromMilliseconds(800) && krcOff[0].Words![0].At == TimeSpan.FromMilliseconds(900), "KRC offset");
+}
+
 Console.WriteLine($"{passed} 项通过，{failed} 项失败");
 if (failed > 0) return 1;
 Console.WriteLine("SELFTEST_OK");

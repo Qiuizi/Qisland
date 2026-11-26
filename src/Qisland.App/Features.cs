@@ -16,7 +16,8 @@ public static class Features
         PlayerLyricOffset = "player-lyric-offset", HideFromCapture = "hide-from-capture",
         AiUsage = "ai-usage", QuotaAlerts = "quota-alerts",
         Peripherals = "peripherals", PeripheralAlerts = "peripheral-alerts",
-        QuotaCapsule = "quota-capsule", CapsuleStats = "capsule-stats";
+        QuotaCapsule = "quota-capsule", CapsuleStats = "capsule-stats",
+        MusicTint = "music-tint", LyricWords = "lyric-words";
 
     /// <summary>
     /// 默认关、要自己打开的（文件是 &lt;键&gt;.on）：喝水 / 久坐提醒会主动打扰，OLED 防烧屏会挪动岛；

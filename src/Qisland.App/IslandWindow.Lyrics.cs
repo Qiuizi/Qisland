@@ -89,13 +89,17 @@ public sealed partial class IslandWindow
     {
         var l = LiveLyrics;
         if (l == null || Media == null) return;
-        var idx = Lrc.IndexAt(l, LyricClock());
-        if (idx == _lyricIdx) return;
-        _lyricIdx = idx;
-        var (cur, sub) = LyricAt(idx, l);
-        Swap(_compactLyric, cur);
-        Swap(_cardLyric, cur);
-        Swap(_cardLyric2, sub ?? "");
+        var clock = LyricClock();
+        var idx = Lrc.IndexAt(l, clock);
+        if (idx != _lyricIdx)
+        {
+            _lyricIdx = idx;
+            var (cur, sub) = LyricAt(idx, l);
+            Swap(_compactLyric, cur);
+            Swap(_cardLyric, cur);
+            Swap(_cardLyric2, sub ?? "");
+        }
+        KaraokeTick(idx >= 0 ? l[idx] : null, clock);
     }
 
     private static void Swap(TextBlock? tb, string text)
