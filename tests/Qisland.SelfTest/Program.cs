@@ -281,6 +281,18 @@ void Eq<T>(T actual, T expected, string name)
     Check(krcOff[0].At == TimeSpan.FromMilliseconds(800) && krcOff[0].Words![0].At == TimeSpan.FromMilliseconds(900), "KRC offset");
 }
 
+// ───────────── 日历：只有 DURATION 的日程 ─────────────
+{
+    Eq(CalendarIcs.ParseDuration("PT1H30M"), TimeSpan.FromMinutes(90), "DURATION PT1H30M");
+    Eq(CalendarIcs.ParseDuration("P1DT2H"), TimeSpan.FromHours(26), "DURATION P1DT2H");
+    Eq(CalendarIcs.ParseDuration("P2W"), TimeSpan.FromDays(14), "DURATION P2W");
+    Check(CalendarIcs.ParseDuration("-PT15M") == null && CalendarIcs.ParseDuration("P") == null && CalendarIcs.ParseDuration("PT") == null && CalendarIcs.ParseDuration("abc") == null, "坏 DURATION");
+    var day = DateTime.Today.AddDays(1);
+    var ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:a1\r\nSUMMARY:组会\r\nDTSTART:" + day.ToString("yyyyMMdd") + "T140000\r\nDURATION:PT45M\r\nEND:VEVENT\r\nEND:VCALENDAR";
+    var ev = CalendarIcs.Expand(ics, DateTime.Today, DateTime.Today.AddDays(3), TimeZoneInfo.Local);
+    Check(ev.Count == 1 && ev[0].End - ev[0].Start == TimeSpan.FromMinutes(45), "只有 DURATION 的日程按时长结束");
+}
+
 Console.WriteLine($"{passed} 项通过，{failed} 项失败");
 if (failed > 0) return 1;
 Console.WriteLine("SELFTEST_OK");

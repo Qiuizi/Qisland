@@ -58,6 +58,7 @@ public static class CalendarIcs
     {
         public string Uid = "", Summary = "", Location = "", Desc = "", Url = "", Rrule = "", Status = "";
         public DateTime? Start, End, RecurrenceId;
+        public TimeSpan? Duration;
         public DateTime StartWall;
         public TimeZoneInfo? StartZone;
         public bool AllDay;
@@ -76,7 +77,8 @@ public static class CalendarIcs
         foreach (var e in evs)
         {
             if (e.Start is not { } s || e.Status.Equals("CANCELLED", StringComparison.OrdinalIgnoreCase)) continue;
-            var end = e.End ?? (e.AllDay ? s.AddDays(1) : s.AddHours(1));
+            // 没有 DTEND 时按 RFC 5545 用 DURATION（有的订阅源只给时长）；两样都没有：全天 = 一天，定时 = 1 小时
+            var end = e.End ?? (e.Duration is { } du ? s + du : e.AllDay ? s.AddDays(1) : s.AddHours(1));
             var dur = end - s;
             if (dur < TimeSpan.Zero || dur > TimeSpan.FromDays(14)) dur = TimeSpan.FromHours(1);
             var join = MeetingLink.Find(e.Url, e.Location, e.Desc);
@@ -143,6 +145,7 @@ public static class CalendarIcs
                     cur.AllDay = val.Trim().Length == 8 || pars.Contains("VALUE=DATE", StringComparison.OrdinalIgnoreCase) && !pars.Contains("DATE-TIME", StringComparison.OrdinalIgnoreCase);
                     break;
                 case "DTEND": cur.End = Timetable.ParseDate(val, pars, local); break;
+                case "DURATION": cur.Duration = ParseDuration(val); break;
                 case "RECURRENCE-ID": cur.RecurrenceId = Timetable.ParseDate(val, pars, local); break;
                 case "EXDATE":
                     foreach (var v in val.Split(',')) if (Timetable.ParseDate(v, pars, local) is { } d) cur.ExDates.Add(d);
@@ -156,6 +159,16 @@ public static class CalendarIcs
                     break;
             }
         }
+    }
+
+    /// <summary>RFC 5545 的时长：P1W、PT1H30M、P1DT2H、-PT15M（负的不认）。认不出返回 null。</summary>
+    public static TimeSpan? ParseDuration(string v)
+    {
+        var m = Regex.Match(v.Trim(), @"^\+?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$", RegexOptions.IgnoreCase);
+        if (!m.Success || v.Trim().TrimStart('+').Length <= 1 || v.Trim().EndsWith("T", StringComparison.OrdinalIgnoreCase)) return null;
+        int G(int i) => m.Groups[i].Success ? int.Parse(m.Groups[i].Value) : 0;
+        var t = new TimeSpan(G(1) * 7 + G(2), G(3), G(4), G(5));
+        return t > TimeSpan.Zero ? t : null;
     }
 
     private static string Clean(string s) => Regex.Replace(s.Replace('\n', ' '), @"\s+", " ").Trim();
