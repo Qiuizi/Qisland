@@ -43,6 +43,7 @@ public sealed partial class IslandWindow
             _idleCountdown.Visibility = Visibility.Visible;
         }
         else _idleCountdown.Visibility = Visibility.Collapsed;
+        UpdateIdleExtras();   // 中间的精简系统状态给倒计时让位
         _expDirty = true;
         if (_mode == Mode.Expanded && !_animating && _page == Page.Home) RebuildExpanded();
     }

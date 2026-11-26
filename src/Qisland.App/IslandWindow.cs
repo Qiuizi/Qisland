@@ -23,7 +23,7 @@ public sealed partial class IslandWindow : Window
     private enum Mode { Idle, Compact, Expanded }
 
     private const double WinW = 680, WinH = 600, TopGap = 10;
-    private const double IdleW = 176, IdleH = 34, CompactH = 36, ExpandedW = 452, RowH = 56;
+    private const double IdleH = 34, CompactH = 36, ExpandedW = 452, RowH = 56;
     private const int MaxRows = 3;
     // 胶囊里左侧图标离边缘的距离：胶囊两端是半圆，图标贴得太近会显得挤在弧线上
     private const double PillInset = 14;
@@ -72,7 +72,7 @@ public sealed partial class IslandWindow : Window
     private readonly TranslateTransform _rootShift = new();
     private readonly List<RectangleGeometry> _shadows = [];
 
-    private readonly Spring _w = new(IdleW), _h = new(IdleH), _r = new(IdleH / 2);
+    private readonly Spring _w = new(IdleBaseW), _h = new(IdleH), _r = new(IdleH / 2);
     private readonly Spring _idleOp = new(1) { Response = 0.30, DampingRatio = 1, Epsilon = 0.004 };
     private readonly Spring _compactOp = new(0) { Response = 0.30, DampingRatio = 1, Epsilon = 0.004 };
     private readonly Spring _expOp = new(0) { Response = 0.34, DampingRatio = 1, Epsilon = 0.004 };
@@ -247,6 +247,7 @@ public sealed partial class IslandWindow : Window
         wx.Children.Add(_idleTemp);
         Grid.SetColumn(wx, 2);
         _idle.Children.Add(wx);
+        SetupIdleExtras(wx);
 
         _pill.MouseLeftButtonUp += (_, e) => { if (PillJump()) { e.Handled = true; return; } _pinned = !_pinned; SetMode(_pinned ? Mode.Expanded : DesiredRestMode()); e.Handled = true; };
         _bubble.MouseLeftButtonUp += (_, e) => { _pinned = true; SetMode(Mode.Expanded); e.Handled = true; };
@@ -346,6 +347,7 @@ public sealed partial class IslandWindow : Window
         if (_expDirty && !_animating) RebuildExpanded();
         UpdateMediaProgress();
         OnPageSecond();
+        TickCapsuleStats();
         CheckFocusDigest();
         if (now.Second % 5 == 0) _store.Expire();
         if (_peekUntil != DateTime.MinValue && now > _peekUntil && !_pinned && _hoverSince == DateTime.MaxValue)
@@ -782,6 +784,7 @@ public sealed partial class IslandWindow : Window
     {
         _idleClock.Text = _clockText;
         try { RebuildIdleWeather(); } finally { RebuildSideIdle(); }
+        UpdateIdleExtras();
     }
 
     private void RebuildIdleWeather()

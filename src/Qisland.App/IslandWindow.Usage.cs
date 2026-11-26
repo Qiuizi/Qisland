@@ -90,5 +90,6 @@ public sealed partial class IslandWindow
     {
         _pageCache.Remove(Page.Agents);
         if (_mode == Mode.Expanded && _page == Page.Agents && !_animating) RebuildExpanded(); else _expDirty = true;
+        UpdateIdleExtras();
     }
 }

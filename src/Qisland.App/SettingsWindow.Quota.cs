@@ -75,6 +75,8 @@ public sealed partial class SettingsWindow
         p.Children.Add(Section("提醒与显示"));
         var more = new StackPanel();
         more.Children.Add(FeatureRow(Features.QuotaAlerts, "用到 70% / 90% 时提醒", "Codex、豆包和上面这些工具，任何一个额度窗口过 70% 和 90% 各提醒一次；同一个重置周期里不重复，重启也不重复"));
+        more.Children.Add(DialogKit.Row("收起时显示额度小环", "岛收起时天气左边一个小圆环，表示最紧的那个额度；过 70% 变黄、过 90% 变红",
+            DialogKit.Switch(Features.On(Features.QuotaCapsule), v => Features.Set(Features.QuotaCapsule, v))));
         p.Children.Add(Card(more));
     }
 }

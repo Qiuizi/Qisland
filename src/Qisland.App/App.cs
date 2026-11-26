@@ -293,6 +293,7 @@ public sealed partial class App : Application
             _usage.Changed += _quotaWatch.OnQuota;
             if (_quota != null) _quota.Changed += _quotaWatch.OnQuota;
             if (_doubao != null) _doubao.Changed += _quotaWatch.OnQuota;
+            _quotaWatch.Changed += _window.UpdateIdleExtras;   // 收起胶囊上的额度小环
         }
         catch (Exception ex) { Log("本机 AI 额度: " + ex.Message); }
         try { _mail = new MailOtpService(_store, a => Dispatcher.BeginInvoke(a)); _mail.Start(); }
@@ -400,6 +401,7 @@ public sealed partial class App : Application
             case Features.Bluetooth: if (on) _bt?.Start(); else _bt?.Stop(); break;
             case Features.AiUsage: _usage?.OnToggle(); _quotaWatch?.OnQuota(); break;
             case var k when k.StartsWith("ai-usage-", StringComparison.Ordinal): _usage?.OnToggle(); _quotaWatch?.OnQuota(); break;
+            case Features.QuotaCapsule: case Features.CapsuleStats: _window?.UpdateIdleExtras(); break;
             case Features.Peripherals: _devices?.Soon(); _devices?.Tick(); _window?.OnDevicesChanged(); break;
             case Features.LockKeys: _volume?.WatchLockKeys(on); break;
             case Features.Calendar: _cal?.Tick(); _window?.OnCalendarChanged(); if (on) _cal?.RefreshNow(); break;

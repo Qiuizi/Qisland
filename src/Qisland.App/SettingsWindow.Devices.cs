@@ -34,5 +34,7 @@ public sealed partial class SettingsWindow
             a.Children.Add(rescan);
         }
         p.Children.Add(Card(a));
+
+        CapsuleSection(p);
     }
 }

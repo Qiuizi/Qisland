@@ -15,14 +15,15 @@ public static class Features
         ClickLockHotkey = "click-lock-hotkey", HideList = "hide-list", HideOnlyCovering = "hide-only-covering",
         PlayerLyricOffset = "player-lyric-offset", HideFromCapture = "hide-from-capture",
         AiUsage = "ai-usage", QuotaAlerts = "quota-alerts",
-        Peripherals = "peripherals", PeripheralAlerts = "peripheral-alerts";
+        Peripherals = "peripherals", PeripheralAlerts = "peripheral-alerts",
+        QuotaCapsule = "quota-capsule", CapsuleStats = "capsule-stats";
 
     /// <summary>
     /// 默认关、要自己打开的（文件是 &lt;键&gt;.on）：喝水 / 久坐提醒会主动打扰，OLED 防烧屏会挪动岛；
     /// 「只在挡住岛时才藏」会改变隐藏名单原来的行为；截图录屏时隐藏会让自己截图、录教程时岛也拍不到。
     /// </summary>
     // 4.3 里会读本机令牌或常驻采样的几项默认关，要你自己打开。
-    private static readonly HashSet<string> OptIn = [Water, Sit, OledShift, Clock12, HideOnlyCovering, HideFromCapture, AiUsage];
+    private static readonly HashSet<string> OptIn = [Water, Sit, OledShift, Clock12, HideOnlyCovering, HideFromCapture, AiUsage, QuotaCapsule, CapsuleStats];
 
     private static readonly ConcurrentDictionary<string, bool> Cache = new();
     private static string Dir => Path.Combine(App.DataDir, "features");
