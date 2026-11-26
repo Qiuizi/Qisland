@@ -263,7 +263,7 @@ public sealed partial class App : Application
             };
             if (_api != null) _api.Preview = id =>
                 Dispatcher.Invoke(() => DebugJumpTarget.Resolve(_store, id, _media));
-            if (_api != null) { _api.PerfJson = _perf.Json; _api.Peek = (s, p) => _window?.PeekFor(s, p); _api.Settings = c => OpenSettings(c); }
+            if (_api != null) { _api.PerfJson = _perf.Json; _api.Peek = (s, p) => _window?.PeekFor(s, p); _api.Settings = c => { if (c < 0) OpenWeatherCities(); else OpenSettings(c); }; }
             PerfGuard.Changed += () => _window?.OnPerfChanged();
             PerfGuard.MemoryPressure += () => _window?.OnMemoryPressure();
             _quota = new CodexQuota(a => Dispatcher.BeginInvoke(a));

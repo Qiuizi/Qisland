@@ -68,6 +68,27 @@ public static class DialogKit
         }
     }
 
+    /// <summary>
+    /// 整窗可拖，但只在空白处按下才拖。DragMove 进的是系统移动循环，会把这次的 MouseUp 吞掉，
+    /// 按在列表行、关闭叉、按钮、输入框这些可点的东西上时整窗一拖，它们就永远收不到点击。
+    /// </summary>
+    public static void DragFromBlank(Window w) => w.MouseLeftButtonDown += (_, e) =>
+    {
+        if (Clickable(e.OriginalSource as DependencyObject, w)) return;
+        try { w.DragMove(); } catch { }
+    };
+
+    private static bool Clickable(DependencyObject? d, Window w)
+    {
+        while (d != null && d != w)
+        {
+            if (d is ButtonBase or TextBoxBase or PasswordBox or ComboBox) return true;
+            if (d is FrameworkElement { Cursor: { } c } && c == Cursors.Hand) return true;   // 手形光标 = 这块能点
+            d = d is Visual ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d);
+        }
+        return false;
+    }
+
     public static TextBlock Text(string s, double size, FontWeight weight, Brush fg) =>
         new() { Text = s, FontFamily = Theme.Text, FontSize = size, FontWeight = weight, Foreground = fg, TextWrapping = TextWrapping.Wrap };
 

@@ -65,7 +65,7 @@ public sealed class QrLoginWindow : Window
             BorderBrush = new SolidColorBrush(dark ? Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF) : Color.FromArgb(0x18, 0, 0, 0)), BorderThickness = new Thickness(1),
             Effect = new DropShadowEffect { BlurRadius = 28, ShadowDepth = 6, Opacity = 0.35, Color = Colors.Black },
         };
-        MouseLeftButtonDown += (_, e) => { if (e.OriginalSource is not TextBlock { Cursor: not null }) try { DragMove(); } catch { } };
+        DialogKit.DragFromBlank(this);
         KeyDown += (_, e) => { if (e.Key == Key.Escape) Close(); };
         Loaded += (_, _) => _ = Start();
         Closed += (_, _) => _cts?.Cancel();

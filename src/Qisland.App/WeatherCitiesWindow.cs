@@ -17,7 +17,7 @@ public sealed class WeatherCitiesWindow : Window
     private readonly TextBlock _status;
     private readonly StackPanel _saved = new();
     private readonly StackPanel _results = new();
-    private readonly Brush _fg, _sub, _row;
+    private readonly Brush _fg, _sub, _row, _hover;
     private CancellationTokenSource? _cts;
 
     public WeatherCitiesWindow(App app)
@@ -31,6 +31,7 @@ public sealed class WeatherCitiesWindow : Window
         _fg = dark ? Brushes.White : new SolidColorBrush(Color.FromRgb(0x1C, 0x1C, 0x1E));
         _sub = new SolidColorBrush(dark ? Color.FromArgb(0x99, 0xFF, 0xFF, 0xFF) : Color.FromArgb(0x99, 0, 0, 0));
         _row = new SolidColorBrush(dark ? Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF) : Color.FromArgb(0x0C, 0, 0, 0));
+        _hover = new SolidColorBrush(dark ? Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF) : Color.FromArgb(0x16, 0, 0, 0));
         var sp = new StackPanel { Margin = new Thickness(24, 20, 24, 20), Width = 380 };
         var head = new Grid();
         head.Children.Add(new TextBlock { Text = "天气城市", FontFamily = Theme.Text, FontSize = 17, FontWeight = FontWeights.SemiBold, Foreground = _fg });
@@ -47,10 +48,11 @@ public sealed class WeatherCitiesWindow : Window
         var search = new Grid { Margin = new Thickness(0, 12, 0, 0) };
         search.ColumnDefinitions.Add(new ColumnDefinition());
         search.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        _box = new TextBox { FontFamily = Theme.Text, FontSize = 13, Padding = new Thickness(6, 5, 6, 5), Height = 30, VerticalContentAlignment = VerticalAlignment.Center };
+        _box = DialogKit.Box();
+        _box.KeyDown += async (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; await Search(); } };
         search.Children.Add(_box);
-        var go = new Button { Content = "搜索", Width = 70, Height = 30, Margin = new Thickness(8, 0, 0, 0), IsDefault = true };
-        go.Click += async (_, _) => await Search();
+        var go = DialogKit.Button("搜索", () => _ = Search(), primary: true);
+        go.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(go, 1);
         search.Children.Add(go);
         sp.Children.Add(search);
@@ -63,7 +65,7 @@ public sealed class WeatherCitiesWindow : Window
             Background = new SolidColorBrush(dark ? Color.FromRgb(0x1C, 0x1C, 0x1E) : Color.FromRgb(0xF7, 0xF7, 0xF8)),
             BorderBrush = new SolidColorBrush(dark ? Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF) : Color.FromArgb(0x18, 0, 0, 0)), BorderThickness = new Thickness(1),
         };
-        MouseLeftButtonDown += (_, e) => { if (e.OriginalSource is not TextBox) try { DragMove(); } catch { } };
+        DialogKit.DragFromBlank(this);   // 以前按在结果行上也整窗拖动，MouseUp 被吞掉，点了没反应
         Loaded += (_, _) => { Activate(); _box.Focus(); };
         KeyDown += (_, e) => { if (e.Key == Key.Escape) Close(); };
         Closed += (_, _) => _cts?.Cancel();
@@ -87,7 +89,12 @@ public sealed class WeatherCitiesWindow : Window
             g.Children.Add(b);
         }
         var row = new Border { Background = _row, CornerRadius = new CornerRadius(9), Padding = new Thickness(10, 6, 10, 6), Margin = new Thickness(0, 0, 0, 4), Child = g, Cursor = click != null ? Cursors.Hand : null };
-        if (click != null) row.MouseLeftButtonUp += (_, _) => click();
+        if (click != null)
+        {
+            row.MouseEnter += (_, _) => row.Background = _hover;
+            row.MouseLeave += (_, _) => row.Background = _row;
+            row.MouseLeftButtonUp += (_, e) => { e.Handled = true; click(); };
+        }
         return row;
     }
 
@@ -119,7 +126,7 @@ public sealed class WeatherCitiesWindow : Window
         {
             var found = await App.SearchCities(q, ct);
             if (ct.IsCancellationRequested) return;
-            _status.Text = found.Count == 0 ? "没找到，换个写法试试（如「北京」「Beijing」）" : "点一个添加：";
+            _status.Text = found.Count == 0 ? "没找到，换个写法试试（如「北京」「Beijing」）" : "点一个添加并切换：";
             foreach (var c in found.Take(8))
             {
                 var city = c;

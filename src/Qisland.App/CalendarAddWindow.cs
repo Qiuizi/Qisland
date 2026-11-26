@@ -63,7 +63,7 @@ public sealed class CalendarAddWindow : Window
             Background = new SolidColorBrush(dark ? Color.FromRgb(0x1C, 0x1C, 0x1E) : Color.FromRgb(0xF7, 0xF7, 0xF8)),
             BorderBrush = new SolidColorBrush(dark ? Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF) : Color.FromArgb(0x18, 0, 0, 0)), BorderThickness = new Thickness(1),
         };
-        MouseLeftButtonDown += (_, e) => { if (e.OriginalSource is not TextBox) try { DragMove(); } catch { } };
+        DialogKit.DragFromBlank(this);
         Loaded += (_, _) => { Activate(); _box.Focus(); _box.SelectAll(); };
         KeyDown += (_, e) => { if (e.Key == Key.Escape) Close(); };
     }
