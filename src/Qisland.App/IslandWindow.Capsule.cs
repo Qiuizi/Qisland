@@ -73,7 +73,9 @@ public sealed partial class IslandWindow
         var items = statsOn ? CapsuleItems : CompactStats.Items.None;
         if (items != _capItems) { _capItems = items; RebuildCapCells(); _capSampled = DateTime.MinValue; }
         // 课程 / 考试倒计时在中间显示时让给它（它更要紧、也只是一会儿）
-        var showStats = statsOn && _idleCountdown.Visibility != Visibility.Visible && _idleStats.Children.Count > 0;
+        // 倒计时还没放进胶囊（启动早期）时它的 Visibility 也是默认的 Visible，要按「真的在胶囊里显示」判断
+        var countdownShown = _idleCountdown.Parent != null && _idleCountdown.Visibility == Visibility.Visible;
+        var showStats = statsOn && !countdownShown && _idleStats.Children.Count > 0;
         _idleStats.Visibility = showStats ? Visibility.Visible : Visibility.Collapsed;
         foreach (var c in _idleStats.Children.OfType<TextBlock>()) c.Foreground = c.FontSize < 10 ? Theme.Tertiary : Theme.Secondary;
         if (showStats) SampleCapsule(force: true);

@@ -122,8 +122,10 @@ public sealed partial class IslandWindow
         await Shot(dir, "19-ai-usage", Mode.Expanded);
         // 设备电量（演示数据，不读真实设备）
         Devices = new PeripheralWatcher(_store, a => a()); Devices.Demo();
+        _widgetList = Widgets().OrderBy(w => w.Id == "devices" ? 0 : 1).ToList();   // 只在快照进程里把设备卡挪到最上面，不写 widgets.txt
         _page = Page.Widgets; _expDirty = true; _pageCache.Clear();
         await Shot(dir, "20-devices", Mode.Expanded);
+        _widgetList = null;
         _page = Page.Home;
         App.Log("snapshot 完成: " + dir);
     }
