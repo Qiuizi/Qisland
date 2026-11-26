@@ -51,6 +51,7 @@ public sealed partial class App : Application
     private AiUsageService? _usage;
     private QuotaWatch? _quotaWatch;
     private MailOtpService? _mail;
+    private PeripheralWatcher? _devices;
     private CalendarWatcher? _cal;
     private Updater _upd = null!;
     private DateTime _day = DateTime.Today;
@@ -296,6 +297,13 @@ public sealed partial class App : Application
         catch (Exception ex) { Log("本机 AI 额度: " + ex.Message); }
         try { _mail = new MailOtpService(_store, a => Dispatcher.BeginInvoke(a)); _mail.Start(); }
         catch (Exception ex) { Log("邮箱验证码: " + ex.Message); }
+        try
+        {
+            _devices = new PeripheralWatcher(_store, a => Dispatcher.BeginInvoke(a));
+            _window.Devices = _devices;
+            _devices.Changed += _window.OnDevicesChanged;
+        }
+        catch (Exception ex) { Log("外设电量: " + ex.Message); }
         try { _todo = new TodoFile(_store); _window.Todo = _todo; _todo.Changed += () => _window.SetTodos(_todo.Open); _window.SetTodos(_todo.Open); }
         catch (Exception ex) { Log("待办: " + ex.Message); }
         _ime = new ImeWatch();
@@ -328,6 +336,7 @@ public sealed partial class App : Application
             if (_tickN % 10 == 5) { try { _xxt?.Tick(); } catch (Exception ex) { Log("学习通: " + ex.Message); } }
             if (_tickN % 10 == 7) { try { _quota?.Tick(); } catch (Exception ex) { Log("Codex 额度: " + ex.Message); } }
             if (_tickN % 10 == 2) { try { _usage?.Tick(); } catch (Exception ex) { Log("本机 AI 额度: " + ex.Message); } }
+            if (_tickN % 10 == 4 && _tickN > 15) { try { _devices?.Tick(); } catch (Exception ex) { Log("外设电量: " + ex.Message); } }
             if (_tickN % 60 == 0) { try { _homework?.Tick(); _window.OnHomeworkChanged(); } catch (Exception ex) { Log("作业: " + ex.Message); } }
             try { _calls?.Tick(_tickN); } catch (Exception ex) { Log("通话: " + ex.Message); }
             if (_tickN % 30 == 3) { try { _cal?.Tick(); } catch (Exception ex) { Log("日历: " + ex.Message); } }
@@ -391,6 +400,7 @@ public sealed partial class App : Application
             case Features.Bluetooth: if (on) _bt?.Start(); else _bt?.Stop(); break;
             case Features.AiUsage: _usage?.OnToggle(); _quotaWatch?.OnQuota(); break;
             case var k when k.StartsWith("ai-usage-", StringComparison.Ordinal): _usage?.OnToggle(); _quotaWatch?.OnQuota(); break;
+            case Features.Peripherals: _devices?.Soon(); _devices?.Tick(); _window?.OnDevicesChanged(); break;
             case Features.LockKeys: _volume?.WatchLockKeys(on); break;
             case Features.Calendar: _cal?.Tick(); _window?.OnCalendarChanged(); if (on) _cal?.RefreshNow(); break;
             case Features.Focus: FocusMode.Poll(); _window?.OnFocusModeChanged(); break;

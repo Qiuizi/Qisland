@@ -67,6 +67,7 @@ public sealed partial class App
     internal CalendarWatcher? CalendarService => _cal;
     internal AiUsageService? UsageService => _usage;
     internal MailOtpService? MailService => _mail;
+    internal PeripheralWatcher? DeviceService => _devices;
     internal IslandWindow? Island => _window;
     internal LyricsService? LyricsSvc => _lyrics;
 

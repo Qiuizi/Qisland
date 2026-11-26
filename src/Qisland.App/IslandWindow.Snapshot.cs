@@ -120,6 +120,10 @@ public sealed partial class IslandWindow
         Usage = new AiUsageService(a => a()); Usage.Demo();
         _page = Page.Agents; _expDirty = true; _pageCache.Clear();
         await Shot(dir, "19-ai-usage", Mode.Expanded);
+        // 设备电量（演示数据，不读真实设备）
+        Devices = new PeripheralWatcher(_store, a => a()); Devices.Demo();
+        _page = Page.Widgets; _expDirty = true; _pageCache.Clear();
+        await Shot(dir, "20-devices", Mode.Expanded);
         _page = Page.Home;
         App.Log("snapshot 完成: " + dir);
     }

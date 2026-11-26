@@ -26,6 +26,7 @@ public sealed partial class IslandWindow
         new("timer", "专注", "\uE823", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x9F, 0x0A))), true),
         new("health", "健康", "\uEB51", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0x32, 0xAD, 0xE6))), false),
         new("system", "系统", "\uE950", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0x30, 0xD1, 0x58))), false),
+        new("devices", "设备电量", "\uE702", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF))), false),
     ];
     private static string WidgetFile => System.IO.Path.Combine(App.DataDir, "widgets.txt");
     private List<(string Id, bool On)>? _widgetList;
@@ -164,7 +165,8 @@ public sealed partial class IslandWindow
 
         // 内容比视口高时必须顶端对齐：WPF 默认会把超高的子元素居中，上面的天气和下面的系统行会被同时裁掉
         var inner = new StackPanel { VerticalAlignment = VerticalAlignment.Top };
-        var on = Widgets().Where(w => w.On).Select(w => w.Id).ToList();
+        // 设备电量：没有读到电量的已连接设备时整张卡不出现
+        var on = Widgets().Where(w => w.On && (w.Id != "devices" || HasDevices)).Select(w => w.Id).ToList();
         for (var i = 0; i < on.Count;)
         {
             FrameworkElement el;
@@ -257,6 +259,7 @@ public sealed partial class IslandWindow
                 _timerCard = WCard(null); _timerCard.Height = HalfH; return _timerCard;
             case "todo": return TodoWidget();
             case "health": return HealthWidget();
+            case "devices": return DevicesWidget();
             default: return ClipWidget();
         }
     }
@@ -308,6 +311,7 @@ public sealed partial class IslandWindow
             "shelf" => (C(0x5FD4DA), C(0x149FB5)),
             "school" => (C(0xD08CFF), C(0x9B3FDB)),
             "health" => (C(0x7FDBFF), C(0x1A9BE0)),
+            "devices" => (C(0x6EB6FF), C(0x2F6BFF)),
             _ => (C(0x5EE07A), C(0x24AE45)),
         };
         var bg = new LinearGradientBrush(top, bottom, 90); bg.Freeze();
@@ -371,6 +375,11 @@ public sealed partial class IslandWindow
                 break;
             case "health": // 水滴
                 Fill("M12 2.4c3.6 4.5 6.6 8.3 6.6 12a6.6 6.6 0 0 1-13.2 0c0-3.7 3-7.5 6.6-12Z");
+                break;
+            case "devices": // 横放的电池：外壳 + 电量 + 正极
+                Fill("F1 M4.6 7h12.8A2.6 2.6 0 0 1 20 9.6v4.8a2.6 2.6 0 0 1-2.6 2.6H4.6A2.6 2.6 0 0 1 2 14.4V9.6A2.6 2.6 0 0 1 4.6 7Z M4.9 8.9a.9.9 0 0 0-.9.9v4.4a.9.9 0 0 0 .9.9h12.2a.9.9 0 0 0 .9-.9V9.8a.9.9 0 0 0-.9-.9Z");
+                Fill("M5.6 10.4h8.2v3.2H5.6Z");
+                Fill("M20.8 10.2h.5a.9.9 0 0 1 .9.9v1.8a.9.9 0 0 1-.9.9h-.5Z", 0.85);
                 break;
             default: // 系统：芯片
                 Fill("F1 M8.5 5h7A3.5 3.5 0 0 1 19 8.5v7a3.5 3.5 0 0 1-3.5 3.5h-7A3.5 3.5 0 0 1 5 15.5v-7A3.5 3.5 0 0 1 8.5 5Z M9.5 9.5v5h5v-5Z");

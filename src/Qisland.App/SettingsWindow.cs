@@ -40,6 +40,7 @@ public sealed partial class SettingsWindow : Window
             ("翻译、AI 与快捷键", "\uE8C1", Ai),
             ("AI 额度", "\uE9D2", AiQuota),
             ("邮箱验证码", "\uE715", MailOtpPage),
+            ("设备与状态", "\uE772", DevicesStatus),
             ("接入其他软件", "\uE71B", p => { Mirror(p, "Codex"); Mirror(p, "接入其他 AI 工具"); Mirror(p, "对其他软件的改动"); }),
             ("其他", "\uE712", Other),
         ];

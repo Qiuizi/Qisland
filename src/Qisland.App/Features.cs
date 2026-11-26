@@ -14,7 +14,8 @@ public static class Features
         WeatherAlerts = "weather-alerts", Water = "water", Sit = "sit", OledShift = "oled-shift", Clock12 = "clock-12h",
         ClickLockHotkey = "click-lock-hotkey", HideList = "hide-list", HideOnlyCovering = "hide-only-covering",
         PlayerLyricOffset = "player-lyric-offset", HideFromCapture = "hide-from-capture",
-        AiUsage = "ai-usage", QuotaAlerts = "quota-alerts";
+        AiUsage = "ai-usage", QuotaAlerts = "quota-alerts",
+        Peripherals = "peripherals", PeripheralAlerts = "peripheral-alerts";
 
     /// <summary>
     /// 默认关、要自己打开的（文件是 &lt;键&gt;.on）：喝水 / 久坐提醒会主动打扰，OLED 防烧屏会挪动岛；

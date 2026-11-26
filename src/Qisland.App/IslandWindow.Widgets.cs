@@ -120,6 +120,7 @@ public sealed partial class IslandWindow
     /// <summary>翻到组件页时：圆环从 0 长到当前值。</summary>
     private void EnterWidgets()
     {
+        Devices?.Soon();
         _stats.Sample();
         void Rings()
         {
