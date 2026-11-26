@@ -91,7 +91,7 @@ public sealed class ToastMirror
         if (!OtpEnabled || Otp.Extract(text) is not { } code) return;
         var id = "otp:" + toastId;
         _store.Upsert(new IslandActivity(id, "otp", "验证码 " + code, appName.Length > 0 ? appName + " · 点一下复制" : "点一下复制",
-            ActivityKind.Info, 86, "\uE8C8", DurationSeconds: 180, ResetTtl: true));
+            ActivityKind.Info, 86, "\uE8C8", DurationSeconds: MailOtpSettings.Current.CardSeconds, ResetTtl: true, ExactDuration: true));
         App.Log("验证码通知: 已上岛（内容不记录）");
     }
 

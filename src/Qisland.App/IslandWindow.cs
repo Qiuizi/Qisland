@@ -1099,6 +1099,13 @@ public sealed partial class IslandWindow : Window
         var mid = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 12, 0) };
         var t = Txt(14, FontWeights.SemiBold, Theme.Primary);
         t.Text = a.Title;
+        if (a.Dispatch == "otp" && a.Title.StartsWith("验证码 ", StringComparison.Ordinal))
+        {
+            // 验证码大字：等宽数字、字距拉开，一眼能对着输
+            t.Text = "";
+            t.Inlines.Add(new System.Windows.Documents.Run("验证码  ") { FontSize = 12.5, FontWeight = FontWeights.Medium, Foreground = Theme.Secondary });
+            t.Inlines.Add(new System.Windows.Documents.Run(a.Title[4..]) { FontSize = 19, FontWeight = FontWeights.Bold, FontFamily = Mono });
+        }
         mid.Children.Add(t);
         var sub = Txt(12.5, FontWeights.Normal, Theme.Secondary);
         sub.Text = string.IsNullOrWhiteSpace(a.Body) ? Theme.SourceName(a.Source) : $"{Theme.SourceName(a.Source)} · {a.Body}";
@@ -1128,7 +1135,14 @@ public sealed partial class IslandWindow : Window
         g.Children.Add(right);
 
         var canOpen = CanOpenItem(a); // 登录过期：点一下弹扫码
-        if (a.Dispatch == "otp") right.Children.Add(Chip("复制", () => CopyOtp(a)));
+        if (a.Dispatch == "otp" && a.Title.StartsWith("验证码 ", StringComparison.Ordinal))
+        {
+            var chips = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            var close = Chip("关闭", () => _store.Remove(a.Id), "收起这条验证码"); close.Margin = new Thickness(0, 4, 6, 0);
+            chips.Children.Add(close);
+            chips.Children.Add(Chip("复制", () => CopyOtp(a)));
+            right.Children.Add(chips);
+        }
         if (a.Dispatch is "agenda" or "calendar" && a.OpenUri is { } join) right.Children.Add(Chip("加入", () => Launcher.OpenUri(join, a.Dispatch), "打开会议链接"));
         // QQ 等发系统通知的软件：原通知还在时，给一个去通知中心的入口——点原通知，软件自己会跳到那个会话
         if (a.Dispatch is not "wechat" && a.OpenUri == null && ToastMirror.Current?.Alive(a.Id) == true)

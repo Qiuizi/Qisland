@@ -39,6 +39,7 @@ public sealed partial class SettingsWindow : Window
             ("课程与作业", "\uE7BE", p => { Mirror(p, "导入课表"); Mirror(p, "作业 DDL"); }),
             ("翻译、AI 与快捷键", "\uE8C1", Ai),
             ("AI 额度", "\uE9D2", AiQuota),
+            ("邮箱验证码", "\uE715", MailOtpPage),
             ("接入其他软件", "\uE71B", p => { Mirror(p, "Codex"); Mirror(p, "接入其他 AI 工具"); Mirror(p, "对其他软件的改动"); }),
             ("其他", "\uE712", Other),
         ];

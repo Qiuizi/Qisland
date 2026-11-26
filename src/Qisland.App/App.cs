@@ -50,6 +50,7 @@ public sealed partial class App : Application
     private BluetoothWatcher? _bt;
     private AiUsageService? _usage;
     private QuotaWatch? _quotaWatch;
+    private MailOtpService? _mail;
     private CalendarWatcher? _cal;
     private Updater _upd = null!;
     private DateTime _day = DateTime.Today;
@@ -293,6 +294,8 @@ public sealed partial class App : Application
             if (_doubao != null) _doubao.Changed += _quotaWatch.OnQuota;
         }
         catch (Exception ex) { Log("本机 AI 额度: " + ex.Message); }
+        try { _mail = new MailOtpService(_store, a => Dispatcher.BeginInvoke(a)); _mail.Start(); }
+        catch (Exception ex) { Log("邮箱验证码: " + ex.Message); }
         try { _todo = new TodoFile(_store); _window.Todo = _todo; _todo.Changed += () => _window.SetTodos(_todo.Open); _window.SetTodos(_todo.Open); }
         catch (Exception ex) { Log("待办: " + ex.Message); }
         _ime = new ImeWatch();
