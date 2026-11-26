@@ -7,7 +7,7 @@ using Qisland.Core;
 namespace Qisland.App;
 
 /// <summary>
-/// 天气城市：搜索（Open-Meteo 地理编码）、添加（最多 5 个）、删除、切换。只存在本机 %APPDATA%\Qisland\weather-cities.json。
+/// 天气城市：搜索（国内离线表，海外走 Open-Meteo 地理编码）、添加（最多 5 个）、删除、切换。只存在本机 %APPDATA%\Qisland\weather-cities.json。
 /// 思路参考小糖岛仔（MIT）的多城市天气，C# 重写。
 /// </summary>
 public sealed class WeatherCitiesWindow : Window
@@ -41,7 +41,7 @@ public sealed class WeatherCitiesWindow : Window
         sp.Children.Add(head);
         sp.Children.Add(new TextBlock
         {
-            Text = $"最多保存 {OpenMeteo.MaxCities} 个城市，岛上天气卡片点地名也能切换。城市只存在本机。数据来自 Open-Meteo。",
+            Text = $"最多保存 {OpenMeteo.MaxCities} 个城市，岛上天气卡片点地名也能切换。城市只存在本机。预报来自 Open-Meteo，国内城市用内置地名表搜索。",
             FontFamily = Theme.Text, FontSize = 12, Foreground = _sub, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 10),
         });
         sp.Children.Add(_saved);

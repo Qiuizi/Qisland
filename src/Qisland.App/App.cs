@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Runtime;
@@ -628,6 +628,10 @@ public sealed partial class App : Application
             }
             catch (Exception ex) { Log("wttr: " + ex.Message); }
             var label = place.Display.Length > 0 ? place.Display : wttr?.Area ?? "";
+            // 自动定位且没有 weather.txt 显示名时，若 wttr 给的是空、中文名或英文名并能对上附近城市，改用离线表的中文名
+            if (city == null && place.Display.Length == 0 && wttr?.Lat is { } wlat && wttr.Lon is { } wlon
+                && CitySearch.Nearest(wlat, wlon) is { } near && CitySearch.Refines(label, near))
+                label = near.Label;
             var coords = city != null ? (city.Lat, city.Lon) : place.Coordinates ?? _lastCoords;
             if (coords is { } c)
             {

@@ -6,56 +6,13 @@ namespace Qisland.Core;
 public sealed record CityHit(WeatherCity City, long Population, string Feature, string Country, string Key);
 
 /// <summary>
-/// 天气城市搜索（Open-Meteo 地理编码 = GeoNames 数据）。它只按名字精确匹配、不排序，中文名又是逐条人工维护的，所以：
-/// · 同一个城市的中文名有时带「市」有时不带（「海口市」「三亚」），只查一种就漏，所以原词、补「市」、去后缀都查；
-/// · 中文名只有一个写法（「東京」不认「东京」），App 层再补一个繁体词，几个常见海外城市直接用英文名查；
-/// · 输入省名（「海南」「海南省」）时 GeoNames 只有同名村子，所以内置每个省的省会和几个主要城市放在最前面；
-/// · 排序：中文输入时 国内大城市 → 海外大城市 → 国内小地方 → 海外小地方；
-///   「大城市」= 首都 / 省会 / 地级（PPLC/PPLA/PPLA2/PPLA3）或人口过 10 万（大连这种在 GeoNames 里只标 PPL）；
-///   同档里名字完全一样的在前，再按行政级别、人口；坐标几乎重合的只留一个，同名同地区的村子也只留一个。
+/// 天气城市搜索。国内（省会、地级市、海南等省直辖县市）走内置离线表，不经过 Open-Meteo 地名库，
+/// 所以搜「海南」会直接出海口、三亚、儋州，而不是日本海南市或同名村子。
+/// 表里没有的（东京、伦敦，或更小的县乡）再查 Open-Meteo 地理编码（GeoNames），预报仍用 Open-Meteo。
 /// </summary>
 public static class CitySearch
 {
     public const int Shown = 8;
-
-    // 省 / 直辖市 / 特区 → 省会和主要城市（坐标取自 Open-Meteo 地理编码对应条目）
-    private static readonly Dictionary<string, (string Name, double Lat, double Lon)[]> Provinces = new()
-    {
-        ["北京"] = [("北京", 39.9075, 116.3972)],
-        ["天津"] = [("天津", 39.1422, 117.1767)],
-        ["上海"] = [("上海", 31.2222, 121.4581)],
-        ["重庆"] = [("重庆", 29.5603, 106.5577)],
-        ["河北"] = [("石家庄", 38.0414, 114.4786), ("唐山", 39.6438, 118.1832), ("保定", 38.8729, 115.4625), ("秦皇岛", 39.941, 119.5894)],
-        ["山西"] = [("太原", 37.8694, 112.5603), ("大同", 40.0936, 113.2914)],
-        ["辽宁"] = [("沈阳", 41.7922, 123.4328), ("大连", 38.9122, 121.6022)],
-        ["吉林"] = [("长春", 43.88, 125.3228), ("吉林", 43.8465, 126.5608)],
-        ["黑龙江"] = [("哈尔滨", 45.75, 126.65), ("齐齐哈尔", 47.3392, 123.9615), ("大庆", 46.5833, 125.0)],
-        ["江苏"] = [("南京", 32.0617, 118.7778), ("苏州", 31.3041, 120.5954), ("无锡", 31.5689, 120.2886)],
-        ["浙江"] = [("杭州", 30.2936, 120.1614), ("宁波", 29.8782, 121.5494), ("温州", 27.9994, 120.6668)],
-        ["安徽"] = [("合肥", 31.8639, 117.2808), ("芜湖", 31.3526, 118.4295)],
-        ["福建"] = [("福州", 26.0614, 119.3061), ("厦门", 24.4798, 118.0819), ("泉州", 24.9139, 118.5858)],
-        ["江西"] = [("南昌", 28.684, 115.8531), ("赣州", 25.8466, 114.9326)],
-        ["山东"] = [("济南", 36.6683, 116.9972), ("青岛", 36.0649, 120.3804), ("烟台", 37.4765, 121.4408)],
-        ["河南"] = [("郑州", 34.7578, 113.6486), ("洛阳", 34.6735, 112.4368)],
-        ["湖北"] = [("武汉", 30.5833, 114.2667), ("宜昌", 30.7144, 111.2847)],
-        ["湖南"] = [("长沙", 28.1987, 112.9709), ("张家界", 29.1294, 110.4783)],
-        ["广东"] = [("广州", 23.1167, 113.25), ("深圳", 22.5455, 114.0683), ("珠海", 22.2769, 113.5678)],
-        ["海南"] = [("海口", 20.0342, 110.3465), ("三亚", 18.2543, 109.5095), ("儋州", 19.185, 109.4431)],
-        ["四川"] = [("成都", 30.6667, 104.0667), ("绵阳", 31.4678, 104.6817)],
-        ["贵州"] = [("贵阳", 26.5833, 106.7167), ("遵义", 27.6867, 106.9072)],
-        ["云南"] = [("昆明", 25.0389, 102.7183), ("大理", 25.5847, 100.2123), ("丽江", 26.8688, 100.2207)],
-        ["陕西"] = [("西安", 34.2583, 108.9286), ("宝鸡", 34.3678, 107.237)],
-        ["甘肃"] = [("兰州", 36.057, 103.8399), ("敦煌", 40.1667, 94.6833)],
-        ["青海"] = [("西宁", 36.6255, 101.7574)],
-        ["台湾"] = [("台北", 25.0531, 121.5264), ("高雄", 22.6163, 120.3133), ("台中", 24.1469, 120.6839)],
-        ["内蒙古"] = [("呼和浩特", 40.8106, 111.6522), ("包头", 40.6516, 109.8439)],
-        ["广西"] = [("南宁", 22.8167, 108.3167), ("桂林", 25.2802, 110.2964)],
-        ["西藏"] = [("拉萨", 29.65, 91.1)],
-        ["宁夏"] = [("银川", 38.4681, 106.2731)],
-        ["新疆"] = [("乌鲁木齐", 43.801, 87.6005), ("喀什", 39.4672, 75.9868)],
-        ["香港"] = [("香港", 22.2783, 114.1747)],
-        ["澳门"] = [("澳门", 22.2006, 113.5461)],
-    };
 
     // 中文名在 GeoNames 里没有简体写法的常见海外城市：用英文名查（返回的名字仍是中文）
     private static readonly Dictionary<string, string> Abroad = new()
@@ -71,6 +28,11 @@ public static class CitySearch
 
     private static readonly string[] Suffixes = ["维吾尔自治区", "壮族自治区", "回族自治区", "自治区", "特别行政区", "省", "市"];
 
+    private sealed record LocalCity(string Name, string Province, double Lat, double Lon, int Pop, bool Capital, bool Major, string Ascii);
+
+    private static readonly IReadOnlyList<LocalCity> Cities = Load();
+    private static readonly HashSet<string> ProvinceNames = Cities.Select(c => c.Province).ToHashSet();
+
     public static bool AllCjk(string s) => s.Length > 0 && s.All(c => c is >= '\u4e00' and <= '\u9fff');
     private static bool Chinese(string country) => country is "CN" or "HK" or "MO" or "TW";
 
@@ -84,27 +46,74 @@ public static class CitySearch
     /// <summary>输入是省 / 直辖市 / 特区名（带不带「省」「自治区」都行）时返回它的简称。</summary>
     public static string? Province(string input)
     {
-        var s = input.Trim();
+        var s = Simplify(input.Trim());
         foreach (var suf in Suffixes)
             if (s.EndsWith(suf, StringComparison.Ordinal) && s.Length > suf.Length) { s = s[..^suf.Length]; break; }
-        return Provinces.ContainsKey(s) ? s : null;
+        return ProvinceNames.Contains(s) ? s : null;
     }
 
-    /// <summary>省名对应的内置城市（省会在前）；不是省名返回空。</summary>
+    /// <summary>省名对应的内置城市（省会、重点城市在前）；不是省名返回空。</summary>
     public static List<WeatherCity> ProvinceCities(string input)
     {
         if (Province(input) is not { } p) return [];
-        var region = p switch
-        {
-            "香港" or "澳门" => "中国",
-            "台湾" => "中国台湾",
-            "北京" or "天津" or "上海" or "重庆" => p + "市 · 中国",
-            _ => p + " · 中国",
-        };
-        return Provinces[p].Select(c => new WeatherCity(c.Name, c.Lat, c.Lon, region)).ToList();
+        return Ranked(Cities.Where(c => c.Province == p)).Take(Shown).Select(ToCity).ToList();
     }
 
-    /// <summary>一个输入要查哪几个词（App 层另外再补繁体写法）。</summary>
+    /// <summary>国内离线表搜索。有结果就不必再查 Open-Meteo 地名接口。</summary>
+    public static List<WeatherCity> Local(string input)
+    {
+        var raw = Simplify(input.Trim());
+        if (raw.Length == 0 || Cities.Count == 0) return [];
+        if (Province(raw) is not null) return ProvinceCities(raw);
+
+        var baseName = BaseName(raw);
+        var ascii = Fold(raw);
+        var exact = new List<LocalCity>();
+        var prefix = new List<LocalCity>();
+        var inside = new List<LocalCity>();
+        foreach (var c in Cities)
+        {
+            var ea = Fold(c.Ascii);
+            if (c.Name == raw || c.Name == baseName || (ascii.Length > 0 && ascii == ea))
+                exact.Add(c);
+            else if ((baseName.Length >= 2 && c.Name.StartsWith(baseName, StringComparison.Ordinal))
+                     || (ascii.Length >= 3 && ea.StartsWith(ascii, StringComparison.Ordinal)))
+                prefix.Add(c);
+            else if ((baseName.Length >= 2 && c.Name.Contains(baseName, StringComparison.Ordinal))
+                     || (ascii.Length >= 3 && ea.Contains(ascii, StringComparison.Ordinal)))
+                inside.Add(c);
+        }
+        return Ranked(exact).Concat(Ranked(prefix)).Concat(Ranked(inside)).Take(Shown).Select(ToCity).ToList();
+    }
+
+    /// <summary>离线表里距给定坐标最近的城市；超过 <paramref name="maxKm"/> 视为没有。</summary>
+    public static WeatherCity? Nearest(double lat, double lon, double maxKm = 80)
+    {
+        LocalCity? best = null;
+        var bestKm = maxKm;
+        foreach (var c in Cities)
+        {
+            var km = HaversineKm(lat, lon, c.Lat, c.Lon);
+            if (km < bestKm) { bestKm = km; best = c; }
+        }
+        return best is null ? null : ToCity(best);
+    }
+
+    /// <summary>
+    /// 自动定位时要不要用离线表的中文名替换 wttr 给的地名：
+    /// 显示名为空，或就是这个城市的中文名 / 英文名时才换，不覆盖更具体的区县名。
+    /// </summary>
+    public static bool Refines(string label, WeatherCity city)
+    {
+        if (string.IsNullOrWhiteSpace(label)) return true;
+        var b = BaseName(Simplify(label.Trim()));
+        if (b.Equals(city.Label, StringComparison.OrdinalIgnoreCase)) return true;
+        var a = Fold(label);
+        if (a.Length < 3) return false;
+        return Cities.Any(c => c.Name == city.Label && Math.Abs(c.Lat - city.Lat) < 0.05 && Fold(c.Ascii) == a);
+    }
+
+    /// <summary>一个输入要查哪几个词（App 层另外再补繁体写法）。国内命中离线表时不会走到这里。</summary>
     public static List<string> Queries(string input)
     {
         var name = input.Trim();
@@ -170,7 +179,7 @@ public static class CitySearch
     }
 
     private static int Level(string fc) => fc switch { "PPLC" => 0, "PPLA" => 1, "PPLA2" => 2, "PPLA3" => 3, "PPLA4" => 5, "PCLI" or "PCLS" => 1, _ => 6 };
-    private static bool Major(CityHit h) => Level(h.Feature) <= 3 || h.Population >= 100_000;
+    private static bool MajorHit(CityHit h) => Level(h.Feature) <= 3 || h.Population >= 100_000;
 
     /// <summary>
     /// 省名内置城市在前，再按上面的档位排；去重后最多 <see cref="Shown"/> 条。
@@ -183,10 +192,10 @@ public static class CitySearch
         var cjk = AllCjk(name);
         var names = new HashSet<string>(new[] { name }.Concat(queries ?? []).Select(q => BaseName(Simplify(q.Trim()))), StringComparer.OrdinalIgnoreCase);
         bool Exact(CityHit h) => names.Contains(BaseName(h.City.Label));
-        int Tier(CityHit h) => cjk ? (Major(h) ? 0 : 2) + (Chinese(h.Country) ? 0 : 1) : (Major(h) ? 0 : 1);
+        int Tier(CityHit h) => cjk ? (MajorHit(h) ? 0 : 2) + (Chinese(h.Country) ? 0 : 1) : (MajorHit(h) ? 0 : 1);
         var ranked = ProvinceCities(name);
         var keys = new HashSet<string>();
-        foreach (var h in found.Where(h => !cjk || Exact(h) || Major(h))
+        foreach (var h in found.Where(h => !cjk || Exact(h) || MajorHit(h))
                      .OrderBy(Tier).ThenByDescending(Exact).ThenByDescending(h => h.Population).ThenBy(h => Level(h.Feature)))
         {
             if (ranked.Any(r => Math.Abs(r.Lat - h.City.Lat) < 0.05 && Math.Abs(r.Lon - h.City.Lon) < 0.05)) continue;
@@ -194,6 +203,55 @@ public static class CitySearch
             ranked.Add(h.City);
         }
         return ranked.Take(Shown).ToList();
+    }
+
+    private static IEnumerable<LocalCity> Ranked(IEnumerable<LocalCity> xs) =>
+        xs.OrderBy(c => c.Capital ? 0 : 1).ThenBy(c => c.Major ? 0 : 1).ThenByDescending(c => c.Pop).ThenBy(c => c.Name, StringComparer.Ordinal);
+
+    private static WeatherCity ToCity(LocalCity c) => new(c.Name, c.Lat, c.Lon, LocalRegion(c));
+
+    private static string LocalRegion(LocalCity c)
+    {
+        if (c.Province is "香港" or "澳门") return "中国";
+        if (c.Province == "台湾") return "中国台湾";
+        if (c.Name == c.Province) return "中国";   // 直辖市：不写「北京 · 北京 · 中国」
+        return c.Province + " · 中国";
+    }
+
+    private static string Fold(string s) =>
+        s.Trim().ToLowerInvariant().Replace("'", "", StringComparison.Ordinal).Replace("’", "", StringComparison.Ordinal).Replace(" ", "", StringComparison.Ordinal);
+
+    private static double HaversineKm(double lat1, double lon1, double lat2, double lon2)
+    {
+        const double r = 6371;
+        double Rad(double d) => d * Math.PI / 180;
+        var dLat = Rad(lat2 - lat1);
+        var dLon = Rad(lon2 - lon1);
+        var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) + Math.Cos(Rad(lat1)) * Math.Cos(Rad(lat2)) * Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        return 2 * r * Math.Asin(Math.Min(1, Math.Sqrt(a)));
+    }
+
+    private static IReadOnlyList<LocalCity> Load()
+    {
+        try
+        {
+            using var s = typeof(CitySearch).Assembly.GetManifestResourceStream("Qisland.Core.data.china-cities.json");
+            if (s == null) return [];
+            using var doc = JsonDocument.Parse(s);
+            if (!doc.RootElement.TryGetProperty("cities", out var arr) || arr.ValueKind != JsonValueKind.Array) return [];
+            var list = new List<LocalCity>();
+            foreach (var e in arr.EnumerateArray())
+            {
+                var n = Str(e, "n");
+                var p = Str(e, "p");
+                if (n.Length == 0 || p.Length == 0) continue;
+                if (Num(e, "lat") is not { } lat || Num(e, "lon") is not { } lon) continue;
+                list.Add(new LocalCity(n, p, lat, lon, (int)(Num(e, "pop") ?? 0),
+                    (int)(Num(e, "cap") ?? 0) != 0, (int)(Num(e, "pri") ?? 0) != 0, Str(e, "e")));
+            }
+            return list;
+        }
+        catch { return []; }
     }
 
     private static string Str(JsonElement e, string n) => e.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";

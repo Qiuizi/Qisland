@@ -65,10 +65,12 @@ public sealed partial class App
 
     public void RefreshWeatherNow() => _weatherWake.TrySetResult();
 
-    /// <summary>城市搜索：几个写法并行查 Open-Meteo 地理编码，再按 <see cref="CitySearch.Rank"/> 去重排序（省名直接给内置的主要城市）。</summary>
+    /// <summary>城市搜索：国内走离线城市表；表里没有的再并行查 Open-Meteo 地理编码，按 <see cref="CitySearch.Rank"/> 去重排序。</summary>
     public static async Task<List<WeatherCity>> SearchCities(string name, CancellationToken ct)
     {
         CitySearch.Simplify = Simplified;
+        var local = CitySearch.Local(name);
+        if (local.Count > 0) return local;
         var queries = CitySearch.Queries(name);
         // GeoNames 有些中文名只有繁体（「東京」「臺中」），补一个繁体写法
         if (CitySearch.AllCjk(name.Trim()) && Traditional(name.Trim()) is { } tw && !queries.Contains(tw)) queries.Add(tw);

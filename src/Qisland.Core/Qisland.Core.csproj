@@ -9,5 +9,6 @@
     <Description>Qisland 活动提供方：解析与优先级，不依赖 WPF。</Description>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="data\china-cities.json" LogicalName="Qisland.Core.data.china-cities.json" />
   </ItemGroup>
 </Project>
