@@ -1,86 +1,68 @@
 <div align="center">
 
-<img src="docs/media/qisland-v3.gif" width="560" alt="Qisland 演示">
+<img src="docs/assets/icon/qisland-256.png" width="96" alt="Qisland 图标">
 
 # Qisland
 
-**该知道的，抬眼就知道。**
+**面向 Windows 开发者与学生的轻量原生灵动岛。该知道的，抬眼就知道。**
 
-![version](https://img.shields.io/badge/version-4.1.0-ff9f0a?style=flat-square)
+![version](https://img.shields.io/badge/version-4.3.0-ff9f0a?style=flat-square)
 ![platform](https://img.shields.io/badge/Windows-10%20%7C%2011-0a84ff?style=flat-square)
-![.NET](https://img.shields.io/badge/.NET-8-512bd4?style=flat-square)
-![license](https://img.shields.io/badge/license-MIT-30d158?style=flat-square)
+![.NET](https://img.shields.io/badge/.NET%208-WPF-512bd4?style=flat-square)
+![license](https://img.shields.io/github/license/Qiuizi/Qisland?style=flat-square&color=30d158)
 
-[下载 v4.1.0](https://github.com/Qiuizi/Qisland/releases/tag/v4.1.0) · [宣传片](docs/assets/media/qisland-4.1.mp4) · [介绍页](https://qiuizi.github.io/Qisland/) · [更新日志](CHANGELOG.md)
+[下载最新版](https://github.com/Qiuizi/Qisland/releases/latest) · [介绍页](https://qiuizi.github.io/Qisland/) · [更新日志](CHANGELOG.md) · [English](README_EN.md)
+
+<img src="docs/media/qisland-4.3-hero.png" width="860" alt="Qisland 4.3：收起的歌词胶囊、封面取色的音乐卡片、Codex 审批卡、AI 额度页（演示数据）">
 
 </div>
 
 ---
 
-Qisland 是给 Windows 做的「灵动岛」。它最早是为一个大学生自己写的：课在哪上、作业几点截止、Agent 跑完没有、谁在用麦克风——这些答案都很短，却总要切窗口去看。Qisland 把它们收进屏幕顶上的一颗胶囊：平时只显示时间，有事才展开，事情过去就收回去。
+Qisland 把屏幕顶上的一颗胶囊变成你的状态栏：Agent 要你批准命令、AI 额度快用完、验证码到了、鼠标没电了、作业快截止了，都在这里抬眼就看到；平时只显示时间，有事才展开，事情过去就收回去。原生 .NET 8 / WPF，不带浏览器内核，依赖运行时的安装包约 9 MB，全部在本机运行。
 
-4.1.0 是 4.0.0 之后的一轮稳定性更新：自动更新失败可以回滚，本机接口可选用 Token，作业和日历在解析失败时保留旧数据。明细见 [更新日志](CHANGELOG.md)。
+## 亮点
 
-## 三个出发点
-
-**为学生日常而做。** 导入课表，课前提醒、上课显示进度和教室；雨课堂、学习通扫码登录后只读作业截止时间，截止前 24 / 3 / 1 小时各提醒一次，交了就不再吵。再订阅一份 .ics 日历，组会和面试也一起排进来。
-
-**常驻但不打扰。** 胶囊以外的地方照常点击；前台窗口盖满整块屏（全屏游戏、视频，或任务栏自动隐藏时的最大化窗口）就自动让开，把鼠标推到岛正上方的屏幕顶边停一下仍能把它叫出来。各类监听都靠系统通知驱动，不轮询。下面是作者这台机器（Windows 11、4K、120 Hz）上从 `/v1/perf` 读到的数：
-
-| 项目 | 实测 |
-|---|---|
-| 空闲时 CPU（30 秒平均） | 约 0.2–0.3% |
-| 私有内存 | 约 240 MB（WPF + 玻璃外观，不算小） |
-| 线程 / 句柄 | 约 60–75 / 约 1000 |
-
-30 秒平均 CPU 超过 3% 时，性能护栏会自动降级（60 fps、频谱静止、玻璃少截屏），回落后恢复。数字只代表这一台机器，欢迎贴出你的。
-
-**来去干净。** Qisland 只在两处改过别的软件：Codex 的 `~/.codex/hooks.json` 和 DeepSeek Harness 的桥接插件。每一处都记在「改动账本」里（托盘 → 对其他软件的改动），一键还原，只删自己加的那几条，改前先备份。自己的数据全在 `%APPDATA%\Qisland\`；卸载时先在托盘关掉开机自启（它是一个名为 Qisland 的计划任务），再删掉程序和这个文件夹即可。
-
-## 能做什么
-
-**外观与手感**
-- 两套玻璃皮肤：「磨砂玻璃」用 Windows 系统合成的背景模糊；「液态玻璃」参考 iOS 26——中间几乎透明，左上镜面亮边、内圈斜面、边缘一圈淡磨砂，岛里的卡片、通知列表和按钮也是同一套液态样式。托盘「外观」或设置窗里切换。
-- 点一下直达：点岛上任何一条（收起的胶囊也行），直接切到来源软件——系统通知回到发通知的应用，微信 / QQ 回到会话，终端里的 AI 会话回到那个终端，音乐回到播放器或浏览器标签页。
-- 岛仔同款弹簧动效，阴影四周均匀；可停在顶部、左侧或右侧，或者用极简模式只留一小段线。
-- 统一设置窗（托盘「设置…」）：外观、停靠、提示、天气、健康、日历待办、课程作业、翻译 / AI 一处改完。
-
-**学习**
-- 课表 `.ics`：课前 10 分钟提醒，上课时显示进度，首页列出今天剩下的课。
-- 作业雷达：雨课堂、学习通的截止时间，分 24 / 3 / 1 小时三档提醒，已交未批改单独列出，登录快过期会提前说。
-- 本机日程：月历里直接新建 / 编辑（全天、每周重复、地点）；待办可设提醒时间和每周重复。
-- 日历订阅：Outlook、Google、飞书、钉钉的 .ics 私密链接；开始前 10 分钟提醒，腾讯会议 / Zoom / Teams / Meet / 飞书 / 钉钉链接一键加入；支持每天、每周、每月（如「第二个周二」「最后一天」）、每年重复。
-
-**AI Agent**
-- 审批上岛：Codex 和 DeepSeek Harness 要你批准命令时，岛上直接点允许或拒绝；100 秒没点或岛没开，就照常回终端问你，从不默认同意。
-- 状态：Claude Code、Codex、DeepSeek Harness、豆包、Trae、WorkBuddy 跑完、出错、等你确认时，胶囊会变；Codex 额度显示在旁边。
-- 「AI」页：所有 Agent 会话（含 Gemini CLI、Cursor、Qwen Code、OpenCode）的状态和耗时，Codex / 豆包额度环，DeepSeek / Kimi 余额。
-- 接入其他工具：托盘「接入其他 AI 工具」里逐个开启，每一个都先弹窗说明改哪个文件、改什么，同意了才改，改前备份、记进改动账本、可还原。
-
-**翻译与 AI**
-- 划词翻译（`Ctrl+Alt+T`）：岛上左右对照，可复制、可一键替换原文；默认免 Key 的 MyMemory，也可用豆包（方舟）、DeepSeek、Kimi、通义或本机 Ollama。
-- 问 AI（`Ctrl+Alt+K`）：用自己的 Key 在岛上回答，或粘贴到豆包窗口（只粘贴，不发送）。
-- 豆包会员额度（非官方接口，自愿连接）：只读，约 25 分钟一次。
-
-**像 Mac 一样的小事**
-- 麦克风 / 摄像头被谁占用：开始时提示一下，用着时时间旁边留一个橙点 / 绿点。
-- 通话和会议：微信、QQ、腾讯会议、钉钉、飞书、Teams、Zoom 通话时显示「通话中 · 时长」，点一下回到通话窗口。
-- 专注：自己的专注计时或 Windows 11 专注会话期间，只放行审批、通话和一小时内截止的作业，结束后汇成一条摘要。
-- 蓝牙耳机连上 / 断开和电量；断网、换 Wi-Fi、系统代理开关；大写 / 数字锁定。
-- 音乐：接入系统媒体控制（SMTC）的音乐软件和浏览器视频，封面、进度、逐行歌词都在岛上，可暂停和切歌。
-- 通知里的验证码一键复制；天气（7 天、最多 5 个地点、天气提醒）、健康（喝水、久坐）、待办、剪贴板（可置顶）、倒计时、文件架等组件，开哪些、怎么排自己定。
-
-托盘「岛上提示」里每一类都能单独关掉。
+- **Codex / DeepSeek Harness 岛上审批**：它们要执行命令时，岛上直接点「允许」或「拒绝」；100 秒没点就照常回终端问你，从不默认同意。Claude Code 只在岛上显示「等你确认」的提示，不能在岛上审批。
+- **多家 AI 编程工具额度**（4.3 新增，默认关）：Codex、豆包之外，可读取本机已登录的 Claude Code、Cursor、Gemini CLI、Kimi Code 的用量百分比，过 70% / 90% 各提醒一次，收起的胶囊上可选一圈小额度环。这几个用量接口没有公开文档，读不到就不显示；Claude Code / Cursor / Gemini CLI / Kimi Code 四家目前只按接口格式做了解析和自检，还没有用真实订阅账号验证。
+- **邮箱验证码**（4.3 新增，默认关）：只读 IMAP 收件箱（QQ、163、126、Gmail、iCloud 或自定义服务器），新邮件里的验证码直接上岛、一键复制；不标已读、不删不移，授权码存在 Windows 凭据管理器。目前只用模拟 IMAP 服务器测过。
+- **外设电量**（4.3 新增）：蓝牙鼠标、键盘、手柄、耳机的电量，掉到 20% / 10% 提醒；读不到电量的设备不显示。
+- **封面取色的音乐卡片**（4.3 新增）：卡片后面垫一层封面主色的柔光，进度条跟着变色，颜色压在不刺眼、不影响看字的范围；切歌有方向感的过渡；歌词带逐字时间时（酷狗本机歌词、增强 LRC）逐字高亮。
+- **离线国内天气城市**：国内城市从内置离线表秒搜（搜「海南」直接给海口、三亚），海外城市和预报走 Open-Meteo，免 Key。
+- **点击穿透锁定**：`Ctrl+Alt+Shift+Q` 让整座岛不接鼠标，点击和滚轮都落到下面的窗口，通知照常显示。
+- **按程序隐藏**：名单里的程序在前台时岛自动让开，可选「只在挡住岛时才藏」；全屏游戏和视频本来就会自动让开。
+- **截图录屏时隐藏**（默认关）：截图、录屏、共享屏幕里看不到岛，自己屏幕上照常显示。
+- **本地推送 API**：`http://127.0.0.1:9840` 一行 curl 把构建进度、脚本结果推上岛，只监听本机。
 
 ## 看起来是这样
 
-| 有事时 | 展开后（磨砂玻璃） |
-|---|---|
-| <img src="docs/assets/shots/4.1.0/glass/10-class-compact.png" width="380" alt="上课中紧凑态"><br><br><img src="docs/assets/shots/4.1.0/glass/13-lyrics-compact.png" width="380" alt="歌词紧凑态"> | <img src="docs/assets/shots/4.1.0/glass/14-lyrics-home.png" width="420" alt="磨砂玻璃：展开的歌词页"> |
-| **Codex 审批** | **展开后（液态玻璃）** |
-| <img src="docs/assets/shots/4.1.0/glass/17-codex-approval.png" width="420" alt="Codex 审批卡"> | <img src="docs/assets/shots/4.1.0/liquid/14-lyrics-home.png" width="420" alt="液态玻璃：展开的歌词页"> |
+截图都由程序自己的 `--snapshot` 模式用演示数据渲染，不含真实账号和消息。
 
-截图由程序自己的 `--snapshot` 模式用演示数据渲染，磨砂玻璃和液态玻璃各有一套。完整演示见 [宣传片](docs/assets/media/qisland-4.1.mp4)。
+| 收起时 | 展开后 |
+|---|---|
+| <img src="docs/assets/shots/4.3.0/13-lyrics-compact.png" width="380" alt="收起的歌词胶囊"><br><br><img src="docs/assets/shots/4.3.0/02-compact.png" width="380" alt="待确认的 Agent 请求"><br><br><img src="docs/assets/shots/4.3.0/10-class-compact.png" width="300" alt="上课中"> | <img src="docs/assets/shots/4.3.0/14-lyrics-home.png" width="420" alt="封面取色的音乐卡片和歌词"> |
+| **Codex 审批与额度** | **AI 额度页** |
+| <img src="docs/assets/shots/4.3.0/17-codex-approval.png" width="420" alt="Codex 审批卡"> | <img src="docs/assets/shots/4.3.0/19-ai-usage.png" width="420" alt="多家 AI 工具额度（演示数据）"> |
+
+## 还能做什么
+
+**给学生**
+- 课表 `.ics`：课前 10 分钟提醒，上课时显示进度和教室，首页列出今天剩下的课。
+- 作业雷达：雨课堂、学习通扫码登录后只读作业截止时间，24 / 3 / 1 小时三档提醒，交了就不再吵。
+- 日历订阅（Outlook、Google、飞书、钉钉的 .ics 私密链接）和本机日程，会议链接一键加入。
+
+**给开发者**
+- 「AI」页汇总 Claude Code、Codex、DeepSeek Harness、Gemini CLI、Cursor、Qwen Code、OpenCode 等会话的状态和耗时；跑完、出错、等你确认时胶囊会变。
+- 接入其他 AI 工具：托盘「接入其他 AI 工具」里逐个开启，每一个都先说明改哪个文件、改什么，你同意了才改；改前备份、记进「改动账本」，一键还原。
+- 划词翻译（`Ctrl+Alt+T`）和问 AI（`Ctrl+Alt+K`），默认免 Key，也可以用自己的豆包、DeepSeek、Kimi、通义 Key 或本机 Ollama。
+
+**日常小事**
+- 麦克风 / 摄像头被占用时的橙点 / 绿点；微信、QQ、腾讯会议、钉钉、飞书、Teams、Zoom 通话时显示通话时长。
+- 音乐（系统媒体控制 SMTC）：封面、进度、歌词、切歌；通知里的验证码一键复制。
+- 天气、喝水 / 久坐、待办、剪贴板、倒计时、文件架等组件，开哪些、怎么排自己定；收起的胶囊可选显示 CPU / 内存 / 网速。
+- 磨砂玻璃、液态玻璃两套皮肤；可停在顶部、左侧或右侧，或者用极简模式只留一小段线。
+
+托盘「岛上提示」里每一类都能单独关掉。
 
 ## 隐私与边界
 
@@ -93,16 +75,26 @@ Qisland 是给 Windows 做的「灵动岛」。它最早是为一个大学生自
 - 酷狗、汽水音乐的本机歌词缓存只读不写。
 - 音乐软件的播放日志只读不写。
 - 本机接口只监听 `127.0.0.1`。
+- AI 额度（默认关）只读各工具登录时存在本机的令牌去查用量，不改、不刷新这些令牌，令牌和接口原文不写日志。
+- 邮箱验证码（默认关）只读收件箱、不标已读，邮件内容不落盘；授权码存在 Windows 凭据管理器。
 - 不碰 Claude Code 的 `~/.claude/settings.json`；Claude 的 hook 脚本需要你自己运行，Qisland 不会代劳。
 
 ## 安装
 
-需要 Windows 10 或 11 和 [.NET 8 桌面运行时](https://dotnet.microsoft.com/download/dotnet/8.0)。从 [v4.1.0 Release](https://github.com/Qiuizi/Qisland/releases/tag/v4.1.0) 下载 `Qisland-4.1.0-win-x64.zip`，解压后运行 `Qisland.exe`。有新版时岛上会提示，点一下自动更新；更新失败会回滚到旧版。
+需要 Windows 10 或 11（x64）。在 [最新 Release](https://github.com/Qiuizi/Qisland/releases/latest) 里二选一：
+
+| 文件 | 适合 | 说明 |
+|---|---|---|
+| `Qisland-<版本>-full-x64.zip` | 大多数人 | 自带 .NET 8 运行时，解压后直接运行 `Qisland.exe`，约 80 MB |
+| `Qisland-<版本>-win-x64.zip` | 已装 [.NET 8 桌面运行时](https://dotnet.microsoft.com/download/dotnet/8.0) | 体积小，约 9 MB |
+
+解压到一个你有写权限的文件夹（比如 `文档` 下），运行 `Qisland.exe`。有新版时岛上会提示，点一下自动更新：两种包各自只用同一种包更新，更新失败会回滚到旧版。
 
 - Codex 审批：托盘 → Codex → 「在岛上批准 Codex 请求」，或运行 `scripts\install-codex-hooks.ps1`。
 - DeepSeek Harness：装上 [integrations/dsh-qisland-bridge](integrations/dsh-qisland-bridge)，见 [docs/deepseek-harness.md](docs/deepseek-harness.md)。
-- Claude Code：`scripts\install-claude-hooks.ps1`；WSL2 里用 `scripts/qisland-push`。装了之后，等你确认时岛上会弹出提示，但不能在岛上点审批（能点允许 / 拒绝的只有 Codex 和 DeepSeek Harness）。
+- Claude Code：自己运行 `scripts\install-claude-hooks.ps1`（WSL2 里用 `scripts/qisland-push`）。装了之后，等你确认时岛上会弹出提示，但不能在岛上审批。
 - 豆包、Trae、WorkBuddy 不用装：它们的系统通知会被岛接住。
+- 卸载：先在托盘关掉开机自启（一个名为 Qisland 的计划任务），再删掉程序文件夹和 `%APPDATA%\Qisland\`。
 
 ## 用法
 
@@ -140,12 +132,14 @@ curl -X DELETE http://127.0.0.1:9840/v1/island/push/build
 ## 已知限制
 
 - 微信 / QQ 新版的来电窗口标题没逐一核对，来电提醒可能认不出（接通后的「通话中」不受影响）。
-- 蓝牙电量只有通过免提协议上报电量的耳机才有。
+- 设备电量依赖系统蓝牙电量属性或 BLE 电池服务，有的设备读不到，读不到就不显示。
+- 常驻内存主要是 WPF 渲染本身的开销，还在优化；不同机器差别较大。
 - 笔记本亮度键由固件处理，系统亮度弹窗屏蔽不掉。
 - 雨课堂、学习通改版时可能读不到作业，只影响这一项。
 - 学习通的页面结构如果识别不了，可能丢掉旧条目。
 - 划词时，同一进程在几毫秒内连续复制两次，可能被误判为选区。
 - 液态玻璃的边缘磨砂是几圈叠出来的近似渐变，做不出真正的折射；Win10 上玻璃退回定时截屏模糊，背后画面变化快时会稍有滞后。
+- AI 额度（Claude Code / Cursor / Gemini CLI / Kimi Code）和邮箱验证码还没用真实账号验证过，遇到读不到或读错欢迎反馈。
 - 只在少数几台机器上测过，遇到问题欢迎提 [Issue](https://github.com/Qiuizi/Qisland/issues)。
 
 ## 构建
@@ -154,10 +148,12 @@ curl -X DELETE http://127.0.0.1:9840/v1/island/push/build
 git clone https://github.com/Qiuizi/Qisland.git
 cd Qisland
 dotnet publish src\Qisland.App\Qisland.App.csproj -c Release -r win-x64 --self-contained false -p:PublishReadyToRun=true -o app
+# 自带运行时：把 --self-contained false 换成 true
+dotnet run --project tests\Qisland.SelfTest   # 自检
 ```
 
 `src/Qisland.App` 是主程序，`src/Qisland.Core` 是不依赖 WPF 的解析和数据模型（课表 / 日历重复规则、验证码等）。
 
 ## 致谢
 
-v4 的动效、天气、健康、剪贴板置顶、停靠、系统合成玻璃等不少思路来自 [岛仔 Daozai](https://github.com/Renly1994/xiaotang-daozai)（MIT），都是 C# / WPF 自行实现，明细见 [THIRD_PARTY.md](THIRD_PARTY.md)。基于 [JudeKwong/WinIslands](https://github.com/JudeKwong/WinIslands)（MIT）起步，交互参考了 [souverth/dynamic-island-4win](https://github.com/souverth/dynamic-island-4win) 和 [FlorianButz/DynamicWin](https://github.com/FlorianButz/DynamicWin)。MIT 许可，见 [LICENSE](LICENSE)。
+v4 的动效、天气、健康、剪贴板置顶、停靠、系统合成玻璃等不少思路来自 [岛仔 Daozai](https://github.com/Renly1994/xiaotang-daozai)（MIT），都是 C# / WPF 自行实现，明细见 [THIRD_PARTY.md](THIRD_PARTY.md)。基于 [JudeKwong/WinIslands](https://github.com/JudeKwong/WinIslands)（MIT）起步，交互参考了 [souverth/dynamic-island-4win](https://github.com/souverth/dynamic-island-4win) 和 [FlorianButz/DynamicWin](https://github.com/FlorianButz/DynamicWin)。MIT 许可，见 [LICENSE](LICENSE)；第三方组件与数据来源见 [THIRD_PARTY.md](THIRD_PARTY.md)。
