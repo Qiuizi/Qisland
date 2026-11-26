@@ -60,7 +60,11 @@ public sealed partial class App : Application
     private int _quitting;
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
 
-    public static string DataDir { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Qisland");
+    /// <summary>数据目录。只有 --snapshot 渲染素材时才认环境变量 QISLAND_DATA（换一个干净目录，截图里不会带出本机的待办、倒计时和设置）。</summary>
+    public static string DataDir { get; } =
+        Environment.GetCommandLineArgs().Contains("--snapshot") && Environment.GetEnvironmentVariable("QISLAND_DATA") is { Length: > 0 } d
+            ? d
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Qisland");
     public static string InboxDir => Path.Combine(DataDir, "inbox");
 
     [STAThread]

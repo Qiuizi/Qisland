@@ -83,7 +83,7 @@ public sealed partial class IslandWindow
             new(t0 - TimeSpan.FromSeconds(1), "把没写完的作业吹成了诗", "Turning unfinished homework into poems"),
             new(t0 + TimeSpan.FromSeconds(5), "灯一盏一盏亮起来", "Lights come on one by one"),
         ]);
-        Media.ShowDemo(new MediaState("晚自习", "示例歌手", "网易云音乐", "netease", true, null, t0, TimeSpan.FromSeconds(214), DateTime.Now));
+        Media.ShowDemo(new MediaState("晚自习", "示例歌手", "网易云音乐", "netease", true, DemoCover(), t0, TimeSpan.FromSeconds(214), DateTime.Now));
         OnLyricsChanged();
         await Task.Delay(300);
         await Shot(dir, "13-lyrics-compact", Mode.Compact);
@@ -166,6 +166,31 @@ public sealed partial class IslandWindow
             dc.DrawEllipse(new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)), null, new Point(140, 34), 18, 18);
         }
         var bmp = new System.Windows.Media.Imaging.RenderTargetBitmap(192, 108, 96, 96, PixelFormats.Pbgra32);
+        bmp.Render(dv); bmp.Freeze();
+        return bmp;
+    }
+
+    /// <summary>演示封面（132 px）：暮色渐变 + 一轮月亮 + 几扇亮着的窗，用来展示封面取色。全部代码画的，没有真实专辑图。</summary>
+    private static System.Windows.Media.Imaging.BitmapSource DemoCover()
+    {
+        const int n = 132;
+        var dv = new DrawingVisual();
+        using (var dc = dv.RenderOpen())
+        {
+            var sky = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
+            sky.GradientStops.Add(new GradientStop(Color.FromRgb(0x2B, 0x2A, 0x5C), 0));
+            sky.GradientStops.Add(new GradientStop(Color.FromRgb(0xC8, 0x4E, 0x5A), 0.62));
+            sky.GradientStops.Add(new GradientStop(Color.FromRgb(0xF2, 0x9A, 0x5C), 1));
+            dc.DrawRectangle(sky, null, new Rect(0, 0, n, n));
+            dc.DrawEllipse(new SolidColorBrush(Color.FromArgb(0xE6, 0xFF, 0xEF, 0xD6)), null, new Point(96, 34), 13, 13);
+            var bldg = new SolidColorBrush(Color.FromRgb(0x1C, 0x17, 0x2E));
+            dc.DrawRectangle(bldg, null, new Rect(10, 78, 70, 54));
+            var lit = new SolidColorBrush(Color.FromRgb(0xFF, 0xD3, 0x8A));
+            for (var r = 0; r < 3; r++)
+                for (var c = 0; c < 4; c++)
+                    if ((r * 4 + c) % 3 != 1) dc.DrawRectangle(lit, null, new Rect(17 + c * 15, 86 + r * 13, 8, 6));
+        }
+        var bmp = new System.Windows.Media.Imaging.RenderTargetBitmap(n, n, 96, 96, PixelFormats.Pbgra32);
         bmp.Render(dv); bmp.Freeze();
         return bmp;
     }
