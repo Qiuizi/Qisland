@@ -7,6 +7,12 @@
   .\scripts\release.ps1 1.1.0-preview.2 -Notes "试验功能" -ExpectedCommit 1a2b3c4   # 带 - 的版本会标成预发布
   .\scripts\release.ps1 1.0.1 -NotesFile notes.md -ExpectedCommit 1a2b3c4             # 长更新说明放文件里
   .\scripts\release.ps1 1.0.1 "..." -ExpectedCommit 1a2b3c4 -DryRun                    # 只打包，不提交不推送，结束后还原版本号
+  .\scripts\release.ps1 1.0.1 "..." -ExpectedCommit 1a2b3c4 -NoFull                    # 只打依赖运行时的小包，不打自带运行时的包
+
+每次发两个包（都在 releases\ 里，不进 git）：
+- Qisland-<版本>-win-x64.zip：依赖 .NET 8 桌面运行时，体积小；
+- Qisland-<版本>-full-x64.zip：自带 .NET 8 运行时，解压即用。名字故意不含 win-x64，
+  4.2.0 及更早的更新器只认 win-x64，不会误拿它；4.3.0 起自带运行时的安装只用这个包更新（见 Qisland.Core/ReleaseAsset.cs）。
 
 安全约定：
 - 开始前工作区必须干净、HEAD 必须正好是 -ExpectedCommit，否则什么都不改；
@@ -21,7 +27,8 @@ param(
     [string]$NotesFile = "",
     [string]$Remote = "github",
     [Parameter(Mandatory = $true)][string]$ExpectedCommit,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$NoFull
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -80,7 +87,7 @@ try {
     dotnet build Qisland.sln -c Release -p:ContinuousIntegrationBuild=true --nologo -v q
     if ($LASTEXITCODE -ne 0) { throw "编译失败，已停止发版" }
 
-    # 3. 发布（依赖框架，体积小；用户需要 .NET 8 桌面运行时）。ContinuousIntegrationBuild：dll / pdb 里的源码路径记成 /_/，不带本机目录
+    # 3. 发布（依赖框架，体积小；用户需要 .NET 8 桌面运行时。自带运行时的包在 4.5 步）。ContinuousIntegrationBuild：dll / pdb 里的源码路径记成 /_/，不带本机目录
     $out = "publish\Qisland"
     if (Test-Path $out) { Remove-Item $out -Recurse -Force }
     dotnet publish $csproj -c Release -r win-x64 --self-contained false -p:PublishReadyToRun=true -p:ContinuousIntegrationBuild=true -o $out --nologo -v q
@@ -108,6 +115,26 @@ try {
     if (Test-Path $zip) { Remove-Item $zip }
     Compress-Archive -Path "$out\*" -DestinationPath $zip
     Write-Host ("打包 → {0}（{1:0.0} MB）" -f $zip, ((Get-Item $zip).Length / 1MB)) -ForegroundColor Cyan
+
+    # 4.5 自带 .NET 8 运行时的包：没装运行时的电脑解压就能用
+    $zipFull = $null
+    if (-not $NoFull) {
+        $outFull = "publish\Qisland-full"
+        if (Test-Path $outFull) { Remove-Item $outFull -Recurse -Force }
+        dotnet publish $csproj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -p:ContinuousIntegrationBuild=true -o $outFull --nologo -v q
+        if ($LASTEXITCODE -ne 0) { throw "发布（自带运行时）失败" }
+        $exeFull = Join-Path $outFull "Qisland.exe"
+        if (-not (Test-Path -LiteralPath $exeFull)) { throw "自带运行时的产物缺少 Qisland.exe" }
+        if (-not (Test-Path -LiteralPath (Join-Path $outFull "hostfxr.dll"))) { throw "自带运行时的产物里没有 hostfxr.dll，不是自包含发布" }
+        if (Get-ChildItem -LiteralPath $outFull -Recurse -File -Filter "WinIslands.Legacy.exe" -ErrorAction SilentlyContinue) { throw "自带运行时的产物包含旧版 WinIslands.Legacy.exe" }
+        $infoFull = [Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path $exeFull))
+        if ($infoFull.ProductVersion -ne $declaredVersion -or $infoFull.CompanyName -ne "Qisland.App") { throw "自带运行时的产物版本 / 入口不对：$($infoFull.CompanyName) v$($infoFull.ProductVersion)" }
+        $zipFull = "releases\Qisland-$Version-full-x64.zip"
+        if ($zipFull -match 'win-x64') { throw "自带运行时的包名不能含 win-x64（旧版更新器会误拿）" }
+        if (Test-Path $zipFull) { Remove-Item $zipFull }
+        Compress-Archive -Path "$outFull\*" -DestinationPath $zipFull
+        Write-Host ("打包 → {0}（{1:0.0} MB，自带运行时）" -f $zipFull, ((Get-Item $zipFull).Length / 1MB)) -ForegroundColor Cyan
+    }
 }
 catch {
     Restore-Csproj
@@ -142,7 +169,8 @@ Invoke-Git tag -a $tag -m "Qisland $tag"
 Invoke-Git -c http.postBuffer=524288000 -c http.version=HTTP/1.1 -c credential.helper= -c "credential.helper=!gh auth git-credential" push $Remote HEAD:main --follow-tags
 
 # 7. 建 Release，附上压缩包
-$ghArgs = @("release", "create", $tag, $zip, "--title", "Qisland $tag", "--notes", $Notes, "--verify-tag")
+$assets = @($zip); if ($zipFull) { $assets += $zipFull }
+$ghArgs = @("release", "create", $tag) + $assets + @("--title", "Qisland $tag", "--notes", $Notes, "--verify-tag")
 if ($pre) { $ghArgs += "--prerelease" } else { $ghArgs += "--latest" }
 gh @ghArgs
 if ($LASTEXITCODE -ne 0) { throw "创建 Release 失败" }

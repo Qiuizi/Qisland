@@ -29,6 +29,9 @@ public sealed class Updater
 
     public static string Current { get; } = ReadVersion();
 
+    /// <summary>自带 .NET 运行时的安装（程序目录里有 hostfxr.dll）：更新时只用自带运行时的包。</summary>
+    public static bool SelfContained { get; } = File.Exists(Path.Combine(AppContext.BaseDirectory, "hostfxr.dll"));
+
     public Updater(ActivityStore store, HttpClient http, Action quit) { _store = store; _http = http; _quit = quit; }
 
     private sealed record Release(string Tag, string Name, string Notes, string Url, string? ZipUrl, long ZipSize, bool Pre, string? Sha256);
@@ -113,13 +116,14 @@ public sealed class Updater
             var tag = r.GetProperty("tag_name").GetString() ?? "";
             if (SemVer.Compare(tag, current) <= 0) continue;
             if (best != null && SemVer.Compare(tag, best.Tag) <= 0) continue;
-            string? zip = null, sha = null; long size = 0;
+            string? zip = null, sha = null; long size = 0; var rank = -1;
             foreach (var a in r.GetProperty("assets").EnumerateArray())
             {
                 var n = a.GetProperty("name").GetString() ?? "";
-                if (!n.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) continue;
-                if (zip == null || n.Contains("win-x64", StringComparison.OrdinalIgnoreCase))
+                var k = ReleaseAsset.Rank(n, SelfContained);
+                if (k >= 0 && k >= rank)
                 {
+                    rank = k;
                     zip = a.GetProperty("browser_download_url").GetString(); size = a.GetProperty("size").GetInt64();
                     sha = a.TryGetProperty("digest", out var d) && d.ValueKind == JsonValueKind.String && d.GetString()!.StartsWith("sha256:") ? d.GetString()![7..].ToLowerInvariant() : null;
                 }

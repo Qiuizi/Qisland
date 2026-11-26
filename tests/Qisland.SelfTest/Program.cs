@@ -293,6 +293,20 @@ void Eq<T>(T actual, T expected, string name)
     Check(ev.Count == 1 && ev[0].End - ev[0].Start == TimeSpan.FromMinutes(45), "只有 DURATION 的日程按时长结束");
 }
 
+// ───────────── 4.3 第三波：更新包挑选 ─────────────
+{
+    string? PickZip(bool sc, params string[] names) { string? z = null; var rank = -1; foreach (var n in names) { var k = ReleaseAsset.Rank(n, sc); if (k >= 0 && k >= rank) { rank = k; z = n; } } return z; }
+    Eq(PickZip(false, "Qisland-4.3.0-full-x64.zip", "Qisland-4.3.0-win-x64.zip"), "Qisland-4.3.0-win-x64.zip", "依赖运行时：拿 win-x64 包");
+    Eq(PickZip(false, "Qisland-4.3.0-win-x64.zip", "Qisland-4.3.0-full-x64.zip"), "Qisland-4.3.0-win-x64.zip", "依赖运行时：顺序反过来也不拿 full");
+    Eq(PickZip(true, "Qisland-4.3.0-win-x64.zip", "Qisland-4.3.0-full-x64.zip"), "Qisland-4.3.0-full-x64.zip", "自带运行时：拿 full 包");
+    Check(PickZip(true, "Qisland-4.2.0-win-x64.zip") == null, "自带运行时：没有 full 包就不自动更新");
+    Eq(PickZip(false, "notes.txt", "Qisland.zip"), "Qisland.zip", "旧规则：没有 win-x64 时用第一个 zip");
+    // 4.2.0 及以前的规则（第一个 zip 或带 win-x64 的）永远拿不到 full 包
+    string? Old(params string[] names) { string? z = null; foreach (var n in names) { if (!n.EndsWith(".zip")) continue; if (z == null || n.Contains("win-x64")) z = n; } return z; }
+    Eq(Old("Qisland-4.3.0-full-x64.zip", "Qisland-4.3.0-win-x64.zip"), "Qisland-4.3.0-win-x64.zip", "旧更新器不会误拿 full 包");
+    Check(!"Qisland-4.3.0-full-x64.zip".Contains("win-x64"), "full 包名不含 win-x64");
+}
+
 Console.WriteLine($"{passed} 项通过，{failed} 项失败");
 if (failed > 0) return 1;
 Console.WriteLine("SELFTEST_OK");
