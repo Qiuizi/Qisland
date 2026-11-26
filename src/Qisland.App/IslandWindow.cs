@@ -130,6 +130,7 @@ public sealed partial class IslandWindow : Window
     public IslandWindow(ActivityStore store)
     {
         _store = store;
+        Perf.Load();   // perf.txt 的排查开关启动时就读（以前只在跑测速时才读，平时写了也不生效）
         _frameDone = () => Stats.Ui(_frameSw.Elapsed.TotalMilliseconds);
         _layered = Environment.GetEnvironmentVariable("QISLAND_LAYERED") == "1";
         Title = "Qisland";

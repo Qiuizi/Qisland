@@ -201,10 +201,10 @@ internal static class Perf
 {
     public static string Text = "";
     public static bool Has(string f) => (" " + Text + " ").Contains(" " + f + " ");
-    public static bool NoPop, NoDots, NoPageCache, NoHiRes, NoBlur, Cache, NoShadow, NoGhostCache, NoGlassAnim;
+    public static bool NoPop, NoDots, NoPageCache, NoHiRes, NoBlur, Cache, NoShadow, NoGhostCache, NoGlassAnim, ForceShow;
     public static void Load()
     {
         try { var p = System.IO.Path.Combine(App.DataDir, "perf.txt"); Text = System.IO.File.Exists(p) ? System.IO.File.ReadAllText(p).Trim() : ""; } catch { Text = ""; }
-        NoHiRes = Has("nohires"); NoPop = Has("nopop"); NoDots = Has("nodots"); NoPageCache = Has("nopagecache"); NoBlur = Has("noblur"); Cache = Has("cache"); NoShadow = Has("noshadow"); NoGhostCache = Has("noghostcache"); NoGlassAnim = Has("noglassanim");
+        NoHiRes = Has("nohires"); NoPop = Has("nopop"); NoDots = Has("nodots"); NoPageCache = Has("nopagecache"); NoBlur = Has("noblur"); Cache = Has("cache"); NoShadow = Has("noshadow"); NoGhostCache = Has("noghostcache"); NoGlassAnim = Has("noglassanim"); ForceShow = Has("forceshow");
     }
 }

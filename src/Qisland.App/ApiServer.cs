@@ -25,6 +25,8 @@ public sealed class ApiServer : IDisposable
     public Action<double, string?>? Peek;
     /// <summary>调试版：打开设置窗的第几页（截图核对设置页用）。</summary>
     public Action<int>? Settings;
+    /// <summary>调试版：立刻整理一次工作集（量内存用）。</summary>
+    public Action<string>? Memory;
     private readonly Action<Action> _post;
     private readonly ActivityStore _store;
     private readonly string? _approvalKey;
@@ -506,6 +508,13 @@ public sealed class ApiServer : IDisposable
         {
             var cat = int.TryParse(body.Trim(), out var c) ? c : 0;
             _post(() => Settings(cat));
+            return (200, "{\"ok\":true}");
+        }
+
+        if (method == "POST" && path == "/v1/debug/memory" && Memory != null)
+        {
+            var what = body.Trim();
+            _post(() => Memory(what));
             return (200, "{\"ok\":true}");
         }
 

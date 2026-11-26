@@ -269,6 +269,9 @@ public sealed partial class App : Application
                 Dispatcher.Invoke(() => DebugJumpTarget.Resolve(_store, id, _media));
             if (_api != null) { _api.PerfJson = _perf.Json; _api.Peek = (s, p) => _window?.PeekFor(s, p); _api.Settings = c => { if (c < 0) OpenWeatherCities(); else OpenSettings(c); }; }
             PerfGuard.Changed += () => _window?.OnPerfChanged();
+#if DEBUG
+            if (_api != null) _api.Memory = _ => Trim();
+#endif
             PerfGuard.MemoryPressure += () => _window?.OnMemoryPressure();
             _quota = new CodexQuota(a => Dispatcher.BeginInvoke(a));
             _window.Quota = _quota; _quota.Changed += _window.OnQuotaChanged;
