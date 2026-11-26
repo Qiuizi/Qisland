@@ -878,10 +878,22 @@ public sealed partial class App : Application
         _tray = new System.Windows.Forms.NotifyIcon
         {
             Text = $"Qisland v{Updater.Current}",
-            Icon = System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? System.Drawing.SystemIcons.Application,
+            Icon = TrayIcon(),
             ContextMenuStrip = menu,
             Visible = true,
         };
+    }
+
+    /// <summary>托盘图标：从内嵌的 qisland.ico 里按系统小图标尺寸（16 / 20 / 24…）取最合适的一帧，比从 exe 取 32 px 再缩清楚。</summary>
+    private static System.Drawing.Icon TrayIcon()
+    {
+        try
+        {
+            using var s = typeof(App).Assembly.GetManifestResourceStream("qisland.ico");
+            if (s != null) return new System.Drawing.Icon(s, System.Windows.Forms.SystemInformation.SmallIconSize);
+        }
+        catch (Exception ex) { Log("托盘图标: " + ex.GetType().Name); }
+        return System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? System.Drawing.SystemIcons.Application;
     }
 
     private async void Quit()

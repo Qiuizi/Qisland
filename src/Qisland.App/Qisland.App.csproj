@@ -11,7 +11,7 @@
     <AssemblyName>Qisland</AssemblyName>
     <RootNamespace>Qisland.App</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <ApplicationIcon>..\WinIslands\Assets\winislands.ico</ApplicationIcon>
+    <ApplicationIcon>Assets\qisland.ico</ApplicationIcon>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <Version>4.2.0</Version>
     <FileVersion>4.2.0.0</FileVersion>
@@ -36,6 +36,7 @@
     <ProjectReference Include="..\Qisland.Core\Qisland.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Assets\qisland.ico" LogicalName="qisland.ico" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="QRCoder" Version="1.8.1" />
