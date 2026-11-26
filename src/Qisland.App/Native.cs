@@ -85,6 +85,32 @@ internal static class Native
 
     [DllImport("psapi.dll")] public static extern bool EmptyWorkingSet(IntPtr hProcess);
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PROCESS_MEMORY_COUNTERS_EX2
+    {
+        public uint cb, PageFaultCount;
+        public UIntPtr PeakWorkingSetSize, WorkingSetSize, QuotaPeakPagedPoolUsage, QuotaPagedPoolUsage,
+            QuotaPeakNonPagedPoolUsage, QuotaNonPagedPoolUsage, PagefileUsage, PeakPagefileUsage, PrivateUsage, PrivateWorkingSetSize, SharedCommitUsage;
+    }
+    [DllImport("psapi.dll", SetLastError = true)] private static extern bool GetProcessMemoryInfo(IntPtr h, out PROCESS_MEMORY_COUNTERS_EX2 c, uint cb);
+
+    /// <summary>
+    /// 三个内存口径（MB）：工作集（含共享的系统 DLL 页）、私有工作集（任务管理器「内存」列默认显示的就是它）、私有提交（Private Bytes）。
+    /// 私有工作集要 Windows 10 21H2 之后的结构体，老系统读不到时返回 -1。
+    /// </summary>
+    public static (double ws, double privateWs, double commit) MemoryMb()
+    {
+        var c = new PROCESS_MEMORY_COUNTERS_EX2 { cb = (uint)Marshal.SizeOf<PROCESS_MEMORY_COUNTERS_EX2>() };
+        var me = System.Diagnostics.Process.GetCurrentProcess().Handle;
+        if (GetProcessMemoryInfo(me, out c, c.cb))
+        {
+            var pws = c.PrivateWorkingSetSize.ToUInt64();   // 老系统不认识这个字段时会留 0
+            return (c.WorkingSetSize.ToUInt64() / 1048576.0, pws == 0 ? -1 : pws / 1048576.0, c.PrivateUsage.ToUInt64() / 1048576.0);
+        }
+        var p = System.Diagnostics.Process.GetCurrentProcess();
+        return (p.WorkingSet64 / 1048576.0, -1, p.PrivateMemorySize64 / 1048576.0);
+    }
+
     public static void SetExStyle(IntPtr hwnd, int flag, bool on)
     {
         var cur = (long)GetWindowLongPtr(hwnd, GWL_EXSTYLE);

@@ -244,6 +244,18 @@ internal sealed class SystemGlass : IDisposable
         else ShowWindow(_hwnd, 0);
     }
 
+    /// <summary>
+    /// 命中区域跟岛窗口一致（坐标相对窗口左上角，两个窗口同位置同大小）。
+    /// 只管点击落在哪：系统模糊本身不吃区域裁剪（见 IslandWindow.SetGlass 上面的说明），模糊形状仍由合成视觉的裁剪决定。
+    /// 区域句柄交给系统，调用方不再释放；底板不可用时这里负责删掉。
+    /// </summary>
+    public void SetRegion(IntPtr rgn)
+    {
+        if (!Ok || _hwnd == IntPtr.Zero) { DeleteObject(rgn); return; }
+        if (SetWindowRgn(_hwnd, rgn, false) == 0) DeleteObject(rgn);
+    }
+    [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr h);
+
     /// <summary>和岛窗口对齐（位置、大小）并压在它正下方。</summary>
     public void Follow()
     {

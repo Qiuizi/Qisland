@@ -34,6 +34,13 @@ public sealed class MediaWatcher
     private string? _clockCompared;
     private string _artKey = "";
     private BitmapSource? _art;
+    // 封面：很多播放器先报歌名、过一会儿才补封面（第二次 MediaPropertiesChanged，有的干脆不再发事件），
+    // 切歌瞬间读到的还可能是上一首的封面。所以封面和歌名分开判断：没拿到 / 疑似上一首的，就隔一会儿再读，每首最多补读 3 次。
+    private int _artTries;
+    private string _artAlbum = "", _prevAlbum = "";
+    private ulong _artHash, _prevHash;
+    private int _artRetryArmed;
+    private const int MaxArtTries = 3;
     public MediaState? Current { get; private set; }
     public event Action? Changed;
 
@@ -149,6 +156,8 @@ public sealed class MediaWatcher
             if (title.Length == 0) title = meta.title;
             if (artist.Length == 0) artist = meta.artist;
             if (dur <= TimeSpan.Zero && meta.dur > 0) dur = TimeSpan.FromMilliseconds(meta.dur);
+            // 详情拿到了、封面下载却失败过（超时、断网）：以前不会再下，这首歌一直没封面；现在每首最多补下 3 次
+            if (meta.pic.Length > 0 && _ncmArt?.Item1 != id) NcmLoadArt(id, meta.pic);
         }
         else NcmLoadMeta(id);
         if (title.Length == 0 && NcmElog.WindowTitle() is { } w) { title = w.title; if (artist.Length == 0) artist = w.artist; }
@@ -185,21 +194,41 @@ public sealed class MediaWatcher
                 var pic = s.TryGetProperty("album", out var al) && al.TryGetProperty("picUrl", out var pu) ? pu.GetString() ?? "" : "";
                 var dur = s.TryGetProperty("duration", out var d) && d.TryGetDouble(out var dd) ? dd : 0;
                 _ncmMeta[id] = (title, artist, pic, dur);
-                if (pic.Length > 0)
-                {
-                    var bytes = await NcmHttp.GetByteArrayAsync(pic.Replace("http://", "https://") + "?param=132y132");
-                    var bmp = new BitmapImage();
-                    bmp.BeginInit();
-                    bmp.CacheOption = BitmapCacheOption.OnLoad;
-                    bmp.DecodePixelWidth = 132;
-                    bmp.StreamSource = new MemoryStream(bytes);
-                    bmp.EndInit();
-                    bmp.Freeze();
-                    _ncmArt = Tuple.Create(id, (BitmapSource)bmp);
-                }
-                _ncmCur = null; // 让下一拍按“有变化”刷新
+                _ncmCur = null; // 让下一拍按“有变化”刷新（下一拍的 NcmState 会去下封面）
             }
             catch (Exception ex) { App.Log("网易云详情: " + ex.Message); lock (_ncmMetaLoading) _ncmMetaLoading.Remove(id); }
+        });
+    }
+
+    private readonly Dictionary<string, int> _ncmArtTries = [];
+    private int _ncmArtBusy;
+    private void NcmLoadArt(string id, string pic)
+    {
+        lock (_ncmArtTries)
+        {
+            var n = _ncmArtTries.GetValueOrDefault(id);
+            if (n >= 3 || Interlocked.Exchange(ref _ncmArtBusy, 1) == 1) return;
+            if (_ncmArtTries.Count > 200) _ncmArtTries.Clear();
+            _ncmArtTries[id] = n + 1;
+        }
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var bytes = await NcmHttp.GetByteArrayAsync(pic.Replace("http://", "https://") + "?param=132y132");
+                var bmp = new BitmapImage();
+                bmp.BeginInit();
+                bmp.CacheOption = BitmapCacheOption.OnLoad;
+                bmp.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
+                bmp.DecodePixelWidth = 132;
+                bmp.StreamSource = new MemoryStream(bytes);
+                bmp.EndInit();
+                bmp.Freeze();
+                _ncmArt = Tuple.Create(id, (BitmapSource)bmp);
+                _ncmCur = null;
+            }
+            catch (Exception ex) { App.Log("网易云封面: " + ex.GetType().Name + " " + ex.Message); await Task.Delay(5000); }
+            finally { _ncmArtBusy = 0; }
         });
     }
 
@@ -430,11 +459,23 @@ public sealed class MediaWatcher
             video |= site != null;
         }
 
-        var key = props.Title + "|" + props.Artist + "|" + props.AlbumTitle;
+        var key = aumid + "|" + props.Title + "|" + props.Artist + "|" + props.AlbumTitle;
         if (key != _artKey)
         {
             _artKey = key;
-            _art = props.Thumbnail != null ? await LoadArt(props.Thumbnail) : null;
+            if (_art != null) { _prevHash = _artHash; _prevAlbum = _artAlbum; }
+            _art = null; _artHash = 0; _artTries = 0;
+            _artAlbum = props.AlbumTitle ?? "";
+        }
+        if (_art == null && _artTries < MaxArtTries)
+        {
+            _artTries++;
+            var art = props.Thumbnail != null ? await LoadArt(props.Thumbnail, src) : null;
+            // 专辑不同、封面字节却和上一首一模一样：多半是播放器还没换封面，先不认，稍后再读；最后一次还一样就认（真有共用封面的）
+            var stale = art != null && _artHash == 0 && art.Value.hash == _prevHash && _artAlbum != _prevAlbum && _artTries < MaxArtTries;
+            if (art != null && !stale) { _art = art.Value.bmp; _artHash = art.Value.hash; }
+            else if (!video || props.Thumbnail != null) ArmArtRetry(_artTries);
+            if (art == null && _artTries == MaxArtTries) App.Log($"media art: {src} 这首歌没有拿到封面（{(props.Thumbnail == null ? "播放器没提供" : "读取或解码失败")}），显示软件图标");
         }
         var dur = tl.EndTime - tl.StartTime;
         _start = tl.StartTime;
@@ -445,25 +486,53 @@ public sealed class MediaWatcher
             video, SourceCount(), canSeek, Aumid: aumid);
     }
 
-    private static async Task<BitmapSource?> LoadArt(Windows.Storage.Streams.IRandomAccessStreamReference r)
+    /// <summary>封面没拿到时隔一会儿再读一次（同一时刻只排一个）：第 1 次 0.6 秒后，之后 1.5 秒。</summary>
+    private void ArmArtRetry(int tries)
+    {
+        if (tries >= MaxArtTries || Interlocked.Exchange(ref _artRetryArmed, 1) == 1) return;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(tries <= 1 ? 600 : 1500);
+            _artRetryArmed = 0;
+            await RefreshAsync();
+        });
+    }
+
+    private static async Task<(BitmapSource bmp, ulong hash)?> LoadArt(Windows.Storage.Streams.IRandomAccessStreamReference r, string src)
     {
         try
         {
             using var ras = await r.OpenReadAsync();
+            if (ras.Size == 0) return null;   // 有的播放器先给一个空流，稍后才写进去
             using var net = ras.AsStreamForRead();
             var ms = new MemoryStream();
             await net.CopyToAsync(ms);
+            if (ms.Length == 0) return null;
+            var hash = Fnv(ms.GetBuffer().AsSpan(0, (int)ms.Length));
             ms.Position = 0;
             var bmp = new BitmapImage();
             bmp.BeginInit();
             bmp.CacheOption = BitmapCacheOption.OnLoad;
+            bmp.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
             bmp.DecodePixelWidth = 132; // 44 DIP × 300% 缩放
             bmp.StreamSource = ms;
             bmp.EndInit();
             bmp.Freeze();
-            return bmp;
+            return (bmp, hash);
         }
-        catch { return null; }
+        catch (Exception ex)
+        {
+            // 只记来源和错误类型，不记歌名
+            App.Log($"media art: {src} 封面读取失败 {ex.GetType().Name} {ex.HResult:X8}");
+            return null;
+        }
+    }
+
+    private static ulong Fnv(ReadOnlySpan<byte> b)
+    {
+        var h = 14695981039346656037UL;
+        foreach (var x in b) { h ^= x; h *= 1099511628211UL; }
+        return h;
     }
 
     // AUMID 例子：cloudmusic.exe、QQMusic.exe、Spotify.exe / SpotifyAB.SpotifyMusic_…!Spotify、Chrome、MSEdge、308046B0AF4A39CB（Firefox）

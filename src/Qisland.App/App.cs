@@ -919,7 +919,9 @@ public sealed partial class App : Application
         GC.Collect(2, GCCollectionMode.Optimized, false, true);
         Native.EmptyWorkingSet(Process.GetCurrentProcess().Handle);
         var info = GC.GetGCMemoryInfo();
-        Log($"trim: managed {GC.GetTotalMemory(false) / 1048576.0:0.0} MB, gc committed {info.TotalCommittedBytes / 1048576.0:0.0} MB, private {Process.GetCurrentProcess().PrivateMemorySize64 / 1048576.0:0.0} MB");
+        var (ws, pws, commit) = Native.MemoryMb();
+        // 托管堆只是一小块；私有提交减去 GC 提交，剩下的基本是 WPF 渲染 / 显卡驱动 / 图片等本机内存
+        Log($"trim: managed {GC.GetTotalMemory(false) / 1048576.0:0.0} MB, gc committed {info.TotalCommittedBytes / 1048576.0:0.0} MB, private {commit:0.0} MB, native≈{commit - info.TotalCommittedBytes / 1048576.0:0.0} MB, ws {ws:0.0} MB, private ws {pws:0.0} MB");
     }
 
     public static void Log(string msg)

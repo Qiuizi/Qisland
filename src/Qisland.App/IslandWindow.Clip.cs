@@ -10,11 +10,14 @@ namespace Qisland.App;
 
 /// <summary>
 /// 剪贴板历史：文字、文件和图片（图片最多留 3 张、每张不超过 1600 万像素），最多 30 条，只放在内存里（退出即清空，不落盘）。
+/// 图片不再整张解码常驻：列表只留一张小缩略图，原图压成 PNG 字节放在内存里，点回去复制时才解开。
 /// 密码管理器复制的内容会带 ExcludeClipboardContentFromMonitorProcessing / CanIncludeInClipboardHistory=0 标记，直接跳过。
 /// </summary>
 public sealed partial class IslandWindow
 {
-    private sealed record ClipItem(string Text, string[]? Files, DateTime At, System.Windows.Media.Imaging.BitmapSource? Image = null, bool Pinned = false);
+    /// <summary>Image 是显示用的小缩略图；Full 是原图的 PNG 字节（后台压缩，复制回去时才解码）；Sig 用来判断连着复制的是不是同一张。</summary>
+    private sealed record ClipItem(string Text, string[]? Files, DateTime At, System.Windows.Media.Imaging.BitmapSource? Image = null, bool Pinned = false,
+        Task<byte[]?>? Full = null, ulong Sig = 0);
     // 置顶的文字：用户主动钉住才落盘，DPAPI 加密（只有本机本用户能解开）
     private ClipPins? _pins;
     private static string PinFile => Path.Combine(App.DataDir, "clip-pins.dat");
@@ -42,7 +45,8 @@ public sealed partial class IslandWindow
     private readonly List<ClipItem> _clips = new();
     private string? _selfCopy;
     private DateTime _copiedFlash = DateTime.MinValue;
-    // 图片很占内存（4K 截图 ≈ 33 MB）：最多留 3 张，超过 1600 万像素的不进历史
+    // 图片很占内存（4K 截图解码后 ≈ 33 MB，以前三张原图常驻、显示时还要整张传进显卡）：现在只留缩略图 + PNG 字节，
+    // 截图类图片压完通常几百 KB 到几 MB。最多留 3 张，超过 1600 万像素的不进历史
     private const int MaxClipImages = 3;
     private const long MaxClipPixels = 16_000_000;
 
@@ -78,8 +82,10 @@ public sealed partial class IslandWindow
                 img.Freeze();
                 // 同一张图连着复制两次不重复记；用尺寸 + 采样像素粗判
                 var key = $"图片 {img.PixelWidth}×{img.PixelHeight}";
-                item = new ClipItem(key, null, DateTime.Now, img);
-                if (_clips.FirstOrDefault() is { Image: { } last } && SameImage(last, img)) return;
+                var sig = ImageSig(img);
+                if (_clips.FirstOrDefault() is { Image: not null, Sig: var lastSig } last && last.Text == key && lastSig == sig && sig != 0) return;
+                var full = Task.Run(() => EncodePng(img));   // 压完 img 就没人引用了，原图跟着释放
+                item = new ClipItem(key, null, DateTime.Now, Thumb(img), Full: full, Sig: sig);
             }
             if (item == null) return;
             if (item.Files == null && item.Text == _selfCopy) { _selfCopy = null; return; }
@@ -96,7 +102,7 @@ public sealed partial class IslandWindow
     {
         try
         {
-            if (c.Image != null) Clipboard.SetImage(c.Image);
+            if (c.Image != null) { _ = CopyBackImage(c); return; }
             else if (c.Files != null)
             {
                 var sc = new System.Collections.Specialized.StringCollection();
@@ -113,6 +119,59 @@ public sealed partial class IslandWindow
             RebuildExpanded();
         }
         catch (Exception ex) { App.Log("写剪贴板失败: " + ex.Message); }
+    }
+
+    private async Task CopyBackImage(ClipItem c)
+    {
+        try
+        {
+            System.Windows.Media.Imaging.BitmapSource img = c.Image!;
+            if (c.Full != null && await c.Full is { } png)
+            {
+                var dec = new System.Windows.Media.Imaging.PngBitmapDecoder(new MemoryStream(png), System.Windows.Media.Imaging.BitmapCreateOptions.None, System.Windows.Media.Imaging.BitmapCacheOption.OnLoad);
+                img = dec.Frames[0];
+            }
+            Clipboard.SetImage(img);   // 系统剪贴板接手后，这份解码出来的原图随即可以回收
+            _clips.Remove(c);
+            _clips.Insert(0, c with { At = DateTime.Now });
+            _copiedFlash = DateTime.Now;
+            RebuildExpanded();
+        }
+        catch (Exception ex) { App.Log("写剪贴板失败: " + ex.Message); }
+    }
+
+    private static byte[]? EncodePng(System.Windows.Media.Imaging.BitmapSource img)
+    {
+        try
+        {
+            var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(img));
+            using var ms = new MemoryStream();
+            enc.Save(ms);
+            return ms.ToArray();
+        }
+        catch (Exception ex) { App.Log("剪贴板图片压缩失败: " + ex.GetType().Name); return null; }
+    }
+
+    /// <summary>
+    /// 列表里的缩略图（48×32 DIP，按 300% 缩放算 144×96 像素，铺满时短边也够）：
+    /// 像素拷进一块小数组再建位图，不留对原图的引用。
+    /// </summary>
+    private static System.Windows.Media.Imaging.BitmapSource? Thumb(System.Windows.Media.Imaging.BitmapSource img)
+    {
+        try
+        {
+            var k = Math.Min(1, Math.Max(144.0 / img.PixelWidth, 96.0 / img.PixelHeight));
+            System.Windows.Media.Imaging.BitmapSource src = new System.Windows.Media.Imaging.FormatConvertedBitmap(img, PixelFormats.Bgra32, null, 0);
+            if (k < 1) src = new System.Windows.Media.Imaging.TransformedBitmap(src, new ScaleTransform(k, k));
+            int w = src.PixelWidth, h = src.PixelHeight, stride = w * 4;
+            var px = new byte[stride * h];
+            src.CopyPixels(px, stride, 0);
+            var t = System.Windows.Media.Imaging.BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgra32, null, px, stride);
+            t.Freeze();
+            return t;
+        }
+        catch { return null; }
     }
 
     private void BuildClip(StackPanel stack)
@@ -248,19 +307,19 @@ public sealed partial class IslandWindow
         return b;
     }
 
-    private static bool SameImage(System.Windows.Media.Imaging.BitmapSource a, System.Windows.Media.Imaging.BitmapSource b)
+    /// <summary>同一张图的粗判：取中间一行的前 64 个像素算个指纹（和以前 SameImage 比的是同一段像素）。</summary>
+    private static ulong ImageSig(System.Windows.Media.Imaging.BitmapSource a)
     {
-        if (a.PixelWidth != b.PixelWidth || a.PixelHeight != b.PixelHeight) return false;
         try
         {
             int w = Math.Min(64, a.PixelWidth), stride = w * 4;
-            var pa = new byte[stride]; var pb = new byte[stride];
-            var r = new Int32Rect(0, a.PixelHeight / 2, w, 1);
-            new System.Windows.Media.Imaging.FormatConvertedBitmap(a, PixelFormats.Bgra32, null, 0).CopyPixels(r, pa, stride, 0);
-            new System.Windows.Media.Imaging.FormatConvertedBitmap(b, PixelFormats.Bgra32, null, 0).CopyPixels(r, pb, stride, 0);
-            return pa.AsSpan().SequenceEqual(pb);
+            var pa = new byte[stride];
+            new System.Windows.Media.Imaging.FormatConvertedBitmap(a, PixelFormats.Bgra32, null, 0).CopyPixels(new Int32Rect(0, a.PixelHeight / 2, w, 1), pa, stride, 0);
+            var h = 14695981039346656037UL;
+            foreach (var x in pa) { h ^= x; h *= 1099511628211UL; }
+            return h == 0 ? 1 : h;
         }
-        catch { return false; }
+        catch { return 0; }
     }
 
     private static bool LooksLikeUrl(string s) => s.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || s.StartsWith("https://", StringComparison.OrdinalIgnoreCase);

@@ -638,6 +638,7 @@ public sealed partial class IslandWindow : Window
             else { _sys.SetSolid(want == GlassRender.SystemSolid, !SystemLook.AppsLight); _sys.SetLiquid(Theme.IsLiquid); }
         }
         if (!sys) _sys?.Show(false);
+        if (sys && !_sysOn) _lastRgn = (-1, -1, -1, -1, -1, -1);   // 底板刚打开：下一帧把当前区域也套给它
         _sysOn = sys;
         _glass.Enable(_hwnd, want == GlassRender.Capture);
         _glass.Host.Opacity = Theme.IsLiquid ? 0.4 : 1; // 液态玻璃：截屏模糊只透出四成，中间更通透
@@ -691,11 +692,15 @@ public sealed partial class IslandWindow : Window
         static double Up(double v) => Math.Ceiling(v / 24) * 24;
         // 收起停稳时窗口区域只比岛大一圈（收起时影子只扩 5、下偏 1，正好落在这圈里，见 IslandShadow）：区域里的点击会被岛吃掉，
         // 以前四周 16、下面 20 的阴影带会挡住最大化浏览器标签栏 / 地址栏正中间那一小块。展开和动画时照旧留足阴影。
+        // 收起停稳时更进一步：不再按 24 取整（取整会让区域比胶囊宽十几、高十几 DIP，挡住胶囊下面一截），
+        // 区域 = 胶囊本身 + 收起阴影实际画到的范围（四周 5、上 4、下 6），阴影外一像素都不挡。
         var tight = !_animating && _mode != Mode.Expanded;
-        double side = tight ? 6 : 16, below = tight ? 11 : 20;
+        double side = tight ? IslandShadow.CollapsedSpread : 16;
+        double above = tight ? IslandShadow.CollapsedSpread - IslandShadow.CollapsedDrop : 16;
+        double below = tight ? IslandShadow.CollapsedSpread + IslandShadow.CollapsedDrop + 1 : 20;
         var visible = show >= 0.02 || _show.Target > 0.5;
-        var bw = Up(Math.Max(w, _w.Target));
-        var bh = Up(Math.Max(h, _h.Target));
+        var bw = tight ? Math.Ceiling(_w.Target) : Up(Math.Max(w, _w.Target));
+        var bh = tight ? Math.Ceiling(_h.Target) : Up(Math.Max(h, _h.Target));
         var (bl, by) = Origin(bw, bh);
         var y0 = by + (_show.Target > 0.5 ? 0 : _rootShift.Y);
         var rr = Math.Min(Math.Min(r, _r.Target), bh / 2);
@@ -712,25 +717,29 @@ public sealed partial class IslandWindow : Window
         var bubble = bubbleOp > 0.05 || _bubbleOp.Target > 0.05;
         var bubbleX = bl + bw + 8;
         var key = !visible ? (0, 0, 0, 0, 0, 0)
-            : (P(bl - side), P(Math.Max(0, y0 - side)), P(bl + bw + side), P(y0 + bh + below), P((rr + side) * 2), bubble ? P(bubbleX) : -1);
+            : (P(bl - side), P(Math.Max(0, y0 - above)), P(bl + bw + side), P(y0 + bh + below), P((rr + side) * 2), bubble ? P(bubbleX) : -1);
         if (key.Item3 != 0 && !Side) FitHeight(key.Item4 + 1, dpi.DpiScaleY);
         if (key == _lastRgn) return;
         _lastRgn = key;
         Stats.Count("rgn");
-        IntPtr rgn;
-        if (key.Item3 == 0) rgn = Native.CreateRoundRectRgn(0, 0, 0, 0, 0, 0);
-        else
+        var bubbleBottom = P(y0 + CompactH + below) + 1;
+        IntPtr Make()
         {
-            rgn = Native.CreateRoundRectRgn(key.Item1, key.Item2, key.Item3 + 1, key.Item4 + 1, key.Item5, key.Item5);
+            if (key.Item3 == 0) return Native.CreateRoundRectRgn(0, 0, 0, 0, 0, 0);
+            var rgn = Native.CreateRoundRectRgn(key.Item1, key.Item2, key.Item3 + 1, key.Item4 + 1, key.Item5, key.Item5);
             if (key.Item6 >= 0)
             {
                 // 气泡贴着岛右侧滑进来：从岛中线到气泡最终位置一次性包住，滑动途中不再改区域
-                var b = Native.CreateRectRgn(P(WinW / 2), key.Item2, key.Item6 + P(CompactH + 8) + 1, P(y0 + CompactH + below) + 1);
+                var b = Native.CreateRectRgn(P(WinW / 2), key.Item2, key.Item6 + P(CompactH + 8) + 1, bubbleBottom);
                 Native.CombineRgn(rgn, rgn, b, 2);
                 Native.DeleteObject(b);
             }
+            return rgn;
         }
-        Native.SetWindowRgn(_hwnd, rgn, false); // 系统接管 rgn，不用 DeleteObject
+        Native.SetWindowRgn(_hwnd, Make(), false); // 系统接管 rgn，不用 DeleteObject
+        // 系统模糊底板窗口和岛一样大、压在岛正下方：它回 HTTRANSPARENT 只对同一线程的窗口有效，
+        // 别的程序的窗口照样点不到。给它套同一个区域，岛外的点击才真正落到下面的软件上。
+        if (_sysOn) _sys?.SetRegion(Make());
     }
 
     // 截图工具（PixPin、Snow Shot…）的「窗口识别」按窗口矩形框选，不看窗口区域：

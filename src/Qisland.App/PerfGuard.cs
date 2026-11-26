@@ -99,6 +99,9 @@ public sealed class PerfGuard
         if (_n % 120 == 0) { App.Log($"perf: CPU 30s 平均 {Avg30:0.00}%，峰值 {Peak:0.0}%，线程 {Threads}，句柄 {Handles}，私有内存 {PrivateMb:0} MB{(Degraded ? "（降级中）" : "")}"); Peak = 0; }
     }
 
-    public string Json() =>
-        $"{{\"ok\":true,\"cpu\":{Cpu:0.00},\"cpu_avg30\":{Avg30:0.00},\"threads\":{Threads},\"handles\":{Handles},\"private_mb\":{PrivateMb:0.0},\"degraded\":{(Degraded ? "true" : "false")},\"budget\":{Budget},\"memory_target_mb\":{MemoryTargetMb},\"events\":{Counters.Json()}}}";
+    public string Json()
+    {
+        var (ws, pws, _) = Native.MemoryMb();   // 调试接口才读，不进 5 秒一次的采样
+        return $"{{\"ok\":true,\"cpu\":{Cpu:0.00},\"cpu_avg30\":{Avg30:0.00},\"threads\":{Threads},\"handles\":{Handles},\"private_mb\":{PrivateMb:0.0},\"ws_mb\":{ws:0.0},\"private_ws_mb\":{pws:0.0},\"gc_committed_mb\":{GC.GetGCMemoryInfo().TotalCommittedBytes / 1048576.0:0.0},\"degraded\":{(Degraded ? "true" : "false")},\"budget\":{Budget},\"memory_target_mb\":{MemoryTargetMb},\"events\":{Counters.Json()}}}";
+    }
 }
