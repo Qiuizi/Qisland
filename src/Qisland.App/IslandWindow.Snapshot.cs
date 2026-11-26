@@ -116,6 +116,11 @@ public sealed partial class IslandWindow
         Quota.Demo(91, 74);
         _page = Page.Home; _expDirty = true; _pageCache.Clear();
         await Shot(dir, "18-codex-quota", Mode.Expanded);
+        // 4.3：本机 AI 额度（演示数据，不读真实令牌）
+        Usage = new AiUsageService(a => a()); Usage.Demo();
+        _page = Page.Agents; _expDirty = true; _pageCache.Clear();
+        await Shot(dir, "19-ai-usage", Mode.Expanded);
+        _page = Page.Home;
         App.Log("snapshot 完成: " + dir);
     }
 

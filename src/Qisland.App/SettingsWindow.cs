@@ -14,7 +14,7 @@ namespace Qisland.App;
 /// 再加上托盘里不好做的：停靠和极简、健康数值、本机日程列表、当前快捷键。托盘菜单保留不变。
 /// 思路参考小糖岛仔（MIT）的设置窗，WPF 重写。
 /// </summary>
-public sealed class SettingsWindow : Window
+public sealed partial class SettingsWindow : Window
 {
     private readonly App _app;
     private readonly Forms.ContextMenuStrip _tray;
@@ -38,6 +38,7 @@ public sealed class SettingsWindow : Window
             ("日历与待办", "\uE787", CalendarTodo),
             ("课程与作业", "\uE7BE", p => { Mirror(p, "导入课表"); Mirror(p, "作业 DDL"); }),
             ("翻译、AI 与快捷键", "\uE8C1", Ai),
+            ("AI 额度", "\uE9D2", AiQuota),
             ("接入其他软件", "\uE71B", p => { Mirror(p, "Codex"); Mirror(p, "接入其他 AI 工具"); Mirror(p, "对其他软件的改动"); }),
             ("其他", "\uE712", Other),
         ];

@@ -48,6 +48,8 @@ public sealed partial class App : Application
     private NetworkWatcher? _net;
     private CallWatcher? _calls;
     private BluetoothWatcher? _bt;
+    private AiUsageService? _usage;
+    private QuotaWatch? _quotaWatch;
     private CalendarWatcher? _cal;
     private Updater _upd = null!;
     private DateTime _day = DateTime.Today;
@@ -279,6 +281,18 @@ public sealed partial class App : Application
             _ = BalanceLoop();
         }
         catch (Exception ex) { Log("AI 额度: " + ex.Message); }
+        try
+        {
+            // 4.3：本机 AI 编程工具额度 + 所有额度的 70% / 90% 提醒
+            _usage = new AiUsageService(a => Dispatcher.BeginInvoke(a));
+            _quotaWatch = new QuotaWatch(_store) { Codex = _quota, Doubao = _doubao, Usage = _usage };
+            _window.Usage = _usage; _window.QuotaWatch = _quotaWatch;
+            _usage.Changed += _window.OnUsageChanged;
+            _usage.Changed += _quotaWatch.OnQuota;
+            if (_quota != null) _quota.Changed += _quotaWatch.OnQuota;
+            if (_doubao != null) _doubao.Changed += _quotaWatch.OnQuota;
+        }
+        catch (Exception ex) { Log("本机 AI 额度: " + ex.Message); }
         try { _todo = new TodoFile(_store); _window.Todo = _todo; _todo.Changed += () => _window.SetTodos(_todo.Open); _window.SetTodos(_todo.Open); }
         catch (Exception ex) { Log("待办: " + ex.Message); }
         _ime = new ImeWatch();
@@ -310,6 +324,7 @@ public sealed partial class App : Application
             if (_tickN % 10 == 0) { try { _ykt?.Tick(); } catch (Exception ex) { Log("雨课堂: " + ex.Message); } }
             if (_tickN % 10 == 5) { try { _xxt?.Tick(); } catch (Exception ex) { Log("学习通: " + ex.Message); } }
             if (_tickN % 10 == 7) { try { _quota?.Tick(); } catch (Exception ex) { Log("Codex 额度: " + ex.Message); } }
+            if (_tickN % 10 == 2) { try { _usage?.Tick(); } catch (Exception ex) { Log("本机 AI 额度: " + ex.Message); } }
             if (_tickN % 60 == 0) { try { _homework?.Tick(); _window.OnHomeworkChanged(); } catch (Exception ex) { Log("作业: " + ex.Message); } }
             try { _calls?.Tick(_tickN); } catch (Exception ex) { Log("通话: " + ex.Message); }
             if (_tickN % 30 == 3) { try { _cal?.Tick(); } catch (Exception ex) { Log("日历: " + ex.Message); } }
@@ -371,6 +386,8 @@ public sealed partial class App : Application
                 break;
             case Features.Network: if (on) _net?.Start(); else _net?.Stop(); break;
             case Features.Bluetooth: if (on) _bt?.Start(); else _bt?.Stop(); break;
+            case Features.AiUsage: _usage?.OnToggle(); _quotaWatch?.OnQuota(); break;
+            case var k when k.StartsWith("ai-usage-", StringComparison.Ordinal): _usage?.OnToggle(); _quotaWatch?.OnQuota(); break;
             case Features.LockKeys: _volume?.WatchLockKeys(on); break;
             case Features.Calendar: _cal?.Tick(); _window?.OnCalendarChanged(); if (on) _cal?.RefreshNow(); break;
             case Features.Focus: FocusMode.Poll(); _window?.OnFocusModeChanged(); break;

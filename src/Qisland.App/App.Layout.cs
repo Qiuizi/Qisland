@@ -65,6 +65,7 @@ public sealed partial class App
 {
     private System.Windows.Forms.ContextMenuStrip? _trayMenu;
     internal CalendarWatcher? CalendarService => _cal;
+    internal AiUsageService? UsageService => _usage;
     internal IslandWindow? Island => _window;
     internal LyricsService? LyricsSvc => _lyrics;
 

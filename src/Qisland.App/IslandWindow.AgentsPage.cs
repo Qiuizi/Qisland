@@ -48,6 +48,7 @@ public sealed partial class IslandWindow
         foreach (var ac in ApprovalCards()) stack.Children.Add(ac);
 
         if (QuotaStrip() is { } q) stack.Children.Add(q);
+        if (UsageSection() is { } u) stack.Children.Add(u);
 
         if (list.Count == 0)
         {
