@@ -126,7 +126,8 @@ public sealed class WeatherCitiesWindow : Window
         {
             var found = await App.SearchCities(q, ct);
             if (ct.IsCancellationRequested) return;
-            _status.Text = found.Count == 0 ? "没找到，换个写法试试（如「北京」「Beijing」）" : "点一个添加并切换：";
+            _status.Text = found.Count == 0 ? "没找到，换个写法试试（如「北京」「Beijing」）"
+                : CitySearch.ProvinceCities(q).Count > 1 ? $"{CitySearch.Province(q)}的省会和主要城市排在最前，点一个添加并切换：" : "点一个添加并切换：";
             foreach (var c in found.Take(8))
             {
                 var city = c;

@@ -65,18 +65,43 @@ public sealed partial class App
 
     public void RefreshWeatherNow() => _weatherWake.TrySetResult();
 
-    /// <summary>城市搜索（Open-Meteo 地理编码，按中文习惯补查后缀 / 省会）。</summary>
+    /// <summary>城市搜索：几个写法并行查 Open-Meteo 地理编码，再按 <see cref="CitySearch.Rank"/> 去重排序（省名直接给内置的主要城市）。</summary>
     public static async Task<List<WeatherCity>> SearchCities(string name, CancellationToken ct)
     {
-        var found = new List<(WeatherCity, long)>();
+        CitySearch.Simplify = Simplified;
+        var queries = CitySearch.Queries(name);
+        // GeoNames 有些中文名只有繁体（「東京」「臺中」），补一个繁体写法
+        if (CitySearch.AllCjk(name.Trim()) && Traditional(name.Trim()) is { } tw && !queries.Contains(tw)) queries.Add(tw);
         Exception? last = null;
-        foreach (var q in OpenMeteo.CityQueries(name))
+        var pages = await Task.WhenAll(queries.Select(async q =>
         {
-            try { found.AddRange(OpenMeteo.ParseCities(await Http.GetStringAsync(OpenMeteo.GeocodeUrl(q), ct))); }
-            catch (Exception ex) when (ex is not OperationCanceledException) { last = ex; }
+            try { return CitySearch.Parse(await Http.GetStringAsync(CitySearch.GeocodeUrl(q), ct)); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { last = ex; return new List<CityHit>(); }
+        }));
+        var found = pages.SelectMany(p => p).ToList();
+        var ranked = CitySearch.Rank(name, found, queries);
+        if (ranked.Count == 0 && last != null) throw last;
+        return ranked;
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int LCMapStringEx(string locale, uint flags, string src, int srcLen, [System.Runtime.InteropServices.Out] char[]? dest, int destLen, IntPtr ver, IntPtr res, IntPtr param);
+
+    /// <summary>简体转繁体（系统自带的 LCMapStringEx），失败或没变化返回 null。</summary>
+    private static string? Traditional(string s) { var t = MapChinese(s, 0x04000000); return t != s ? t : null; }
+
+    /// <summary>繁体转简体，搜索结果里的「東京」「臺灣省」显示成简体；失败原样返回。</summary>
+    internal static string Simplified(string s) => s.Length == 0 ? s : MapChinese(s, 0x02000000) ?? s;
+
+    private static string? MapChinese(string s, uint flag)
+    {
+        try
+        {
+            var buf = new char[s.Length * 2 + 2];
+            var n = LCMapStringEx("zh-CN", flag, s, s.Length, buf, buf.Length, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+            return n > 0 ? new string(buf, 0, n) : null;
         }
-        if (found.Count == 0 && last != null) throw last;
-        return OpenMeteo.RankCities(name, found);
+        catch { return null; }
     }
 
     /// <summary>加入城市列表，返回位置（已在列表里就返回原位置），满了返回 -1。</summary>

@@ -19,8 +19,7 @@ public sealed record Forecast(WeatherSnapshot Now, bool IsDay, double Pressure, 
 
 /// <summary>
 /// Open-Meteo（免 Key）：实况、逐小时（48 h）、逐日（7 天，含日出日落、UV、降水概率）。
-/// 城市搜索用它的地理编码接口；中文输入会同时查「去掉市/县/区后缀」「补上市字」和省会，
-/// 名字完全一致的排前面、再按人口排，坐标几乎重合的同名地点只留一个。
+/// 城市搜索见 <see cref="CitySearch"/>。
 /// 思路参考岛仔 Daozai（MIT）的 weather.rs，C# 重写。
 /// </summary>
 public static class OpenMeteo
@@ -34,9 +33,6 @@ public static class OpenMeteo
         "&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m,is_day,visibility" +
         "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset,uv_index_max,wind_speed_10m_max" +
         $"&timezone=auto&forecast_days={ForecastDays}&forecast_hours=48";
-
-    public static string GeocodeUrl(string name) =>
-        "https://geocoding-api.open-meteo.com/v1/search?name=" + Uri.EscapeDataString(name) + "&count=10&language=zh&format=json";
 
     // ───────────── 预报 ─────────────
 
@@ -88,83 +84,6 @@ public static class OpenMeteo
     /// <summary>当前时刻之后的若干小时（含当前这一小时之后的整点）。</summary>
     public static IEnumerable<HourWx> Upcoming(IReadOnlyList<HourWx> hours, DateTime now, int count) =>
         hours.Where(h => h.At > now).Take(count);
-
-    // ───────────── 城市搜索 ─────────────
-
-    private static readonly (string Province, string Capital)[] Capitals =
-    [
-        ("北京", "北京"), ("天津", "天津"), ("上海", "上海"), ("重庆", "重庆"), ("河北", "石家庄"), ("山西", "太原"),
-        ("辽宁", "沈阳"), ("吉林", "长春"), ("黑龙江", "哈尔滨"), ("江苏", "南京"), ("浙江", "杭州"), ("安徽", "合肥"),
-        ("福建", "福州"), ("江西", "南昌"), ("山东", "济南"), ("河南", "郑州"), ("湖北", "武汉"), ("湖南", "长沙"),
-        ("广东", "广州"), ("海南", "海口"), ("四川", "成都"), ("贵州", "贵阳"), ("云南", "昆明"), ("陕西", "西安"),
-        ("甘肃", "兰州"), ("青海", "西宁"), ("台湾", "台北"), ("内蒙古", "呼和浩特"), ("广西", "南宁"), ("西藏", "拉萨"),
-        ("宁夏", "银川"), ("新疆", "乌鲁木齐"), ("香港", "香港"), ("澳门", "澳门"),
-    ];
-
-    private static bool AllCjk(string s) => s.Length > 0 && s.All(c => c is >= '\u4e00' and <= '\u9fff');
-
-    /// <summary>去掉「市 / 县 / 区 / 省」后缀；去掉后不足两个字就保留原名（例如「津市」）。</summary>
-    public static string BaseName(string name)
-    {
-        if (!AllCjk(name) || name.Length < 3) return name;
-        return name[^1] is '市' or '县' or '区' or '省' ? name[..^1] : name;
-    }
-
-    public static string? ProvinceCapital(string name)
-    {
-        var s = name;
-        foreach (var suf in new[] { "维吾尔自治区", "壮族自治区", "回族自治区", "自治区", "特别行政区", "省", "市" })
-            if (s.EndsWith(suf, StringComparison.Ordinal) && s.Length > suf.Length) { s = s[..^suf.Length]; break; }
-        foreach (var (p, c) in Capitals) if (p == s) return c;
-        return null;
-    }
-
-    /// <summary>一个输入要查哪几个词。</summary>
-    public static List<string> CityQueries(string input)
-    {
-        var name = input.Trim();
-        var q = new List<string> { name };
-        if (name.Length < 2 || !AllCjk(name)) return q;
-        var b = BaseName(name);
-        if (ProvinceCapital(name) is { } cap && cap != b && !q.Contains(cap)) q.Add(cap);
-        if (b != name) { if (!q.Contains(b)) q.Add(b); }
-        else if (!name.EndsWith('州')) q.Insert(0, name + "市");
-        return q;
-    }
-
-    private static bool SkipFeature(string code) =>
-        new[] { "AIR", "RSTN", "BUS", "PRT", "HTL", "SCH", "HSP" }.Any(p => code.StartsWith(p, StringComparison.Ordinal));
-
-    public static List<(WeatherCity City, long Population)> ParseCities(string json)
-    {
-        var list = new List<(WeatherCity, long)>();
-        using var doc = JsonDocument.Parse(json);
-        if (!doc.RootElement.TryGetProperty("results", out var rs) || rs.ValueKind != JsonValueKind.Array) return list;
-        foreach (var r in rs.EnumerateArray())
-        {
-            if (SkipFeature(r.TryGetProperty("feature_code", out var fc) ? fc.GetString() ?? "" : "")) continue;
-            var label = r.TryGetProperty("name", out var n) ? (n.GetString() ?? "").Trim() : "";
-            if (Num(r, "latitude") is not { } lat || Num(r, "longitude") is not { } lon) continue;
-            var areas = new List<string>();
-            foreach (var k in new[] { "admin2", "admin1", "country" })
-                if (r.TryGetProperty(k, out var a) && a.GetString() is { Length: > 0 } s && s != label && !areas.Contains(s)) areas.Add(s);
-            var c = new WeatherCity(label, lat, lon, string.Join(" · ", areas));
-            if (c.Valid) list.Add((c, (long)(Num(r, "population") ?? 0)));
-        }
-        return list;
-    }
-
-    /// <summary>名字一致的排前面，再按人口；同名且坐标几乎重合的只留一个。</summary>
-    public static List<WeatherCity> RankCities(string input, IEnumerable<(WeatherCity City, long Population)> found)
-    {
-        var name = input.Trim();
-        var b = BaseName(name);
-        bool Exact(WeatherCity c) => c.Label == name || c.Label == b || BaseName(c.Label) == b;
-        var ranked = new List<WeatherCity>();
-        foreach (var (c, _) in found.OrderByDescending(f => Exact(f.City)).ThenByDescending(f => f.Population))
-            if (!ranked.Any(r => r.Label == c.Label && Math.Abs(r.Lat - c.Lat) < 0.05 && Math.Abs(r.Lon - c.Lon) < 0.05)) ranked.Add(c);
-        return ranked;
-    }
 
     // ───────────── JSON 小工具 ─────────────
 
