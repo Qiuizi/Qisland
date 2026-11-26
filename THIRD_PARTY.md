@@ -1,19 +1,19 @@
 # THIRD_PARTY.md — 第三方组件与许可证
 
-WinIslands 应用本体为 **MIT License**（见 [LICENSE](LICENSE)）。
+Qisland 本体为 **MIT License**（见 [LICENSE](LICENSE)）。
 
-运行时（发布产物）不依赖任何第三方 NuGet 包，仅使用 .NET 平台自带组件：
+Qisland 派生自 [WinIslands](https://github.com/JudeKwong/WinIslands) 3.1.2（JudeKwong 与 WinIslands contributors，MIT）。上游的版权声明保留在 LICENSE 里，同一份 MIT 许可同时适用于上游代码和 Qisland 的改动。
+
+运行时用到的组件：
 
 | 组件 | 用途 | 许可证 |
 | --- | --- | --- |
-| .NET 8 Runtime / SDK（Microsoft.NETCore.App, Microsoft.WindowsDesktop.App） | 运行时、WPF、WinForms | MIT |
+| .NET 8 Runtime（Microsoft.NETCore.App, Microsoft.WindowsDesktop.App） | 运行时、WPF、WinForms；「自带运行时」的发布包里会把它一起打进去 | MIT |
 | Windows SDK 投影 `Microsoft.Windows.SDK.NET.Ref`（CsWinRT） | `Windows.Media.Control`（SMTC）等 WinRT API 互操作 | MIT |
-| WPF（WindowsBase, PresentationFramework, PresentationCore） | 界面框架 | MIT |
-| Windows Forms（System.Windows.Forms, System.Drawing） | 托盘图标 NotifyIcon、文件夹对话框 | MIT |
-| `System.Text.Json`（.NET 内置） | 配置文件序列化 | MIT |
-| `System.Net.Http`（.NET 内置） | Cider API / 封面下载 / 在线歌词 | MIT |
+| [QRCoder](https://github.com/codebude/QRCoder) | 扫码登录窗口里生成二维码 | MIT |
+| 国内城市表 `src/Qisland.Core/data/china-cities.json` | 天气的离线国内城市搜索。名称来自民政部公开的行政区划，坐标与英文名来自 [GeoNames](https://www.geonames.org/)，详见 [CHINA-CITIES.md](src/Qisland.Core/data/CHINA-CITIES.md) | GeoNames 数据 CC BY 4.0 |
 
-> 说明：上述均为 .NET 平台自带组件，随 .NET SDK/Runtime 分发，许可证为 MIT（.NET 使用 MIT，部分组件含 Apache-2.0 头部，详见 .NET 仓库 LICENSE）。
+> 说明：.NET 平台组件随 .NET Runtime 分发，许可证为 MIT（部分组件含 Apache-2.0 头部，详见 .NET 仓库 LICENSE）。
 
 ## 开发/测试依赖
 
@@ -23,7 +23,7 @@ WinIslands 应用本体为 **MIT License**（见 [LICENSE](LICENSE)）。
 | Microsoft.NET.Test.Sdk | 测试宿主 | MIT |
 
 ## 图标与资源
-- 应用图标与截图：WinIslands 原创（MIT）。
+- 应用图标（`src/Qisland.App/Assets/qisland.ico`）、官网标志与截图：Qisland 原创（MIT）。旧版 WinIslands 工程里的 `winislands.ico` 只留给 `src/WinIslands` 旧工程用。
 
 ## 未使用
 - 无遥测 / 广告 / 商业组件。
