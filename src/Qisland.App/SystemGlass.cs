@@ -87,6 +87,8 @@ internal sealed class SystemGlass : IDisposable
             if (err != null) throw err;
             Ok = true;
             Follow();
+            if (_locked) SetClickLock(true);
+            if (ExcludeFromCapture) ApplyCaptureHide();
             return true;
         }
         catch (Exception ex)
@@ -255,6 +257,30 @@ internal sealed class SystemGlass : IDisposable
         if (SetWindowRgn(_hwnd, rgn, false) == 0) DeleteObject(rgn);
     }
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr h);
+
+    private bool _locked;
+
+    /// <summary>
+    /// 岛的穿透锁定：底板本来就回 HTTRANSPARENT，但那只对同线程有效，别的程序照样被它挡住；
+    /// 锁定时加上 WS_EX_LAYERED（它已有 WS_EX_TRANSPARENT），系统命中测试才会跳过它。合成视觉照常画，模糊不受影响。
+    /// </summary>
+    public void SetClickLock(bool on)
+    {
+        _locked = on;
+        if (!Ok || _hwnd == IntPtr.Zero) return;
+        var ex = (long)Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE);
+        Native.SetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE, new IntPtr(on ? ex | Native.WS_EX_LAYERED : ex & ~(long)Native.WS_EX_LAYERED));
+        if (on) SetLayeredWindowAttributes(_hwnd, 0, 255, 0x2 /*LWA_ALPHA*/);
+    }
+
+    /// <summary>「截图录屏时隐藏」：底板也一起排除，不然截图里会留一块没有岛的模糊。</summary>
+    public static bool ExcludeFromCapture { get; set; }
+    public void ApplyCaptureHide()
+    {
+        if (Ok && _hwnd != IntPtr.Zero) SetWindowDisplayAffinity(_hwnd, ExcludeFromCapture ? 0x11u : 0u);
+    }
+    [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr h, uint key, byte alpha, uint flags);
+    [DllImport("user32.dll")] private static extern bool SetWindowDisplayAffinity(IntPtr h, uint affinity);
 
     /// <summary>和岛窗口对齐（位置、大小）并压在它正下方。</summary>
     public void Follow()

@@ -52,7 +52,7 @@ public sealed class GlassBackdrop
         if (on == _on) return;
         _on = on;
         // 把自己排除在截屏之外，否则会截到自己、越叠越糊。副作用：录屏/截图里看不到岛（只在玻璃主题下）。
-        SetWindowDisplayAffinity(hwnd, on ? 0x11u : 0u);
+        SetWindowDisplayAffinity(hwnd, on || KeepExcluded ? 0x11u : 0u);
         Host.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
         if (on) { Capture(); _timer.Start(); } else { _timer.Stop(); lock (_gate) _req = null; _img.Source = null; _wb = null; }
     }
@@ -127,7 +127,10 @@ public sealed class GlassBackdrop
 
     /// <summary>岛的目标尺寸刚变：立刻按新范围补一张背景，赶在动画前几帧之内。</summary>
     /// <summary>测速对照：临时撤掉 / 恢复「截图时排除本窗口」。</summary>
-    public void Affinity(bool on) { var h = new System.Windows.Interop.WindowInteropHelper(_win).Handle; SetWindowDisplayAffinity(h, on && _on ? 0x11u : 0u); }
+    public void Affinity(bool on) { var h = new System.Windows.Interop.WindowInteropHelper(_win).Handle; SetWindowDisplayAffinity(h, (on && _on) || KeepExcluded ? 0x11u : 0u); }
+
+    /// <summary>用户打开了「截图录屏时隐藏」：关掉截屏模糊时也别把排除撤掉。</summary>
+    public static bool KeepExcluded { get; set; }
 
     public void Refresh() { _lastCap = 0; _same = false; Capture(); }
 

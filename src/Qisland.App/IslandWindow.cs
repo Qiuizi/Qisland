@@ -261,6 +261,7 @@ public sealed partial class IslandWindow : Window
         BrightnessWatcher.Register(_hwnd);
         SetupScreen();
         SetupClipboard();
+        SetupClickLock();
         if (_layered) return;
 
         var src = HwndSource.FromHwnd(_hwnd);
@@ -401,7 +402,7 @@ public sealed partial class IslandWindow : Window
             : x >= pillLeft - slop && x <= pillLeft + _w.Value + slop && y >= 0 && y <= TopGap + _h.Value + slop;
         var bx = pillLeft + _w.Value + 8;
         var inBubble = _bubble.Opacity > 0.5 && x >= bx && x <= bx + CompactH && y >= TopGap && y <= TopGap + CompactH;
-        var inside = !_hidden && (inPill || inBubble);
+        var inside = !_hidden && !ClickLocked && (inPill || inBubble);   // 穿透锁定时整座岛都当不在
 
         if (inside == _clickThrough)
         {
@@ -418,7 +419,7 @@ public sealed partial class IslandWindow : Window
         var buttons = (Native.GetAsyncKeyState(0x01) & 0x8000) != 0 || (Native.GetAsyncKeyState(0x02) & 0x8000) != 0;
         var spanL = (int)Math.Round((Left + pillLeft) * dpi.DpiScaleX);
         var spanR = (int)Math.Round((Left + pillLeft + _w.Value) * dpi.DpiScaleX);
-        var onEdge = !(_hidden && _manualHide) && !buttons
+        var onEdge = !(_hidden && _manualHide) && !buttons && !ClickLocked
                      && (Side ? OnSideEdge(p, pillTop, _h.Value, dpi)
                               : _winAtTop && EdgeZone.Contains(p.X, p.Y, new Box(m.Left, m.Top, m.Right, m.Bottom), spanL, spanR, (int)Math.Round(EdgeMarginDip * dpi.DpiScaleX)));
         if (!onEdge && (Side ? (Dock == DockSide.Left ? p.X > m.Left + 8 : p.X < m.Right - 8) : p.Y > m.Top + 8)) _edgeArmed = true;

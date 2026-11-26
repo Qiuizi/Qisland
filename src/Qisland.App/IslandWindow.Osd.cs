@@ -115,21 +115,26 @@ public sealed partial class IslandWindow
         _compact.ColumnDefinitions.Add(new ColumnDefinition());
         _compact.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var caps = _lockName.StartsWith("大写");
+        var through = _lockName == "点击穿透";   // 穿透锁定：键帽里换成锁的图标（开 = 上锁，关 = 打开的锁）
+        // 「开」时键帽用主色填满，上面的字按主色深浅取黑 / 白（浅色、液态玻璃的主色是深色，原来写死黑字会看不清）
+        var onInk = Theme.Primary is SolidColorBrush pb && (0.299 * pb.Color.R + 0.587 * pb.Color.G + 0.114 * pb.Color.B) < 128
+            ? Theme.Freeze(new SolidColorBrush(Colors.White)) : Theme.Freeze(new SolidColorBrush(Colors.Black));
         var key = new Border
         {
             Width = 24, Height = 22, CornerRadius = new CornerRadius(6), Margin = new Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
             Background = _lockOn ? Theme.Primary : Theme.Fill,
-            Child = new TextBlock { Text = caps ? "A" : "1", FontFamily = Theme.Text, FontSize = 13, FontWeight = FontWeights.Bold, Foreground = _lockOn ? Theme.Freeze(new SolidColorBrush(Colors.Black)) : Theme.Secondary, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
+            Child = through
+                ? new TextBlock { Text = _lockOn ? "\uE72E" : "\uE785", FontFamily = DialogKit.Icons, FontSize = 12, Foreground = _lockOn ? onInk : Theme.Secondary, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }
+                : new TextBlock { Text = caps ? "A" : "1", FontFamily = Theme.Text, FontSize = 13, FontWeight = FontWeights.Bold, Foreground = _lockOn ? onInk : Theme.Secondary, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
         };
-        if (_lockOn && Theme.Current == Theme.Look.Light) ((TextBlock)key.Child).Foreground = Theme.Freeze(new SolidColorBrush(Colors.White));
         _compact.Children.Add(key);
         var t = Txt(13, FontWeights.SemiBold, Theme.Primary);
         t.Text = _lockName; t.VerticalAlignment = VerticalAlignment.Center; t.Margin = new Thickness(10, 0, 10, 1);
         Grid.SetColumn(t, 1); _compact.Children.Add(t);
         var st = Txt(12, FontWeights.SemiBold, _lockOn ? Theme.Primary : Theme.Tertiary);
-        st.Text = _lockOn ? "开" : "关"; st.VerticalAlignment = VerticalAlignment.Center; st.Margin = new Thickness(0, 0, 18, 1);
+        st.Text = through ? (_lockOn ? "已锁定" : "已解除") : _lockOn ? "开" : "关"; st.VerticalAlignment = VerticalAlignment.Center; st.Margin = new Thickness(0, 0, 18, 1);
         Grid.SetColumn(st, 2); _compact.Children.Add(st);
-        _compactW = 200;
+        _compactW = through ? 216 : 200;
         _compact.Width = _compactW;
         Place(_compact, _compactW);
         if (_mode == Mode.Compact) _w.Target = _compactW;

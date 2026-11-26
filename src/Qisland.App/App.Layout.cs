@@ -46,6 +46,19 @@ public sealed partial class App
         };
         return m;
     }
+
+    /// <summary>托盘「锁定点击穿透」：勾上后整座岛不接鼠标（快捷键同一开关）。打开菜单时按岛的实际状态勾选。</summary>
+    private Forms.ToolStripMenuItem ClickLockMenu()
+    {
+        var it = new Forms.ToolStripMenuItem("锁定点击穿透") { ToolTipText = "整座岛不再接鼠标，点击、悬停、滚轮都落到下面的窗口；通知和音乐照常显示。再点一次或按快捷键解除，重启后自动解除" };
+        it.Click += (_, _) => Dispatcher.BeginInvoke(() => _window?.ToggleClickLock("托盘"));
+        _trayMenu!.Opening += (_, _) =>
+        {
+            it.Checked = _window?.ClickLocked == true;
+            it.ShortcutKeyDisplayString = _window?.ClickLockHotkeyActive == true ? IslandWindow.ClickLockHotkeyText : null;
+        };
+        return it;
+    }
 }
 
 public sealed partial class App
@@ -53,6 +66,7 @@ public sealed partial class App
     private System.Windows.Forms.ContextMenuStrip? _trayMenu;
     internal CalendarWatcher? CalendarService => _cal;
     internal IslandWindow? Island => _window;
+    internal LyricsService? LyricsSvc => _lyrics;
 
     /// <summary>打开（或切到）统一设置窗。</summary>
     public void OpenSettings(int category = 0)

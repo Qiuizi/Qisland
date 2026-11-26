@@ -31,6 +31,7 @@ public sealed class SettingsWindow : Window
         _cats =
         [
             ("外观与停靠", "\uE771", Look),
+            ("隐藏与穿透", "\uE890", HideAndThrough),
             ("岛上提示", "\uEA8F", p => Mirror(p, "岛上提示")),
             ("天气", "\uE706", Weather),
             ("健康", "\uEB51", Health),
@@ -45,16 +46,23 @@ public sealed class SettingsWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition());
         grid.Children.Add(_nav);
-        _scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _body, Margin = new Thickness(18, 0, 0, 0), Padding = new Thickness(0, 0, 8, 0) };
+        _scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _body, Margin = new Thickness(18, 0, 0, 0), Padding = new Thickness(0, 0, 8, 0), FocusVisualStyle = null };
         Grid.SetColumn(_scroll, 1);
         grid.Children.Add(_scroll);
         DialogKit.Shell(this, "Qisland 设置", grid, 700);
         RenderNav();
         Render();
         Loaded += (_, _) => Activate();
+        // 快捷键 / 托盘改了穿透锁定：正开着「隐藏与穿透」页就跟着刷新开关
+        if (_app.Island is { } island)
+        {
+            Action sync = () => Dispatcher.BeginInvoke(() => { if (IsLoaded && _cats[_cat].Name == "隐藏与穿透") Render(); });
+            island.ClickLockChanged += sync;
+            Closed += (_, _) => island.ClickLockChanged -= sync;
+        }
     }
 
-    public void Show(int category) { _cat = Math.Clamp(category, 0, _cats.Count - 1); RenderNav(); Render(); Activate(); }
+    public void Show(int category) { _cat = Math.Clamp(category, 0, _cats.Count - 1); RenderNav(); Render(); _scroll.ScrollToTop(); Activate(); }
 
     private void RenderNav()
     {
@@ -186,6 +194,188 @@ public sealed class SettingsWindow : Window
         Mirror(p, "动效");
     }
 
+    // ───────────── 隐藏与穿透 ─────────────
+
+    private void HideAndThrough(StackPanel p)
+    {
+        var w = _app.Island;
+        p.Children.Add(Section("鼠标"));
+        var mouse = new StackPanel();
+        mouse.Children.Add(DialogKit.Row("锁定点击穿透", "整座岛不接鼠标：点击、悬停、滚轮都落到下面的窗口，通知和音乐照常显示。重启后自动解除",
+            DialogKit.Switch(w?.ClickLocked == true, v => w?.SetClickLock(v, "设置"))));
+        var hk = Features.On(Features.ClickLockHotkey);
+        var hkDesc = !hk ? "关掉后只能用上面的开关或托盘菜单"
+            : w?.ClickLockHotkeyActive == true ? "随时按一下锁定，再按一下解除；岛上会提示当前状态"
+            : "这个组合被别的程序占用了，暂时只能用上面的开关或托盘菜单";
+        mouse.Children.Add(DialogKit.Row($"快捷键 {IslandWindow.ClickLockHotkeyText}", hkDesc,
+            DialogKit.Switch(hk, v => { Features.Set(Features.ClickLockHotkey, v); RenderSoon(); })));
+        p.Children.Add(Card(mouse));
+
+        p.Children.Add(Section("截图与录屏"));
+        var cap = new StackPanel();
+        cap.Children.Add(FeatureRow(Features.HideFromCapture, "截图录屏时隐藏", "截图、录屏、共享屏幕里看不到岛，自己屏幕上照常显示。想截岛本身时记得关掉"));
+        p.Children.Add(Card(cap));
+
+        p.Children.Add(Section("自动隐藏"));
+        var (show, hide) = HideRules.Read();
+        var rules = new StackPanel();
+        rules.Children.Add(DialogKit.Row("全屏时让开", "游戏、全屏视频、演示时岛自动藏起来，一直开着；Ctrl+Alt+Q 可以临时叫回",
+            DialogKit.Text("始终", 12.5, FontWeights.SemiBold, DialogKit.Sub)));
+        rules.Children.Add(FeatureRow(Features.HideList, "按程序隐藏", "下面名单里的程序在前台时，岛藏起来，哪怕它没全屏"));
+        rules.Children.Add(FeatureRow(Features.HideOnlyCovering, "只在挡住岛时才藏", "名单里的程序窗口盖到岛的位置才藏；挪开、缩小或最小化后岛回来"));
+        rules.Children.Add(new Border { Height = 1, Background = DialogKit.Line, Margin = new Thickness(0, 2, 0, 12) });
+        rules.Children.Add(NameList("隐藏名单", "在前台时藏起岛", hide, n => { var h = hide.ToList(); h.RemoveAll(x => x.Equals(n, StringComparison.OrdinalIgnoreCase)); Save(show, h); }, n => Save(show, hide.Append(n)), suggest: true));
+        rules.Children.Add(NameList("全屏也显示", "这些程序全屏时岛照常显示，比如看视频时仍想看音量条和通知", show, n => { var s = show.ToList(); s.RemoveAll(x => x.Equals(n, StringComparison.OrdinalIgnoreCase)); Save(s, hide); }, n => Save(show.Append(n), hide), suggest: false));
+        var file = DialogKit.Text("名单存在数据目录的 fullscreen.txt 里，手动改也会在一秒内生效。", 11.5, FontWeights.Normal, DialogKit.Sub);
+        file.Margin = new Thickness(0, 0, 0, 10);
+        rules.Children.Add(file);
+        p.Children.Add(Card(rules));
+
+        void Save(IEnumerable<string> s, IEnumerable<string> h) { if (HideRules.Write(s, h)) Render(); }
+    }
+
+    /// <summary>一组进程名：已加的是带 × 的圆角标签，下面一行输入框 +「添加」，可选「正在运行」的建议（点一下加入）。</summary>
+    private FrameworkElement NameList(string title, string desc, List<string> names, Action<string> remove, Action<string> add, bool suggest)
+    {
+        var sp = new StackPanel { Margin = new Thickness(0, 0, 0, 14) };
+        var head = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+        head.Children.Add(DialogKit.Text(title, 13.5, FontWeights.Medium, DialogKit.Fg));
+        var d = DialogKit.Text(desc, 11.5, FontWeights.Normal, DialogKit.Sub); d.Margin = new Thickness(8, 2, 0, 0); d.VerticalAlignment = VerticalAlignment.Center;
+        head.Children.Add(d);
+        sp.Children.Add(head);
+
+        var wrap = new WrapPanel { Margin = new Thickness(0, 0, 0, 2) };
+        if (names.Count == 0)
+        {
+            var empty = DialogKit.Text("还没有程序", 12, FontWeights.Normal, DialogKit.Sub); empty.Margin = new Thickness(0, 2, 0, 8);
+            wrap.Children.Add(empty);
+        }
+        foreach (var n in names) wrap.Children.Add(NameTag(n, () => remove(n)));
+        sp.Children.Add(wrap);
+
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition());
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var box = DialogKit.Box();
+        box.ToolTip = "进程名，不带 .exe，比如 notepad；也可以粘贴 exe 的完整路径";
+        var hint = DialogKit.Text("输入进程名，如 notepad", 12.5, FontWeights.Normal, DialogKit.Sub);
+        hint.IsHitTestVisible = false; hint.Margin = new Thickness(9, 0, 0, 0); hint.VerticalAlignment = VerticalAlignment.Center;
+        box.TextChanged += (_, _) => hint.Visibility = box.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var boxHost = new Grid(); boxHost.Children.Add(box); boxHost.Children.Add(hint);
+        row.Children.Add(boxHost);
+        void Commit()
+        {
+            var n = HideRules.Clean(box.Text);
+            if (n.Length == 0) return;
+            if (names.Contains(n, StringComparer.OrdinalIgnoreCase)) { box.Text = ""; return; }
+            add(n);
+        }
+        box.KeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; Commit(); } };
+        var btn = DialogKit.Button("添加", Commit);
+        Grid.SetColumn(btn, 1);
+        row.Children.Add(btn);
+        row.Margin = new Thickness(0, 4, 0, 0);
+        sp.Children.Add(row);
+
+        if (suggest)
+        {
+            var running = HideRules.RunningApps().Where(n => !names.Contains(n, StringComparer.OrdinalIgnoreCase)).ToList();
+            if (running.Count > 0)
+            {
+                var sw = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+                var l = DialogKit.Text("正在运行", 11.5, FontWeights.Normal, DialogKit.Sub); l.Margin = new Thickness(0, 0, 8, 6); l.VerticalAlignment = VerticalAlignment.Center;
+                sw.Children.Add(l);
+                foreach (var n in running) sw.Children.Add(SuggestTag(n, () => add(n)));
+                sp.Children.Add(sw);
+            }
+        }
+        return sp;
+    }
+
+    private static Border NameTag(string name, Action remove)
+    {
+        var sp = new StackPanel { Orientation = Orientation.Horizontal };
+        var t = DialogKit.Text(name, 12.5, FontWeights.SemiBold, DialogKit.Fg); t.TextWrapping = TextWrapping.NoWrap; t.VerticalAlignment = VerticalAlignment.Center;
+        sp.Children.Add(t);
+        var x = new TextBlock { Text = "\uE711", FontFamily = DialogKit.Icons, FontSize = 8.5, Foreground = DialogKit.Sub, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 1, 0, 0) };
+        var xHit = new Border { Child = x, Background = Brushes.Transparent, Cursor = Cursors.Hand, Padding = new Thickness(2, 4, 2, 4), ToolTip = "移出名单" };
+        xHit.MouseEnter += (_, _) => x.Foreground = DialogKit.Danger;
+        xHit.MouseLeave += (_, _) => x.Foreground = DialogKit.Sub;
+        xHit.MouseLeftButtonUp += (_, e) => { e.Handled = true; remove(); };
+        sp.Children.Add(xHit);
+        return new Border { Child = sp, Background = DialogKit.Line, CornerRadius = new CornerRadius(13), Padding = new Thickness(11, 3, 7, 3), Margin = new Thickness(0, 0, 6, 6) };
+    }
+
+    private static Border SuggestTag(string name, Action add)
+    {
+        var t = DialogKit.Text("+ " + name, 12, FontWeights.Medium, DialogKit.Sub); t.TextWrapping = TextWrapping.NoWrap;
+        var b = new Border { Child = t, BorderBrush = DialogKit.Line, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), Padding = new Thickness(9, 2, 9, 3), Margin = new Thickness(0, 0, 6, 6), Cursor = Cursors.Hand, Background = Brushes.Transparent, ToolTip = $"把 {name} 加进隐藏名单" };
+        b.MouseEnter += (_, _) => { b.Background = DialogKit.Faint; t.Foreground = DialogKit.Fg; };
+        b.MouseLeave += (_, _) => { b.Background = Brushes.Transparent; t.Foreground = DialogKit.Sub; };
+        b.MouseLeftButtonUp += (_, e) => { e.Handled = true; add(); };
+        return b;
+    }
+
+    // ───────────── 歌词校准（按播放器） ─────────────
+
+    private void LyricCalibration(StackPanel p)
+    {
+        var lyr = _app.LyricsSvc;
+        var inner = new StackPanel();
+        var on = Features.On(Features.PlayerLyricOffset);
+        inner.Children.Add(DialogKit.Row("按播放器校准歌词", "有的播放器报给系统的进度总是慢或快一截：在这里调，或按住 Ctrl 在岛上的歌词上滚滚轮，这个播放器放的每首歌都跟着走；和按歌的滚轮微调叠加。正数 = 歌词提前",
+            DialogKit.Switch(on, v => { Features.Set(Features.PlayerLyricOffset, v); RenderSoon(); })));
+        if (on && lyr != null)
+        {
+            var list = lyr.PlayerOffsets.ToDictionary(k => k.Key, k => k.Value);
+            if (lyr.Player.Length > 0 && !list.ContainsKey(lyr.Player)) list[lyr.Player] = new LyricsService.PlayerOffset(lyr.PlayerName, 0);
+            if (list.Count == 0)
+            {
+                var empty = DialogKit.Text("还没有播放器。放一首有歌词的歌，正在用的播放器会出现在这里。", 12, FontWeights.Normal, DialogKit.Sub);
+                empty.Margin = new Thickness(0, 0, 0, 10);
+                inner.Children.Add(empty);
+            }
+            else inner.Children.Add(new Border { Height = 1, Background = DialogKit.Line, Margin = new Thickness(0, 2, 0, 10) });
+            foreach (var (key, po) in list.OrderByDescending(k => k.Key == lyr.Player).ThenBy(k => k.Value.Name, StringComparer.CurrentCulture))
+                inner.Children.Add(DialogKit.Row(po.Name, key == lyr.Player ? "正在播放" : null, Stepper(lyr, key, po)));
+        }
+        p.Children.Add(Card(inner));
+    }
+
+    /// <summary>[−] +0.3 秒 [+]：每次 0.1 秒，就地改数字不重画整页；数字是 0 时灰掉。</summary>
+    private static FrameworkElement Stepper(LyricsService lyr, string key, LyricsService.PlayerOffset po)
+    {
+        var v = po.Seconds;
+        var val = DialogKit.Text("", 13, FontWeights.SemiBold, DialogKit.Fg);
+        val.Width = 66; val.TextAlignment = TextAlignment.Center; val.VerticalAlignment = VerticalAlignment.Center; val.TextWrapping = TextWrapping.NoWrap;
+        void Paint()
+        {
+            val.Text = Math.Abs(v) < 0.05 ? "0.0 秒" : $"{v:+0.0;-0.0} 秒";
+            val.Foreground = Math.Abs(v) < 0.05 ? DialogKit.Sub : DialogKit.Fg;
+        }
+        Border Round(string glyph, string tip, double step)
+        {
+            var g = new TextBlock { Text = glyph, FontFamily = DialogKit.Icons, FontSize = 10, Foreground = DialogKit.Fg, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            var b = new Border { Width = 28, Height = 28, CornerRadius = new CornerRadius(14), Background = DialogKit.Faint, Child = g, Cursor = Cursors.Hand, ToolTip = tip };
+            b.MouseEnter += (_, _) => b.Background = DialogKit.Line;
+            b.MouseLeave += (_, _) => b.Background = DialogKit.Faint;
+            b.MouseLeftButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                v = Math.Round(Math.Clamp(v + step, -5, 5), 1);
+                lyr.SetPlayerOffset(key, po.Name, v);
+                Paint();
+            };
+            return b;
+        }
+        var sp = new StackPanel { Orientation = Orientation.Horizontal };
+        sp.Children.Add(Round("\uE738", "推后 0.1 秒", -0.1));
+        sp.Children.Add(val);
+        sp.Children.Add(Round("\uE710", "提前 0.1 秒", 0.1));
+        Paint();
+        return sp;
+    }
+
     private static Grid FeatureRow(string key, string title, string desc) =>
         DialogKit.Row(title, desc, DialogKit.Switch(Features.On(key), v => Features.Set(key, v)));
 
@@ -296,7 +486,9 @@ public sealed class SettingsWindow : Window
 
     private void Other(StackPanel p)
     {
-        foreach (var prefix in new[] { "显示歌词", "通知里的验证码", "显示输入法", "接管音量键", "开机自启" }) Mirror(p, prefix, header: false);
+        Mirror(p, "显示歌词", header: false);
+        LyricCalibration(p);
+        foreach (var prefix in new[] { "通知里的验证码", "显示输入法", "接管音量键", "开机自启" }) Mirror(p, prefix, header: false);
         Mirror(p, "计时");
         foreach (var prefix in new[] { "编辑倒计时", "检查更新", "打开数据目录" }) Mirror(p, prefix, header: false);
     }

@@ -29,6 +29,9 @@ public sealed partial class IslandWindow
         UpdateLyricTimer();
     }
 
+    /// <summary>播放器校准改了（设置页 / Ctrl 滚轮 / 开关）：下一拍按新时间重新找句子，不重建界面。</summary>
+    public void OnLyricShiftChanged() { _lyricIdx = -2; LyricTick(); }
+
     /// <summary>播放 / 暂停 / 换会话时调用：只开关计时器，不重建界面。</summary>
     public void UpdateLyricTimer()
     {
@@ -48,19 +51,33 @@ public sealed partial class IslandWindow
         return (c.Text.Length > 0 ? c.Text : "♪", c.Translation ?? next);
     }
 
-    /// <summary>查歌词用的时间：当前进度 + 0.25 秒（换句略提前一点，读起来不拖）+ 这首歌用户调过的偏移。</summary>
+    /// <summary>查歌词用的时间：当前进度 + 0.25 秒（换句略提前一点，读起来不拖）+ 这首歌用户调过的偏移 + 这个播放器的整体校准。</summary>
     private TimeSpan LyricClock() =>
-        (Media?.LivePosition() ?? TimeSpan.Zero) + TimeSpan.FromMilliseconds(250) + (Lyrics?.UserOffset ?? TimeSpan.Zero);
+        (Media?.LivePosition() ?? TimeSpan.Zero) + TimeSpan.FromMilliseconds(250) + (Lyrics?.UserOffset ?? TimeSpan.Zero) + (Lyrics?.PlayerShift ?? TimeSpan.Zero);
 
-    /// <summary>在歌词上滚滚轮：往上 = 歌词提前 0.3 秒，往下 = 推后 0.3 秒；每首歌单独记住。</summary>
+    /// <summary>
+    /// 在歌词上滚滚轮：往上 = 歌词提前 0.3 秒，往下 = 推后 0.3 秒；每首歌单独记住。
+    /// 按住 Ctrl 滚：整个播放器 ±0.1 秒（这个播放器放的歌都跟着走），设置里关掉「按播放器校准」时 Ctrl 滚轮照旧按歌调。
+    /// </summary>
     private void HookLyricWheel(FrameworkElement el)
     {
-        el.ToolTip = "滚轮微调歌词快慢（每格 0.3 秒，按歌记住）";
+        el.ToolTip = Features.On(Features.PlayerLyricOffset)
+            ? "滚轮微调这首歌的歌词快慢（每格 0.3 秒）\n按住 Ctrl 滚：校准整个播放器（每格 0.1 秒）"
+            : "滚轮微调歌词快慢（每格 0.3 秒，按歌记住）";
         el.MouseWheel += (_, e) =>
         {
             if (Lyrics == null) return;
             e.Handled = true;
-            Lyrics.Nudge(e.Delta > 0 ? 0.3 : -0.3);
+            var up = e.Delta > 0;
+            if ((System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0 && Features.On(Features.PlayerLyricOffset) && Lyrics.Player.Length > 0)
+            {
+                Lyrics.NudgePlayer(up ? 0.1 : -0.1);
+                var po = Lyrics.PlayerShift.TotalSeconds;
+                if (_cardLyric2 != null) _cardLyric2.Text = Math.Abs(po) < 0.05 ? $"{Lyrics.PlayerName} 校准已复位" : $"{Lyrics.PlayerName} 整体{(po > 0 ? "提前" : "推后")} {Math.Abs(po):0.0} 秒";
+                _lyricIdx = -2;
+                return;
+            }
+            Lyrics.Nudge(up ? 0.3 : -0.3);
             var o = Lyrics.UserOffset.TotalSeconds;
             App.Log($"歌词偏移 {o:+0.0;-0.0;0} 秒");
             if (_cardLyric2 != null) _cardLyric2.Text = Math.Abs(o) < 0.05 ? "歌词偏移已复位" : $"歌词{(o > 0 ? "提前" : "推后")} {Math.Abs(o):0.0} 秒";

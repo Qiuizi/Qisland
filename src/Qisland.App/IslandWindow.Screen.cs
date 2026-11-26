@@ -10,7 +10,8 @@ namespace Qisland.App;
 /// 屏幕相关：
 /// · 多显示器：岛跟着「前台窗口所在的那块屏」走（不跟鼠标，避免乱跳），换屏后按那块屏的 DPI 重新居中。
 /// · 全屏 / 游戏自动隐藏：只看岛所在那块屏；D3D 独占全屏和演示模式也算。
-/// · fullscreen.txt：show 名单全屏也照常显示，hide 名单只要在前台就隐藏。
+/// · fullscreen.txt：show 名单全屏也照常显示，hide 名单只要在前台就隐藏（设置页可编辑，见 HideRules；
+///   「按程序隐藏」可整体关掉；可选「只在挡住岛时才藏」，参考小糖岛仔的自动避让）。
 /// · Ctrl+Alt+Q：全屏时临时叫回来；平时一键隐藏 / 显示。
 /// </summary>
 public sealed partial class IslandWindow
@@ -97,9 +98,11 @@ public sealed partial class IslandWindow
         }
         LoadLists();
         var proc = ProcName(fg);
+        var listed = proc.Length > 0 && Features.On(Features.HideList) && _hideList.Contains(proc)
+                     && (!Features.On(Features.HideOnlyCovering) || CoversIsland(fg));
         bool hide;
         if (_manualHide) hide = true;
-        else if (proc.Length > 0 && _hideList.Contains(proc)) hide = true;
+        else if (listed) hide = true;
         else if (fg == _override && fg != IntPtr.Zero) hide = false;
         else if (proc.Length > 0 && _showList.Contains(proc)) hide = false;
         else hide = FullscreenOnMyScreen(fg);
@@ -111,7 +114,7 @@ public sealed partial class IslandWindow
         {
             _hidden = hide;
             // 显示 / 隐藏切换不频繁（换前台程序才会变），记下来方便查「岛怎么不见了」
-            App.Log((hide ? $"岛隐藏：前台 {(proc.Length > 0 ? proc : "?")}{(_manualHide ? "（手动）" : _hideList.Contains(proc) ? "（hide 名单）" : "（全屏）")}" : $"岛显示：前台 {(proc.Length > 0 ? proc : "?")}")
+            App.Log((hide ? $"岛隐藏：前台 {(proc.Length > 0 ? proc : "?")}{(_manualHide ? "（手动）" : listed ? "（hide 名单）" : "（全屏）")}" : $"岛显示：前台 {(proc.Length > 0 ? proc : "?")}")
                 + $" · {Native.Describe(fg)}");
             _show.Target = hide ? 0 : 1;
             if (hide && _mode == Mode.Expanded && !_pinned) SetMode(DesiredRestMode());
@@ -120,6 +123,21 @@ public sealed partial class IslandWindow
     }
 
     private DateTime _benchShowUntil = DateTime.MinValue;
+
+    /// <summary>
+    /// 前台窗口有没有盖到岛（「只在挡住岛时才藏」用）：按窗口实际可见边框（DWM 扩展边框，不含阴影）和岛此刻的胶囊位置比；
+    /// 最小化、读不到边框时按「盖住」算，退回原来的规则，宁可藏也不挡人。
+    /// </summary>
+    private bool CoversIsland(IntPtr fg)
+    {
+        if (fg == IntPtr.Zero || IsIconic(fg)) return false;
+        if (DwmGetWindowAttribute(fg, 9 /*DWMWA_EXTENDED_FRAME_BOUNDS*/, out var r, Marshal.SizeOf<Native.RECT>()) != 0 && !Native.GetWindowRect(fg, out r)) return true;
+        var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(this);
+        var (pl, pt) = Origin(_w.Target, _h.Target);
+        var l = (int)Math.Round((Left + pl) * dpi.DpiScaleX); var t = (int)Math.Round((Top + pt) * dpi.DpiScaleY);
+        var rr = (int)Math.Round((Left + pl + _w.Target) * dpi.DpiScaleX); var b = (int)Math.Round((Top + pt + _h.Target) * dpi.DpiScaleY);
+        return r.Left < rr && r.Right > l && r.Top < b && r.Bottom > t;
+    }
 
     private bool FullscreenOnMyScreen(IntPtr fg)
     {
@@ -248,4 +266,6 @@ public sealed partial class IslandWindow
     [DllImport("user32.dll")] private static extern bool RegisterHotKey(IntPtr h, int id, uint mods, uint vk);
     [DllImport("shcore.dll")] private static extern int GetDpiForMonitor(IntPtr mon, int type, out uint dx, out uint dy);
     [DllImport("shell32.dll")] private static extern int SHQueryUserNotificationState(out int state);
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr h);
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr h, int attr, out Native.RECT value, int size);
 }

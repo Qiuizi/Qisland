@@ -12,7 +12,9 @@ namespace Qisland.App;
 /// - 网易云日志 / SMTC 合并后给了 songId：直接按 id 取，不搜索；
 /// - 其它播放器（Apple Music、QQ 音乐、酷狗、Spotify……）按歌名 + 歌手 + 时长搜，时长差 &gt; 3 秒、Live / Remix / 伴奏版一律不要（<see cref="LyricMatch"/>）；
 /// - 换歌时旧查询的结果作废（key 不一致就丢），不会串到新歌；
-/// - 每首歌可以在歌词上滚滚轮微调 ±0.3 秒，记在 lyrics\offsets.json 里，下次放同一首自动用上。
+/// - 每首歌可以在歌词上滚滚轮微调 ±0.3 秒，记在 lyrics\offsets.json 里，下次放同一首自动用上；
+/// - 另外按播放器整体校准（参考 pyisland）：有的播放器报给系统的进度总是慢 / 快一截，按住 Ctrl 滚滚轮或在设置里调，
+///   记在 lyrics\player-offsets.json，这个播放器放的每首歌都加上；和按歌的偏移叠加。
 /// 对不上宁可不显示，也不显示错歌词。
 /// </summary>
 public sealed class LyricsService
@@ -21,6 +23,7 @@ public sealed class LyricsService
     public static string OffFlag => Path.Combine(App.DataDir, "lyrics.off");
     public static bool Enabled { get => !File.Exists(OffFlag); set { try { if (value) File.Delete(OffFlag); else File.WriteAllText(OffFlag, ""); } catch { } } }
     private static string OffsetsPath => Path.Combine(Dir, "offsets.json");
+    private static string PlayerOffsetsPath => Path.Combine(Dir, "player-offsets.json");
 
     private static readonly HttpClient Http = CreateHttp();
     private string _key = "";
@@ -30,6 +33,17 @@ public sealed class LyricsService
     /// <summary>这首歌用户调过的偏移（正数 = 歌词提前）。</summary>
     public TimeSpan UserOffset { get; private set; }
     public event Action? Changed;
+
+    /// <summary>按播放器的整体校准：键是 MediaState.AppSource（music / qqmusic / spotify / exe:xxx…），Name 是显示名。</summary>
+    public sealed record PlayerOffset(string Name, double Seconds);
+    private Dictionary<string, PlayerOffset>? _players;
+    /// <summary>当前播放器（AppSource）和显示名；没在放时是空串。</summary>
+    public string Player { get; private set; } = "";
+    public string PlayerName { get; private set; } = "";
+    /// <summary>当前播放器的整体校准（开关关掉时为 0）。</summary>
+    public TimeSpan PlayerShift => Features.On(Features.PlayerLyricOffset) && Player.Length > 0 && LoadPlayers().TryGetValue(Player, out var p) ? TimeSpan.FromSeconds(p.Seconds) : TimeSpan.Zero;
+    public IReadOnlyDictionary<string, PlayerOffset> PlayerOffsets => LoadPlayers();
+    public event Action? PlayerShiftChanged;
 
     private static HttpClient CreateHttp()
     {
@@ -50,6 +64,7 @@ public sealed class LyricsService
     public void OnTrack(MediaState? m)
     {
         if (_key == "demo") return;
+        if (m is { AppSource.Length: > 0 }) { Player = m.AppSource; PlayerName = m.App.Length > 0 ? m.App : m.AppSource; }
         // 没有歌手、也不是网易云日志里的歌：多半是浏览器标签页 / 网页视频的标题，不拿它去歌词站搜（搜不到，还把网页标题发了出去）
         if (m == null || m.Video || !Enabled || string.IsNullOrWhiteSpace(m.Title) || (string.IsNullOrWhiteSpace(m.Artist) && m.SongId == null))
         {
@@ -77,6 +92,39 @@ public sealed class LyricsService
         if (Math.Abs(v) < 0.05) d.Remove(_name); else d[_name] = v;
         try { Directory.CreateDirectory(Dir); File.WriteAllText(OffsetsPath, JsonSerializer.Serialize(d)); } catch { }
         Changed?.Invoke();
+    }
+
+    /// <summary>Ctrl + 滚轮：当前播放器整体 ±0.1 秒。</summary>
+    public void NudgePlayer(double seconds)
+    {
+        if (Player.Length == 0) return;
+        var cur = LoadPlayers().TryGetValue(Player, out var p) ? p.Seconds : 0;
+        SetPlayerOffset(Player, PlayerName, cur + seconds);
+    }
+
+    /// <summary>设置页 / 滚轮改某个播放器的校准；0 就删掉这条（名单里保留显示名，方便再调回来时认得）。</summary>
+    public void SetPlayerOffset(string player, string name, double seconds)
+    {
+        if (player.Length == 0) return;
+        var v = Math.Round(Math.Clamp(seconds, -5, 5), 1);
+        if (Math.Abs(v) < 0.05) v = 0;
+        var d = LoadPlayers();
+        if (d.TryGetValue(player, out var same) && same.Seconds == v && (name.Length == 0 || same.Name == name)) return;   // 已经到头（±5 秒）或没变：不重复写
+        d[player] = new PlayerOffset(name.Length > 0 ? name : d.TryGetValue(player, out var old) ? old.Name : player, v);
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(PlayerOffsetsPath, JsonSerializer.Serialize(d, Readable)); }
+        catch (Exception ex) { App.Log("保存播放器歌词校准: " + ex.Message); }
+        App.Log($"歌词校准 {d[player].Name} {d[player].Seconds:+0.0;-0.0;0} 秒");
+        if (player == Player) PlayerShiftChanged?.Invoke();
+    }
+
+    private static readonly JsonSerializerOptions Readable = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };   // 播放器名照原样写中文，手动打开也看得懂
+
+    private Dictionary<string, PlayerOffset> LoadPlayers()
+    {
+        if (_players != null) return _players;
+        try { _players = File.Exists(PlayerOffsetsPath) ? JsonSerializer.Deserialize<Dictionary<string, PlayerOffset>>(File.ReadAllText(PlayerOffsetsPath)) : null; }
+        catch (Exception ex) { App.Log("读播放器歌词校准: " + ex.Message); }
+        return _players ??= [];
     }
 
     private Dictionary<string, double> LoadOffsets()

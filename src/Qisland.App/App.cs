@@ -263,7 +263,7 @@ public sealed partial class App : Application
             };
             if (_api != null) _api.Preview = id =>
                 Dispatcher.Invoke(() => DebugJumpTarget.Resolve(_store, id, _media));
-            if (_api != null) { _api.PerfJson = _perf.Json; _api.Peek = (s, p) => _window?.PeekFor(s, p); }
+            if (_api != null) { _api.PerfJson = _perf.Json; _api.Peek = (s, p) => _window?.PeekFor(s, p); _api.Settings = c => OpenSettings(c); }
             PerfGuard.Changed += () => _window?.OnPerfChanged();
             PerfGuard.MemoryPressure += () => _window?.OnMemoryPressure();
             _quota = new CodexQuota(a => Dispatcher.BeginInvoke(a));
@@ -293,6 +293,8 @@ public sealed partial class App : Application
         _window.Lyrics = _lyrics;
         _media.Changed += () => { _window.OnMediaChanged(); _lyrics.OnTrack(_media.Current); _window.UpdateLyricTimer(); };
         _lyrics.Changed += _window.OnLyricsChanged;
+        _lyrics.PlayerShiftChanged += _window.OnLyricShiftChanged;
+        Features.Changed += k => { if (k == Features.PlayerLyricOffset) Dispatcher.BeginInvoke(_window.OnLyricShiftChanged); };
         _ = _media.StartAsync();
         StartGapFeatures();
         _tick.Tick += (_, _) =>
@@ -707,6 +709,7 @@ public sealed partial class App : Application
         };
         menu.Items.Add(motion);
         menu.Items.Add(DockMenu());
+        menu.Items.Add(ClickLockMenu());
         menu.Items.Add("导入课表（.ics）…", null, (_, _) => Dispatcher.BeginInvoke(ImportTimetable));
         var hwMenu = new System.Windows.Forms.ToolStripMenuItem("作业 DDL");
         var yktLogin = new System.Windows.Forms.ToolStripMenuItem("雨课堂：扫码登录…");
