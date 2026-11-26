@@ -8,8 +8,9 @@ public static partial class Otp
     [GeneratedRegex(@"验证码|校验码|动态码|动态密码|确认码|安全码|驗證碼|verification code|security code|one[- ]time|\bOTP\b|\bcode\b", RegexOptions.IgnoreCase)]
     private static partial Regex Keyword();
 
-    // 前后不能紧挨着别的数字、字母或小数点 / 横杠（排除金额、日期、尾号、订单号片段）
-    [GeneratedRegex(@"(?<![0-9A-Za-z.\-:/])([0-9]{4,8})(?![0-9A-Za-z.\-:/])")]
+    // 前后不能紧挨着别的数字、字母或小数点 / 横杠（排除金额、日期、尾号、订单号片段）；
+    // 后面跟句号但句号后不是数字的（「验证码是 902731.」）算句末标点，照认
+    [GeneratedRegex(@"(?<![0-9A-Za-z.\-:/])([0-9]{4,8})(?![0-9A-Za-z\-:/]|\.[0-9A-Za-z])")]
     private static partial Regex Digits();
 
     /// <summary>有验证码关键字时，返回离关键字最近的 4–8 位数字；没有返回 null。</summary>
