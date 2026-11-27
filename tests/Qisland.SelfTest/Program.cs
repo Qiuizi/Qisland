@@ -1,7 +1,8 @@
 using System.Text;
 using Qisland.Core;
 
-// Qisland 4.3 新增的核心解析逻辑自检：AI 额度解析与阈值防抖、IMAP 验证码（MIME 解码 + 假服务器走一遍只读流程）、外设电量。
+// Qisland 4.3 / 5.0 新增的核心解析逻辑自检：AI 额度解析与阈值防抖、IMAP 验证码（MIME 解码 + 假服务器走一遍只读流程）、外设电量；
+// 5.0 零代码 DIY：收起胶囊编排、组件顺序迁移、theme.json 校验钳位与差异合并、快捷按钮的网址 / 路径 / 本机地址校验。
 // 用法：dotnet run --project tests/Qisland.SelfTest   全部通过打印 SELFTEST_OK，有失败返回 1。
 
 var failed = 0; var passed = 0;
@@ -305,6 +306,187 @@ void Eq<T>(T actual, T expected, string name)
     string? Old(params string[] names) { string? z = null; foreach (var n in names) { if (!n.EndsWith(".zip")) continue; if (z == null || n.Contains("win-x64")) z = n; } return z; }
     Eq(Old("Qisland-4.3.0-full-x64.zip", "Qisland-4.3.0-win-x64.zip"), "Qisland-4.3.0-win-x64.zip", "旧更新器不会误拿 full 包");
     Check(!"Qisland-4.3.0-full-x64.zip".Contains("win-x64"), "full 包名不含 win-x64");
+}
+
+// ───────────── 5.0 零代码 DIY：收起胶囊编排 ─────────────
+{
+    var def = CapsuleLayout.Parse(null);
+    Check(def.IsDefault(CapsuleState.Idle) && def.IsDefault(CapsuleState.Playing), "没有文件 = 4.3 原样（默认编排）");
+    Eq(string.Join(",", def.Shown(CapsuleState.Idle, CapsuleSlot.Left)), "clock", "默认空闲左槽是时间");
+    Eq(string.Join(",", def.Shown(CapsuleState.Idle, CapsuleSlot.Right)), "quota,weather", "默认空闲右槽：额度环 + 天气");
+    Eq(string.Join(",", def.Shown(CapsuleState.Playing, CapsuleSlot.Right)), "bars", "默认播放右槽只有频谱");
+    Check(!def.IsOn(CapsuleState.Playing, "clock"), "播放时的时间默认关");
+
+    var round = CapsuleLayout.Parse(def.Serialize());
+    Check(round.Idle.SequenceEqual(def.Idle) && round.Playing.SequenceEqual(def.Playing), "编排序列化往返一致");
+
+    var l = CapsuleLayout.Parse("idle.left = weather\nidle.center = clock, -stats\nidle.right = quota\nplaying.right = clock, bars\nplaying.left = cover\n");
+    Eq(string.Join(",", l.Shown(CapsuleState.Idle, CapsuleSlot.Center)), "clock,countdown", "自定义：时间居中，隐藏的系统状态不显示，漏写的倒计时补在后面");
+    Check(l.Idle.Any(e => e.Id == "countdown" && e.On && e.Slot == CapsuleSlot.Center), "文件里漏掉的项按默认位置补上（倒计时回到中间）");
+    Eq(string.Join(",", l.Shown(CapsuleState.Playing, CapsuleSlot.Right)), "clock,bars", "播放右槽按文件顺序");
+    Check(l.IsOn(CapsuleState.Playing, "title") && l.Playing.First(e => e.Id == "title").Slot == CapsuleSlot.Center, "歌名漏写也补回中间");
+    var re = CapsuleLayout.Parse(l.Serialize());
+    Check(re.Idle.SequenceEqual(l.Idle) && re.Playing.SequenceEqual(l.Playing), "自定义编排往返一致");
+    var g = CapsuleLayout.Default();
+    g.Move(CapsuleState.Idle, 0, 1);   // 时间往下拖进中间那一组
+    Check(g.Idle[0].Id == "countdown" && g.Idle[1] is { Id: "clock", Slot: CapsuleSlot.Center }, "拖过组界就跟着换槽位");
+    g.Set(CapsuleState.Idle, "clock", slot: CapsuleSlot.Right);
+    Check(g.Idle[^1] is { Id: "clock", Slot: CapsuleSlot.Right } && g.Idle.Select(e => e.Slot).SequenceEqual(g.Idle.Select(e => e.Slot).Order()), "改槽位后列表仍按左 / 中 / 右分组");
+    var pl = CapsuleLayout.Default();
+    pl.Move(CapsuleState.Playing, 1, 0);
+    Check(pl.Playing.First(e => e.Id == "title").Slot == CapsuleSlot.Center && pl.Playing[0].Id == "cover", "歌名拖不出中间槽位");
+
+    var junk = CapsuleLayout.Parse("idle.left = clock, clock, evil, ../x\nfoo.bar = clock\nidle.middle = weather\n# idle.left = weather\nIDLE.RIGHT = Weather");
+    Eq(junk.Idle.Count(e => e.Id == "clock"), 1, "重复项只留一个");
+    Check(junk.Idle.All(e => CapsuleLayout.Catalog(CapsuleState.Idle).Any(c => c.Id == e.Id)), "不认识的项 / 槽位 / 状态都忽略");
+    Check(junk.Idle.First(e => e.Id == "weather").Slot == CapsuleSlot.Right, "大小写不敏感");
+    var none = CapsuleLayout.Parse("idle.left = -clock, -weather, -countdown, -stats, -quota");
+    Check(none.IsDefault(CapsuleState.Idle), "一项都不显示时退回默认，胶囊不会变空壳");
+    var lockT = CapsuleLayout.Parse("playing.left = title, cover");
+    Check(lockT.Playing.First(e => e.Id == "title").Slot == CapsuleSlot.Center, "歌名固定在中间");
+    lockT.Set(CapsuleState.Playing, "title", slot: CapsuleSlot.Right);
+    Check(lockT.Playing.First(e => e.Id == "title").Slot == CapsuleSlot.Center, "Set 也挪不走歌名");
+    var mv = CapsuleLayout.Default();
+    mv.Move(CapsuleState.Idle, 0, 4);
+    Eq(mv.Idle[^1].Id, "clock", "拖拽排序：第一项挪到最后");
+    mv.Move(CapsuleState.Idle, 4, 99);
+    Eq(mv.Idle[^1].Id, "clock", "越界目标夹住");
+    Check(CapsuleLayout.Parse("idle.left = clock\r\nidle.right = weather\r\n").IsOn(CapsuleState.Idle, "weather"), "Windows 换行");
+}
+
+// ───────────── 5.0：组件页顺序（widgets.txt 旧文件迁移） ─────────────
+{
+    string[] known = ["weather", "school", "quick", "todo", "clip", "calendar", "timer", "health", "system", "devices"];
+    var old = WidgetOrder.Parse(["# Qisland 组件页", "weather", "-todo", "clip", "calendar", "timer", "system"], known);
+    Eq(string.Join(",", old.Select(w => w.Id)), "weather,school,quick,todo,clip,calendar,timer,health,system,devices", "旧文件：新组件插在默认位置，顺序保留");
+    Check(!old.First(w => w.Id == "todo").On, "旧文件里隐藏的仍然隐藏");
+    Check(old.First(w => w.Id == "quick").On, "新加的快捷按钮默认显示（没按钮时卡片自己不占位）");
+    var custom = WidgetOrder.Parse(["system", "weather", "-clip", "bogus", "SYSTEM"], known);
+    Eq(custom[0].Id, "system", "自定义顺序保留");
+    Eq(custom.Count, known.Length, "不认识的行忽略、重复的去掉、缺的补齐");
+    var lines = WidgetOrder.Serialize(custom, known);
+    var back = WidgetOrder.Parse(lines, known);
+    Check(back.SequenceEqual(custom), "widgets.txt 往返一致");
+    var mv = custom.ToList(); WidgetOrder.Move(mv, 0, 2);
+    Eq(mv[2].Id, "system", "拖拽：0 → 2");
+    WidgetOrder.Move(mv, -1, 3);
+    Eq(mv[2].Id, "system", "非法来源不动");
+}
+
+// ───────────── 5.0：theme.json 主题包 ─────────────
+{
+    Eq(Argb.Parse("#0A84FF"), new Argb(0xFF, 0x0A, 0x84, 0xFF), "颜色 #RRGGBB");
+    Eq(Argb.Parse("#0A84FF80"), new Argb(0x80, 0x0A, 0x84, 0xFF), "颜色 #RRGGBBAA（CSS 写法）");
+    Eq(Argb.Parse("#fff"), new Argb(0xFF, 0xFF, 0xFF, 0xFF), "颜色 #RGB");
+    Check(Argb.Parse("red") == null && Argb.Parse("#12345") == null && Argb.Parse("#GGGGGG") == null && Argb.Parse("rgb(1,2,3)") == null, "非法颜色不认");
+    Check(Math.Abs(Argb.Contrast(new Argb(255, 0, 0, 0), new Argb(255, 255, 255, 255)) - 21) < 0.01, "黑白对比度 21");
+
+    var p = ThemePack.Parse("{\"name\":\"测试\",\"material\":\"solid\",\"background\":\"#101018\",\"text\":\"#F0F0F0\",\"accent\":\"#8C7DFF\",\"radius\":28,\"opacity\":0.9}", out var err, out var warn);
+    Check(p != null && err == null && warn.Count == 0, "合法主题包");
+    Eq(p!.Radius, 28.0, "圆角");
+    Check(p.DarkBase, "深色底 → 深色外观");
+
+    var bad = ThemePack.Parse("{\"name\":\"坏\",\"material\":\"solid\",\"background\":\"#10101800\",\"text\":\"#111111\",\"radius\":999,\"opacity\":0,\"blur\":-3,\"card\":\"#FFFFFFFF\",\"accent\":\"javascript:alert(1)\",\"font\":\"Arial; } <script>\",\"evil\":1}", out err, out warn);
+    Check(bad != null, "坏字段不整份拒绝");
+    Eq(bad!.Background!.Value.A, (byte)0xE6, "纯色底透明度下限（不会透明到看不见）");
+    Check(bad.Text == null, "文字和底色对比度不够时退回默认");
+    Eq(bad.Radius, ThemePack.MaxRadius, "圆角上限");
+    Eq(bad.Opacity, ThemePack.MinOpacity, "不透明度下限 0.6");
+    Eq(bad.Blur, 0.0, "模糊下限 0");
+    Eq(bad.Card!.Value.A, (byte)0xC8, "卡片透明度上限");
+    Check(bad.Accent == null && bad.Font == null, "非法强调色、带脚本字符的字体名都丢掉");
+    Check(warn.Count >= 8 && warn.Any(w => w.Contains("evil")), "每一处忽略 / 钳位都有说明");
+
+    var glass = ThemePack.Parse("{\"name\":\"雾\",\"material\":\"frosted\",\"background\":\"#FFFFFF05\"}", out _, out _);
+    Eq(glass!.Background!.Value.A, (byte)0x26, "玻璃底透明度下限 15%");
+
+    string?[] fatal = [null, "", "[]", "\"x\"", "{\"author\":\"a\"}", "{name:1", "{\"name\":\"\\u0000\\u0007\"}", "{\"name\":\"" + new string('x', 40000) + "\"}"];
+    Check(fatal.All(f => ThemePack.Parse(f, out var e, out _) == null && e != null), "空 / 非对象 / 没名字 / 坏 JSON / 超过 32 KB 整份拒绝");
+    Check(ThemePack.Parse("{\"name\":1}", out _, out _) == null, "name 不是文字");
+    var deep = "{\"name\":\"d\",\"x\":" + string.Concat(Enumerable.Repeat("[", 50)) + string.Concat(Enumerable.Repeat("]", 50)) + "}";
+    Check(ThemePack.Parse(deep, out var de, out _) == null && de != null, "嵌套过深拒绝");
+    var rtl = ThemePack.Parse("{\"name\":\"a\\u202Eb\\nc\"}", out _, out _);
+    Eq(rtl!.Name, "abc", "名字去掉控制字符和反向字符");
+    var longName = ThemePack.Parse("{\"name\":\"" + new string('名', 50) + "\"}", out _, out var lw);
+    Check(longName!.Name.Length == 24 && lw.Count == 1, "名字截到 24 字");
+
+    var basePack = ThemePack.Parse("{\"name\":\"底\",\"background\":\"#101010\",\"backgroundEnd\":\"#000000\",\"accent\":\"#FF0000\",\"radius\":20}", out _, out _)!;
+    var diff = ThemePack.Parse("{\"name\":\"差异\",\"accent\":\"#00FF00\"}", out _, out _)!;
+    var merged = basePack.Merge(diff);
+    Check(merged.Accent == new Argb(0xFF, 0, 0xFF, 0) && merged.Radius == 20 && merged.Background == basePack.Background && merged.BackgroundEnd == basePack.BackgroundEnd, "差异合并：只盖写了的字段");
+    var diff2 = ThemePack.Parse("{\"name\":\"换底\",\"background\":\"#202020\"}", out _, out _)!;
+    Check(basePack.Merge(diff2).BackgroundEnd == null, "只换上端底色时不沿用旧的渐变下端");
+
+    var exp = p.ToJson();
+    var back = ThemePack.Parse(exp, out _, out var bw);
+    Check(back != null && bw.Count == 0 && back == p, "导出再导入完全一致");
+    Check(exp.Contains("\"测试\"") && exp.Contains("qisland-theme/1"), "导出中文不转义、带格式标记");
+    Eq(ThemePack.SafeFileName("极夜/曜石..\\x"), "极夜曜石x.json", "导入文件名只留安全字符");
+    Eq(ThemePack.SafeFileName("../.."), "theme.json", "空文件名兜底");
+    var noBg = ThemePack.Parse("{\"name\":\"黑字\",\"text\":\"#050505\"}", out _, out _)!;
+    Check(noBg.Text != null && noBg.Sanitized(null, new Argb(0xFF, 0x12, 0x12, 0x14)).Text == null, "没写底色时按当前外观的底色检查对比度");
+
+    // 仓库里的三套官方主题：都要能无警告通过校验，文字对比度合格
+    var dir = AppContext.BaseDirectory;
+    for (var i = 0; i < 6 && !Directory.Exists(Path.Combine(dir, "themes")); i++) dir = Path.GetDirectoryName(dir.TrimEnd(Path.DirectorySeparatorChar)) ?? dir;
+    var themeDir = Path.Combine(dir, "themes");
+    var files = Directory.Exists(themeDir) ? Directory.GetFiles(themeDir, "*.json") : [];
+    Eq(files.Length, 3, "仓库 themes/ 里 3 套官方主题");
+    foreach (var f in files)
+    {
+        var tp = ThemePack.Parse(File.ReadAllText(f), out var te, out var tw);
+        Check(tp != null && te == null && tw.Count == 0, "官方主题无警告：" + Path.GetFileName(f) + (tw.Count > 0 ? " " + string.Join("；", tw) : ""));
+        Check(tp?.Text != null && tp.Subtext != null && tp.Accent != null && tp.Background != null, "官方主题字段齐全：" + Path.GetFileName(f));
+    }
+}
+
+// ───────────── 5.0：快捷按钮 ─────────────
+{
+    Check(QuickActions.SafeWebUrl("https://github.com/Qiuizi/Qisland") != null, "https 网址");
+    Check(QuickActions.SafeWebUrl("http://example.com/a?b=c") != null, "http 网址");
+    string[] badUrls = ["javascript:alert(1)", "file:///C:/Windows/win.ini", "ftp://x.com", "https://", "github.com", "https://a.com/ b", "https://user:pw@a.com", "ms-settings:privacy", "https://a.com\n", " ", "vbscript:x"];
+    Check(badUrls.All(u => QuickActions.SafeWebUrl(u) == null), "非 http(s)、不完整、带空白 / 账号的网址都拒绝");
+
+    Check(QuickActions.SafeLoopbackUrl("http://127.0.0.1:9840/v1/island/push") != null, "本机 127.0.0.1");
+    Check(QuickActions.SafeLoopbackUrl("http://localhost:8080/run") != null, "本机 localhost");
+    Check(QuickActions.SafeLoopbackUrl("http://[::1]:9840/") != null, "本机 ::1");
+    string[] badLocal = ["http://192.168.1.2:80/", "http://127.0.0.1.evil.com:80/", "http://localhost.evil.com:9840/", "http://127.0.0.1/", "https://example.com:443/", "http://0.0.0.0:9840/", "http://127.0.0.2:9840/"];
+    Check(badLocal.All(u => QuickActions.SafeLoopbackUrl(u) == null), "非回环地址 / 没写端口都拒绝");
+
+    Func<string, bool> exists = s => s is @"C:\Windows\System32\notepad.exe" or @"D:\Demo";
+    Check(QuickActions.ValidatePath(@"C:\Windows\System32\notepad.exe", exists) == null, "存在的程序路径");
+    Check(QuickActions.ValidatePath(@"D:\Demo", exists) == null, "存在的文件夹");
+    Check(QuickActions.ValidatePath(@"C:\nope.exe", exists) == "这个路径不存在", "不存在的路径拒绝");
+    string[] badPaths = ["notepad.exe", @"C:\a.exe"" & calc", @"C:\a.exe | calc", @"C:\a.exe > x", @"\\server\share\x.exe", @"C:\Windows\..\x.exe", @"%COMSPEC%", "cmd /c calc", @"C:\a^b.exe", "", @"C:", "C:x.exe", "//server/share"];
+    Check(badPaths.All(b => QuickActions.ValidatePath(b, _ => true) != null), "相对路径、命令行字符、网络共享、.. 都拒绝");
+
+    var ok = new QuickAction("★", "主页", QuickKind.Url, "https://github.com");
+    Check(QuickActions.Validate(ok, null) == null, "合法网页按钮");
+    Check(QuickActions.Validate(ok with { Title = "" }, null) != null, "没名字不行");
+    Check(QuickActions.Validate(new QuickAction("☕", "歇会", QuickKind.Notify, "站起来走走"), null) == null, "岛上提醒");
+    Check(QuickActions.Validate(new QuickAction("☕", "歇会", QuickKind.Notify, new string('a', 121)), null) != null, "提醒超长");
+    Check(QuickActions.Validate(new QuickAction("⚡", "推送", QuickKind.Local, "http://127.0.0.1:9840/v1/island/push", new string('a', 5000)), null) != null, "请求内容超长");
+    Eq(QuickActions.CleanTitle("一二三四五六七八九十"), "一二三四五六七八", "标题最多 8 个字");
+    Eq(QuickActions.CleanIcon(""), "⚡", "空图标兜底");
+    Eq(QuickActions.CleanIcon("👨‍👩‍👧🚀🎵"), "👨‍👩‍👧🚀", "图标最多两个字符元素（组合 emoji 算一个）");
+    Eq(QuickActions.CleanTitle("a\u0000b\nc"), "abc", "标题去控制字符");
+
+    var list = new List<QuickAction>
+    {
+        ok,
+        new("✎", "记事本", QuickKind.Open, @"C:\Windows\System32\notepad.exe"),
+        new("☕", "歇会", QuickKind.Notify, "站起来走走"),
+        new("⚡", "推送", QuickKind.Local, "http://127.0.0.1:9840/v1/island/push", "{\"title\":\"hi\"}"),
+    };
+    var json = QuickActions.Serialize(list);
+    var back = QuickActions.Parse(json);
+    Check(back.SequenceEqual(list), "快捷按钮序列化往返一致");
+    Check(json.Contains("记事本") && !json.Contains("\\u"), "存盘中文不转义");
+    var mixed = QuickActions.Parse("[{\"icon\":\"★\",\"title\":\"坏\",\"kind\":\"url\",\"target\":\"javascript:alert(1)\"},{\"title\":\"x\",\"kind\":\"shell\",\"target\":\"calc\"},{\"title\":\"本机\",\"kind\":\"local\",\"target\":\"http://10.0.0.1:80/\"},{\"title\":\"好\",\"kind\":\"url\",\"target\":\"https://a.com\"},null]");
+    Eq(mixed.Count, 1, "读文件时坏按钮（脚本网址、未知动作、非本机地址）跳过");
+    Check(QuickActions.Parse("not json").Count == 0 && QuickActions.Parse(null).Count == 0 && QuickActions.Parse("{}").Count == 0, "坏文件 = 没按钮");
+    var many = QuickActions.Serialize(Enumerable.Range(0, 20).Select(i => ok with { Title = "b" + i }));
+    Eq(QuickActions.Parse(many).Count, QuickActions.Max, "最多 12 个");
 }
 
 Console.WriteLine($"{passed} 项通过，{failed} 项失败");
