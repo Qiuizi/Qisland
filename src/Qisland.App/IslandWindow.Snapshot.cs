@@ -126,9 +126,67 @@ public sealed partial class IslandWindow
         _page = Page.Widgets; _expDirty = true; _pageCache.Clear();
         await Shot(dir, "20-devices", Mode.Expanded);
         _widgetList = null;
+        await SnapshotDiy(dir);
         _page = Page.Home;
         App.Log("snapshot 完成: " + dir);
     }
+
+    /// <summary>5.0 零代码 DIY 的素材：快捷按钮卡、两种胶囊编排、三套官方主题。全部是演示数据，只改内存不落盘。</summary>
+    private async Task SnapshotDiy(string dir)
+    {
+        foreach (var a in _store.Ranked().ToList()) _store.Remove(a.Id);
+        QuickStore.Demo(DemoQuick);
+        _widgetList = Widgets().OrderBy(w => w.Id == "quick" ? 0 : w.Id == "weather" ? 1 : 2).ToList();
+        _page = Page.Widgets; _expDirty = true; _pageCache.Clear();
+        await Shot(dir, "21-quick-buttons", Mode.Expanded);
+
+        // 收起胶囊编排：空闲时天气放左、时间居中；播放时右边加上时间
+        Media = null;
+        var lay = CapsuleLayout.Default();
+        lay.Idle.Clear();
+        lay.Idle.AddRange([new("weather", CapsuleSlot.Left, true), new("clock", CapsuleSlot.Center, true), new("countdown", CapsuleSlot.Center, false), new("stats", CapsuleSlot.Center, false), new("quota", CapsuleSlot.Right, true)]);
+        lay.Set(CapsuleState.Playing, "clock", on: true);
+        lay.Move(CapsuleState.Playing, lay.Playing.FindIndex(e => e.Id == "clock"), 2);
+        CapsuleStore.Demo(lay);
+        await Task.Delay(200);
+        RebuildIdle();
+        SetMode(Mode.Idle);
+        await Shot(dir, "22-diy-idle-layout", Mode.Idle);
+        Media = new MediaWatcher(Dispatcher);
+        Lyrics?.ShowDemo([]);
+        Media.ShowDemo(new MediaState("晚自习", "示例歌手", "网易云音乐", "netease", true, DemoCover(), TimeSpan.FromSeconds(40), TimeSpan.FromSeconds(214), DateTime.Now));
+        OnMediaChanged();
+        await Task.Delay(300);
+        await Shot(dir, "23-diy-playing-layout", Mode.Compact);
+        Media = null;
+        OnMediaChanged();
+        CapsuleStore.Demo(null);
+
+        // 三套官方主题：组件页 + 收起胶囊
+        var names = new Dictionary<string, string> { ["obsidian-night"] = "24-theme-obsidian", ["mist-lime"] = "25-theme-mist-lime", ["amber-gold"] = "26-theme-amber" };
+        foreach (var e in ThemeStore.Builtins)
+        {
+            var key = e.Key["builtin:".Length..];
+            if (!names.TryGetValue(key, out var shot)) continue;
+            ThemeStore.Demo(e.Pack);
+            ApplyLook(ThemeStore.LookFor(e.Pack, Theme.Look.Dark));
+            _page = Page.Widgets; _expDirty = true; _pageCache.Clear(); _wScroll = 0;
+            await Shot(dir, shot + "-widgets", Mode.Expanded);
+            SetMode(Mode.Idle);
+            await Shot(dir, shot + "-idle", Mode.Idle);
+        }
+        ThemeStore.Demo(null);
+        ApplyLook(Theme.Look.Dark);
+        _widgetList = null;
+    }
+
+    internal static readonly QuickAction[] DemoQuick =
+    [
+        new("★", "Qisland", QuickKind.Url, "https://github.com/Qiuizi/Qisland"),
+        new("✎", "记事本", QuickKind.Open, @"C:\Windows\System32\notepad.exe"),
+        new("☕", "歇一会", QuickKind.Notify, "站起来走一走，喝口水"),
+        new("⚡", "推送测试", QuickKind.Local, "http://127.0.0.1:9840/v1/island/push", "{\"title\":\"快捷按钮\",\"message\":\"hello\"}"),
+    ];
 
     private async Task Shot(string dir, string name, Mode m, bool osd = false)
     {

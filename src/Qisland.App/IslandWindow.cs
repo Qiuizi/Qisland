@@ -302,7 +302,7 @@ public sealed partial class IslandWindow : Window
         var top = _store.Pill();
         (_w.Target, _h.Target, _r.Target) = m switch
         {
-            Mode.Expanded => (ExpandedW, _expandedH, 30d),
+            Mode.Expanded => (ExpandedW, _expandedH, Theme.ExpandedRadius),
             Mode.Compact => SideCompact ? (IslandLayout.SideW, IslandLayout.SideH, IslandLayout.SideW / 2) : (_compactW, CompactH, CompactH / 2),
             _ => RestSize(),
         };
@@ -386,6 +386,7 @@ public sealed partial class IslandWindow : Window
         _weather = w;
         if (detail != null) _wx = detail;
         RebuildIdle();
+        if (MusicPlaying && CapsuleStore.Current.IsOn(CapsuleState.Playing, "weather")) RebuildCompact();
         _expDirty = true;
     }
 
@@ -574,7 +575,7 @@ public sealed partial class IslandWindow : Window
         _bubbleShift.X = left + w + 8 - (1 - _bubbleOp.Value) * 22;
 
         var show = Math.Clamp(_show.Value, 0, 1);
-        _root.Opacity = show;
+        _root.Opacity = show * Theme.IslandOpacity;
         (_rootShift.X, _rootShift.Y) = IslandLayout.HideShift(Dock, show, w, h, TopGap);
         UpdateHitRegion(left, w, h, r, bo, show);
         if (_sysOn && _sys != null)
@@ -589,6 +590,7 @@ public sealed partial class IslandWindow : Window
     internal void ApplyLook(Theme.Look look)
     {
         Theme.Apply(look);
+        Theme.ApplyPack(ThemeStore.Active);
         _pill.Fill = Theme.Pill;
         _bubble.Background = Theme.Pill;
         _rim.Stroke = Theme.Rim;
@@ -609,6 +611,7 @@ public sealed partial class IslandWindow : Window
         _idleClock.Foreground = Theme.Primary;
         _idleTemp.Foreground = Theme.Secondary;
         _idleWeatherGlyph.Foreground = Theme.Secondary;
+        _idleClock.FontFamily = Theme.Text; _idleTemp.FontFamily = Theme.Text; _idleIme.FontFamily = Theme.Text; _idleCountdown.FontFamily = Theme.Text;
         if (_hwnd != IntPtr.Zero) SetGlass(Theme.IsGlass);
         RebuildIdle();
         RebuildCompact();
@@ -1318,18 +1321,18 @@ public sealed partial class IslandWindow : Window
         _compact.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _compact.ColumnDefinitions.Add(new ColumnDefinition());
         _compact.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var tile = ArtTile(m, 24, 6);
-        var tileW = m.Art != null && m.Video ? 43 : 24;
-        tile.Margin = new Thickness(PillInset, 0, 0, 0);
-        tile.VerticalAlignment = VerticalAlignment.Center;
-        _compact.Children.Add(tile);
+        _compactClock = null; _compactQuotaRing = null;
+        // 5.0：左 / 右槽按收起胶囊编排放（默认左封面、右频谱，和以前一样）
+        var leftW = PlayingSide(CapsuleSlot.Left, m, 0, new Thickness(PillInset, 0, 0, 0));
+        var rightW = PlayingSide(CapsuleSlot.Right, m, 2, new Thickness(0, 0, PillInset + 2, 0));
+        var showTitle = CapsuleStore.Current.IsOn(CapsuleState.Playing, "title");
         var title = new TextBlock
         {
             FontFamily = Theme.Text, FontSize = 13, VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(10, 0, 10, 1),
-            HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, // 文字在图标和右侧状态之间居中，不贴着图标
+            HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, // 文字在两侧之间居中，不贴着图标
         };
-        var lyr = LiveLyrics;
+        var lyr = showTitle ? LiveLyrics : null;
         _compactLyric = null;
         if (lyr != null)
         {
@@ -1338,20 +1341,34 @@ public sealed partial class IslandWindow : Window
             title.ToolTip = $"{m.Title}  {m.Artist}";
             _compactLyric = title;
         }
-        else
+        else if (showTitle)
         {
             title.Inlines.Add(new Run(m.Title) { Foreground = Theme.Primary, FontWeight = FontWeights.SemiBold });
             if (m.Artist.Length > 0) title.Inlines.Add(new Run("  " + m.Artist) { Foreground = Theme.Secondary, FontWeight = FontWeights.Medium });
         }
-        Grid.SetColumn(title, 1);
-        _compact.Children.Add(title);
-        var bars = Bars(14);
-        bars.Margin = new Thickness(0, 0, PillInset + 2, 0);
-        bars.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(bars, 2);
-        _compact.Children.Add(bars);
-        var textW = MeasureText(m.Title, 13, FontWeights.SemiBold) + (m.Artist.Length > 0 ? MeasureText("  " + m.Artist, 13, FontWeights.Medium) : 0);
-        _compactW = lyr != null ? LyricCompactW : Math.Clamp(PillInset + tileW + 10 + Math.Min(textW, 250) + 10 + 14 + PillInset + 2, 200, 400);
+        // 中间槽里除了歌名，也可以放别的项（时间 / 天气 / 额度环）：和歌名排成一排居中
+        var centerExtra = 0.0;
+        var center = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var id in CapsuleStore.Current.Shown(CapsuleState.Playing, CapsuleSlot.Center))
+        {
+            if (id == "title") { if (showTitle) center.Children.Add(title); continue; }
+            if (PlayingItem(id, m, out var w) is not { } el) continue;
+            el.VerticalAlignment = VerticalAlignment.Center;
+            el.Margin = new Thickness(center.Children.Count == 0 ? 10 : 2, 0, 8, 0);
+            center.Children.Add(el);
+            centerExtra += w + 10;
+        }
+        FrameworkElement mid = center.Children.Count == 1 && center.Children[0] == title ? title : center;
+        if (mid == title) center.Children.Clear();
+        Grid.SetColumn(mid, 1);
+        _compact.Children.Add(mid);
+        var textW = !showTitle ? 0 : MeasureText(m.Title, 13, FontWeights.SemiBold) + (m.Artist.Length > 0 ? MeasureText("  " + m.Artist, 13, FontWeights.Medium) : 0);
+        // 默认编排（左封面 24、右频谱 14）的宽度和 4.3 完全一样；多放的项按实际宽度加上去
+        var tileW = m.Art != null && m.Video ? 43 : 24;
+        var sides = leftW + rightW - (tileW + 14);
+        _compactW = lyr != null
+            ? Math.Clamp(LyricCompactW + sides + centerExtra, 200, 520)
+            : Math.Clamp(PillInset + leftW + (showTitle ? 10 + Math.Min(textW, 250) + 10 : 12) + centerExtra + rightW + PillInset + 2, showTitle ? 200 : 120, 400 + Math.Max(0, sides + centerExtra));
         _compact.Width = _compactW;
         Place(_compact, _compactW);
         if (_mode == Mode.Compact) _w.Target = _compactW;

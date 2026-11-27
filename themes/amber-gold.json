@@ -1,0 +1,16 @@
+{
+  "format": "qisland-theme/1",
+  "name": "琥珀暗金",
+  "author": "Qisland",
+  "version": "1.0",
+  "description": "深咖底色配暖金强调，像夜里的一盏台灯；圆角收得更利落",
+  "material": "solid",
+  "background": "#1C150D",
+  "backgroundEnd": "#0D0906",
+  "card": "#FFC9701A",
+  "accent": "#E7A93C",
+  "text": "#FFF3DE",
+  "subtext": "#C8B08A",
+  "radius": 24,
+  "opacity": 1
+}

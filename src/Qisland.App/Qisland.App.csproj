@@ -37,6 +37,8 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\qisland.ico" LogicalName="qisland.ico" />
+    <!-- 5.0 官方示例主题包：仓库 themes/ 目录，内置进程序 -->
+    <EmbeddedResource Include="..\..\themes\*.json" LogicalName="theme.%(Filename).json" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="QRCoder" Version="1.8.1" />

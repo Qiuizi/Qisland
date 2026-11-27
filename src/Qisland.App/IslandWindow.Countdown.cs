@@ -15,12 +15,8 @@ public sealed partial class IslandWindow
 
     public void OnCountdownChanged()
     {
-        if (_idleCountdown.Parent == null)
-        {
-            _idleCountdown.FontFamily = Theme.Text;
-            Grid.SetColumn(_idleCountdown, 1);
-            _idle.Children.Add(_idleCountdown);
-        }
+        // 放在哪个槽位由收起胶囊编排决定（ArrangeIdle），这里只管内容和显隐
+        _idleCountdown.FontFamily = Theme.Text;
         var near = Countdown?.Items.FirstOrDefault();
         var cls = Classes?.Current ?? (Classes?.Next is { } nx && nx.Start - DateTime.Now <= ClassWatcher.Lead ? nx : null);
         if (cls != null)

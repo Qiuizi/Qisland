@@ -109,6 +109,7 @@ public sealed partial class App : Application
                 var lk = Array.IndexOf(args, "--look");
                 _window.ApplyLook(lk >= 0 && lk + 1 < args.Length && Enum.TryParse<Theme.Look>(args[lk + 1], true, out var look) ? look : Theme.Look.Dark);
                 try { await _window.Snapshot(dir, Demo); } catch (Exception ex) { Log("snapshot: " + ex); }
+                try { await SettingsWindow.SnapshotDiy(this, dir); } catch (Exception ex) { Log("snapshot 设置页: " + ex); }
                 Shutdown();
             };
             _window.Show();
@@ -701,6 +702,21 @@ public sealed partial class App : Application
         catch { return Theme.Look.Dark; }
     }
     private static void SaveLook(Theme.Look l) { try { File.WriteAllText(LookFile, l.ToString()); } catch { } }
+    internal static Theme.Look CurrentLook => Theme.Current;
+
+    /// <summary>5.0 主题包：切换（null = 恢复默认）。主题包写了材质就顺带切到对应外观并记住。</summary>
+    internal void SetThemePack(string? key)
+    {
+        var prevFile = Path.Combine(DataDir, "theme-prev-look.txt");
+        // 第一次用主题包前记下原来的外观，「恢复默认」时还原回去
+        if (ThemeStore.ActiveKey == null && key != null) DiyFiles.Write(prevFile, Theme.Current.ToString());
+        ThemeStore.SetActive(key);
+        Theme.Look look;
+        if (ThemeStore.Active is { } p) look = ThemeStore.LookFor(p, Theme.Current);
+        else look = Enum.TryParse<Theme.Look>(DiyFiles.Read(prevFile, 64)?.Trim(), out var prev) ? prev : Theme.Current;
+        _window?.ApplyLook(look);
+        SaveLook(look);
+    }
     private static string GlassFile => Path.Combine(DataDir, "glass.txt");
     private static GlassMode LoadGlass() { try { return File.Exists(GlassFile) ? GlassPref.Parse(File.ReadAllText(GlassFile)) : GlassMode.System; } catch { return GlassMode.System; } }
     internal static void SaveGlass(GlassMode m) { try { File.WriteAllText(GlassFile, GlassPref.Serialize(m)); } catch { } }

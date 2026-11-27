@@ -159,7 +159,9 @@ public sealed class GlassBackdrop
         if (_prev == null || _prev.Length != n) _prev = new byte[n];
         Buffer.BlockCopy(_buf, 0, _prev, 0, n);
         _prevReq = r; _same = false;
-        Blur(_buf, _tmp, bw, bh, 2); Blur(_buf, _tmp, bw, bh, 2); Blur(_buf, _tmp, bw, bh, 1);
+        // 主题包的 blur（0–1）按比例放大 / 缩小三遍盒式模糊的半径；默认 0.6 就是原来的 2、2、1
+        var k = Theme.BlurStrength / 0.6f;
+        foreach (var r0 in new[] { 2, 2, 1 }) { var rr = (int)Math.Round(r0 * k); if (rr > 0) Blur(_buf, _tmp, bw, bh, Math.Min(rr, 6)); }
         Saturate(_buf, n, 1.35);
         lock (_gate)
         {

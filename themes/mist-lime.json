@@ -1,0 +1,17 @@
+{
+  "format": "qisland-theme/1",
+  "name": "晨雾青柠",
+  "author": "Qisland",
+  "version": "1.0",
+  "description": "清晨薄雾一样的浅色磨砂，青柠绿点睛；亮色桌面上最清爽",
+  "material": "frosted",
+  "background": "#F5FBF1C4",
+  "backgroundEnd": "#E4F1DFA8",
+  "card": "#FFFFFF6E",
+  "accent": "#2E9E5B",
+  "text": "#13201A",
+  "subtext": "#4A5D51",
+  "radius": 28,
+  "opacity": 1,
+  "blur": 0.85
+}

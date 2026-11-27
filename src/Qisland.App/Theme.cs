@@ -6,8 +6,11 @@ namespace Qisland.App;
 
 internal static class Theme
 {
-    public static readonly FontFamily Text = new("Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI");
-    public static readonly FontFamily Display = new("Segoe UI Variable Display, Segoe UI, Microsoft YaHei UI");
+    private static readonly FontFamily DefaultText = new("Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI");
+    private static readonly FontFamily DefaultDisplay = new("Segoe UI Variable Display, Segoe UI, Microsoft YaHei UI");
+    /// <summary>正文字体；主题包写了 font 时换成它（没装这个字体时 WPF 按后面的备选回退）。</summary>
+    public static FontFamily Text { get; private set; } = DefaultText;
+    public static FontFamily Display { get; private set; } = DefaultDisplay;
     public static readonly FontFamily Icons = new("Segoe Fluent Icons, Segoe MDL2 Assets");
 
     /// <summary>Glass = 磨砂玻璃（存档里沿用「Glass」）；Liquid = 液态玻璃（通透、少磨砂、边缘折射带 + 镜面高光）。</summary>
@@ -69,7 +72,81 @@ internal static class Theme
     public static readonly Brush Green = Freeze(new SolidColorBrush(Color.FromRgb(0x30, 0xD1, 0x58)));
     public static readonly Brush Orange = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x9F, 0x0A)));
     public static readonly Brush Red = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x45, 0x3A)));
-    public static readonly Brush Blue = Freeze(new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF)));
+    private static readonly Brush DefaultBlue = Freeze(new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF)));
+    /// <summary>强调色（开关、进度、选中）。默认系统蓝，主题包的 accent 会换掉它。</summary>
+    public static Brush Blue { get; private set; } = DefaultBlue;
+
+    // ───────────── 5.0 主题包 ─────────────
+    /// <summary>当前生效的主题包（已按当前外观校验、钳位过）；null = 没用主题包。</summary>
+    public static ThemePack? Pack { get; private set; }
+    /// <summary>展开后岛的圆角。</summary>
+    public static double ExpandedRadius { get; private set; } = 30;
+    /// <summary>组件卡片圆角，跟着岛的圆角按比例变（默认 22）。</summary>
+    public static double CardRadius => Math.Round(ExpandedRadius * 22 / 30);
+    /// <summary>整座岛的不透明度（主题包 opacity，0.6–1）。</summary>
+    public static double IslandOpacity { get; private set; } = 1;
+    /// <summary>截屏模糊的强度（0–1，默认 0.6 = 4.x 原来的模糊半径）。后台线程读，只是一个 double。</summary>
+    public static volatile float BlurStrength = 0.6f;
+
+    private static Color C(Argb a) => Color.FromArgb(a.A, a.R, a.G, a.B);
+    private static SolidColorBrush S(Argb a) => Freeze(new SolidColorBrush(C(a)));
+
+    /// <summary>当前胶囊底色的上端颜色（给主题包算文字对比度用）。</summary>
+    private static Argb PillTop()
+    {
+        var c = Pill switch { LinearGradientBrush lg when lg.GradientStops.Count > 0 => lg.GradientStops[0].Color, SolidColorBrush sb => sb.Color, _ => Colors.Black };
+        return new Argb(c.A, c.R, c.G, c.B);
+    }
+
+    /// <summary>
+    /// 在 <see cref="Apply"/> 之后叠一层主题包：只换写了的字段。每次换外观都会重新叠（深浅色跟随系统的液态玻璃也一样）。
+    /// 传 null 就是恢复默认。
+    /// </summary>
+    public static void ApplyPack(ThemePack? pack)
+    {
+        Blue = DefaultBlue; Text = DefaultText; Display = DefaultDisplay;
+        ExpandedRadius = 30; IslandOpacity = 1; BlurStrength = 0.6f;
+        Pack = null;
+        if (pack == null) return;
+        var p = pack.Sanitized(null, PillTop());
+        Pack = p;
+        if (p.Background is { } bg)
+        {
+            var end = p.BackgroundEnd ?? bg;
+            Pill = Freeze(new LinearGradientBrush(C(bg), C(end), 90));
+        }
+        if (p.Card is { } card)
+        {
+            Card = S(card);
+            CardHover = S(card.WithAlpha((byte)Math.Min(0xFF, card.A + 0x18)));
+            SegOn = S(card.WithAlpha((byte)Math.Min(0xFF, card.A + 0x30)));
+            if (p.DarkBase)
+            {
+                Fill = S(card);
+                Hover = S(card.WithAlpha((byte)Math.Max(0x0A, card.A * 0.7)));
+                Press = S(card.WithAlpha((byte)Math.Min(0xFF, card.A + 0x0C)));
+            }
+            else
+            {
+                // 浅色底上卡片本身是一层白，卡里的按钮 / 格子要用文字色压一层淡影才分得出来
+                var ink = (p.Text ?? new Argb(0xFF, 0, 0, 0)).WithAlpha(0xFF);
+                Fill = S(ink.WithAlpha(0x12));
+                Hover = S(ink.WithAlpha(0x0C));
+                Press = S(ink.WithAlpha(0x1C));
+            }
+        }
+        if (p.Accent is { } ac) Blue = S(ac);
+        if (p.Text is { } t) Primary = S(t);
+        if (p.Subtext is { } st) { Secondary = S(st); Tertiary = S(st.WithAlpha((byte)(st.A * 0.68))); }
+        if (p.Radius is { } r) ExpandedRadius = r;
+        if (p.Opacity is { } o) IslandOpacity = o;
+        if (p.Blur is { } b) BlurStrength = (float)b;
+        if (p.Font is { Length: > 0 } f)
+        {
+            Text = new FontFamily(f + ", Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI");
+            Display = new FontFamily(f + ", Segoe UI Variable Display, Segoe UI, Microsoft YaHei UI");
+        }
+    }
 
     static Theme() => Apply(Look.Dark);
 
@@ -260,6 +337,7 @@ internal static class Theme
         "calendar" or "agenda" => (Color.FromRgb(0xFF, 0x45, 0x3A), "\uE787", null),
         "bluetooth" => (Color.FromRgb(0x0A, 0x84, 0xFF), "\uE702", null),
         "otp" => (Color.FromRgb(0x30, 0xB0, 0x5A), "\uE8D7", null),
+        "quick" => (Color.FromRgb(0xFF, 0x9F, 0x0A), "\uE945", null),
         "quota" => (Color.FromRgb(0xFF, 0x9F, 0x0A), "\uE9D2", null),
         "bluetooth-low" => (Color.FromRgb(0xFF, 0x45, 0x3A), "\uE702", null),
         "filecopy" => (Color.FromRgb(0xFF, 0xB3, 0x40), "\uE8C8", null),
@@ -312,6 +390,7 @@ internal static class Theme
         "calendar" or "agenda" => "日历",
         "bluetooth" or "bluetooth-low" => "蓝牙",
         "otp" => "验证码",
+        "quick" => "快捷按钮",
         "quota" => "AI 额度",
         "filecopy" => "文件",
         "download" => "下载",

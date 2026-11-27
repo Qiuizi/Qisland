@@ -16,7 +16,14 @@ public sealed partial class SettingsWindow
         p.Children.Add(Section("收起时的系统状态"));
         var b = new StackPanel();
         b.Children.Add(DialogKit.Row("收起时显示系统状态", "岛收起时中间一行小字，每 2 秒刷新；课程 / 考试倒计时出现时让位。默认关",
-            DialogKit.Switch(Features.On(Features.CapsuleStats), v => { Features.Set(Features.CapsuleStats, v); RenderSoon(); })));
+            DialogKit.Switch(Features.On(Features.CapsuleStats), v =>
+            {
+                Features.Set(Features.CapsuleStats, v);
+                // 5.0：打开时如果收起胶囊编排里把它藏起来了，顺手放回空闲胶囊（位置沿用编排里的）
+                if (v && !CapsuleStore.Current.IsOn(CapsuleState.Idle, "stats") && !CapsuleStore.Current.IsOn(CapsuleState.Playing, "stats"))
+                { var l = CapsuleStore.Current.Clone(); l.Set(CapsuleState.Idle, "stats", on: true); CapsuleStore.Save(l); }
+                RenderSoon();
+            })));
         if (Features.On(Features.CapsuleStats))
         {
             var items = IslandWindow.CapsuleItems;

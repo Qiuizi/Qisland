@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
+using Qisland.Core;
 
 namespace Qisland.App;
 
@@ -20,6 +21,7 @@ public sealed partial class IslandWindow
     [
         new("weather", "天气", "\uE706", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF))), false),
         new("school", "课程", "\uE7BE", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0xAF, 0x52, 0xDE))), false),
+        new("quick", "快捷按钮", "\uE945", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x9F, 0x0A))), false),
         new("todo", "待办", "\uE73A", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x45, 0x3A))), true),
         new("clip", "剪贴板", "\uE77F", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF))), true),
         new("calendar", "日历", "\uE787", Theme.Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x45, 0x3A))), true),
@@ -116,42 +118,37 @@ public sealed partial class IslandWindow
     private List<(string Id, bool On)> Widgets()
     {
         if (_widgetList != null) return _widgetList;
-        var list = new List<(string, bool)>();
-        try
-        {
-            if (File.Exists(WidgetFile))
-                foreach (var raw in File.ReadAllLines(WidgetFile))
-                {
-                    var l = raw.Trim();
-                    if (l.Length == 0 || l.StartsWith('#')) continue;
-                    var on = !l.StartsWith('-');
-                    var id = l.TrimStart('-').Trim().ToLowerInvariant();
-                    if (WidgetDefs.Any(d => d.Id == id) && list.All(x => x.Item1 != id)) list.Add((id, on));
-                }
-        }
+        string[] lines = [];
+        try { if (File.Exists(WidgetFile)) lines = File.ReadAllLines(WidgetFile); }
         catch (Exception ex) { App.Log("读取 widgets.txt: " + ex.Message); }
-        // 新版本加的组件、文件里漏掉的组件：补在最后，默认显示
-        // 新组件插在默认顺序里它前一个组件的后面（比如「课程」紧跟天气），而不是一律堆到最后
-        for (var k = 0; k < WidgetDefs.Length; k++)
-        {
-            var d = WidgetDefs[k];
-            if (list.Any(x => x.Item1 == d.Id)) continue;
-            var at = k == 0 ? 0 : list.FindIndex(x => x.Item1 == WidgetDefs[k - 1].Id) + 1;
-            list.Insert(Math.Clamp(at, 0, list.Count), (d.Id, true));
-        }
-        return _widgetList = list;
+        // 新版本加的组件、文件里漏掉的组件：插在默认顺序里它前一个组件的后面（比如「课程」紧跟天气），默认显示
+        return _widgetList = WidgetOrder.Parse(lines, WidgetDefs.Select(d => d.Id).ToList());
     }
 
     private void SaveWidgets()
     {
-        try
-        {
-            var lines = new List<string> { "# Qisland 组件页：一行一个，从上到下就是显示顺序；前面加 - 表示隐藏", "# 可选：" + string.Join(" ", WidgetDefs.Select(d => d.Id)) };
-            lines.AddRange(Widgets().Select(w => (w.On ? "" : "-") + w.Id));
-            File.WriteAllLines(WidgetFile, lines);
-        }
+        if (SnapshotMode) return;   // 渲染素材时只改内存
+        try { File.WriteAllLines(WidgetFile, WidgetOrder.Serialize(Widgets(), WidgetDefs.Select(d => d.Id))); }
         catch (Exception ex) { App.Log("保存 widgets.txt: " + ex.Message); }
     }
+
+    // ───────────── 给设置窗「布局与 DIY」用 ─────────────
+
+    /// <summary>组件页当前的顺序与显隐（设置页的拖拽列表照着画）。</summary>
+    internal IReadOnlyList<(string Id, string Name, bool Half, bool On)> WidgetLayout =>
+        Widgets().Select(w => { var d = Def(w.Id); return (w.Id, d.Name, d.Half, w.On); }).ToList();
+
+    /// <summary>设置页改了顺序 / 显隐：存盘并立刻刷新展开页（正开着组件页就当场重排）。</summary>
+    internal void SetWidgetLayout(IEnumerable<(string Id, bool On)> list)
+    {
+        var known = WidgetDefs.Select(d => d.Id).ToList();
+        _widgetList = WidgetOrder.Parse(list.Select(w => (w.On ? "" : "-") + w.Id), known);
+        SaveWidgets();
+        _pageCache.Remove(Page.Widgets);
+        if (_mode == Mode.Expanded && !_animating) RebuildExpanded(); else _expDirty = true;
+    }
+
+    internal void ResetWidgetLayout() => SetWidgetLayout(WidgetDefs.Select(d => (d.Id, true)));
 
     private static WidgetDef Def(string id) => WidgetDefs.First(d => d.Id == id);
 
@@ -166,7 +163,8 @@ public sealed partial class IslandWindow
         // 内容比视口高时必须顶端对齐：WPF 默认会把超高的子元素居中，上面的天气和下面的系统行会被同时裁掉
         var inner = new StackPanel { VerticalAlignment = VerticalAlignment.Top };
         // 设备电量：没有读到电量的已连接设备时整张卡不出现
-        var on = Widgets().Where(w => w.On && (w.Id != "devices" || HasDevices)).Select(w => w.Id).ToList();
+        // 快捷按钮：一个都没配时也不占位
+        var on = Widgets().Where(w => w.On && (w.Id != "devices" || HasDevices) && (w.Id != "quick" || QuickStore.Current.Count > 0)).Select(w => w.Id).ToList();
         for (var i = 0; i < on.Count;)
         {
             FrameworkElement el;
@@ -260,6 +258,7 @@ public sealed partial class IslandWindow
             case "todo": return TodoWidget();
             case "health": return HealthWidget();
             case "devices": return DevicesWidget();
+            case "quick": return QuickWidget();
             default: return ClipWidget();
         }
     }
@@ -298,7 +297,7 @@ public sealed partial class IslandWindow
         return GeoCache[data] = g;
     }
 
-    private static Border WidgetIcon(string id, double size)
+    internal static Border WidgetIcon(string id, double size)
     {
         static Color C(uint v) => Color.FromRgb((byte)(v >> 16), (byte)(v >> 8), (byte)v);
         var (top, bottom) = id switch
@@ -312,6 +311,9 @@ public sealed partial class IslandWindow
             "school" => (C(0xD08CFF), C(0x9B3FDB)),
             "health" => (C(0x7FDBFF), C(0x1A9BE0)),
             "devices" => (C(0x6EB6FF), C(0x2F6BFF)),
+            "quick" => (C(0xFFC24A), C(0xFF7A00)),
+            "layout" => (C(0x8E8CFF), C(0x5856D6)),
+            "theme" => (C(0xFF8FB1), C(0xE0457B)),
             _ => (C(0x5EE07A), C(0x24AE45)),
         };
         var bg = new LinearGradientBrush(top, bottom, 90); bg.Freeze();
@@ -380,6 +382,16 @@ public sealed partial class IslandWindow
                 Fill("F1 M4.6 7h12.8A2.6 2.6 0 0 1 20 9.6v4.8a2.6 2.6 0 0 1-2.6 2.6H4.6A2.6 2.6 0 0 1 2 14.4V9.6A2.6 2.6 0 0 1 4.6 7Z M4.9 8.9a.9.9 0 0 0-.9.9v4.4a.9.9 0 0 0 .9.9h12.2a.9.9 0 0 0 .9-.9V9.8a.9.9 0 0 0-.9-.9Z");
                 Fill("M5.6 10.4h8.2v3.2H5.6Z");
                 Fill("M20.8 10.2h.5a.9.9 0 0 1 .9.9v1.8a.9.9 0 0 1-.9.9h-.5Z", 0.85);
+                break;
+            case "quick": // 快捷按钮：闪电
+                Fill("M13.6 1.8 4.4 13.4h6.2l-1.8 8.8 9.8-12.4h-6.4Z");
+                break;
+            case "layout": // 布局：一宽两窄三块
+                Fill("M4.5 3.5h15a1.5 1.5 0 0 1 1.5 1.5v4a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 9V5a1.5 1.5 0 0 1 1.5-1.5Z");
+                Fill("M4.5 12.5h5.5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H4.5A1.5 1.5 0 0 1 3 19v-5a1.5 1.5 0 0 1 1.5-1.5Z M14 12.5h5.5A1.5 1.5 0 0 1 21 14v5a1.5 1.5 0 0 1-1.5 1.5H14a1.5 1.5 0 0 1-1.5-1.5v-5a1.5 1.5 0 0 1 1.5-1.5Z", 0.85);
+                break;
+            case "theme": // 主题：调色盘
+                Fill("F1 M12 2.6c5.3 0 9.6 3.8 9.6 8.4c0 2.9-2.3 4.6-4.9 4.6h-1.9c-1 0-1.6.9-1.2 1.8l.4.9c.6 1.4-.4 3.1-2 3.1C6.7 21.4 2.4 17.2 2.4 12S6.7 2.6 12 2.6Z M7.4 9.6a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 1 0 0-3.2Z M10.6 5.6a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 1 0 0-3.2Z M15.4 6.2a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 1 0 0-3.2Z");
                 break;
             default: // 系统：芯片
                 Fill("F1 M8.5 5h7A3.5 3.5 0 0 1 19 8.5v7a3.5 3.5 0 0 1-3.5 3.5h-7A3.5 3.5 0 0 1 5 15.5v-7A3.5 3.5 0 0 1 8.5 5Z M9.5 9.5v5h5v-5Z");

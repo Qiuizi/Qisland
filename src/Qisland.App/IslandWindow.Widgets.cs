@@ -67,11 +67,11 @@ public sealed partial class IslandWindow
     {
         var sheen = new LinearGradientBrush(Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF), Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF), 90);
         sheen.Freeze();
-        var inner = new Border { CornerRadius = new CornerRadius(22), Background = sheen, Padding = new Thickness(14, 12, 14, 12), Child = child };
-        var outer = new Border { CornerRadius = new CornerRadius(22), Child = inner };
+        var inner = new Border { CornerRadius = new CornerRadius(Theme.CardRadius), Background = sheen, Padding = new Thickness(14, 12, 14, 12), Child = child };
+        var outer = new Border { CornerRadius = new CornerRadius(Theme.CardRadius), Child = inner };
         Theme.Surface(outer);
         if (bg != null) outer.Background = bg;
-        if (Theme.CardRim != null) inner.CornerRadius = new CornerRadius(21);
+        if (Theme.CardRim != null) inner.CornerRadius = new CornerRadius(Theme.CardRadius - 1);
         if (Theme.CardInner != null) { inner.BorderBrush = Theme.CardInner; inner.BorderThickness = new Thickness(1); inner.Background = null; }
         return outer;
     }
