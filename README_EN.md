@@ -84,7 +84,7 @@ Windows 10 or 11 (x64). Pick one of three assets from the [latest release](https
 |---|---|---|
 | `Qisland-<version>-full-x64.zip` | Most people | Bundles the .NET 8 runtime. Unzip and run `Qisland.exe`. About 80 MB |
 | `Qisland-<version>-win-x64.zip` | You already have the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) | About 9 MB |
-| `Qisland-<version>-Setup.exe` | You prefer a regular installer | New in 5.0. Bundles the runtime, no admin rights, installs to `%LOCALAPPDATA%\Programs\Qisland` by default. About 60 MB |
+| `Qisland-<version>-Setup.exe` | You prefer a regular installer | New in 5.0. Bundles the runtime, no admin rights, installs to `%LOCALAPPDATA%\Programs\Qisland` by default. About 57 MB |
 
 For the zips, unzip into a folder you can write to and run `Qisland.exe`. When a new version is out the island tells you; one click updates in place, each package type updating from the same type, with automatic rollback on failure.
 

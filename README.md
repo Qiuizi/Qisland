@@ -98,7 +98,7 @@ Qisland 把屏幕顶上的一颗胶囊变成你的状态栏：Agent 要你批准
 |---|---|---|
 | `Qisland-<版本>-full-x64.zip` | 大多数人 | 自带 .NET 8 运行时，解压后直接运行 `Qisland.exe`，约 80 MB |
 | `Qisland-<版本>-win-x64.zip` | 已装 [.NET 8 桌面运行时](https://dotnet.microsoft.com/download/dotnet/8.0) | 体积小，约 9 MB |
-| `Qisland-<版本>-Setup.exe` | 想一路「下一步」安装的 | 5.0 起提供，自带运行时，不要管理员权限，默认装到 `%LOCALAPPDATA%\Programs\Qisland`，约 60 MB |
+| `Qisland-<版本>-Setup.exe` | 想一路「下一步」安装的 | 5.0 起提供，自带运行时，不要管理员权限，默认装到 `%LOCALAPPDATA%\Programs\Qisland`，约 57 MB |
 
 zip 解压到一个你有写权限的文件夹（比如 `文档` 下），运行 `Qisland.exe`。有新版时岛上会提示，点一下自动更新：两种包各自只用同一种包更新，更新失败会回滚到旧版。
 
