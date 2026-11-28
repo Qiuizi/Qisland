@@ -117,7 +117,7 @@ public sealed partial class App : Application
                     Plugins = new PluginHost(Dispatcher);
                     Plugins.Demo(IslandWindow.DemoPluginMocks(), IslandWindow.DemoProcessPlugin());
                     Market = new MarketService(Plugins, null);
-                    Market.Demo();
+                    // 宣传素材用默认的「内置离线目录」态；Market.Demo() 仍留给测试（会模拟已验签的在线索引和第三方源）
                     await _window.SnapshotPlugins(dir, Plugins);
                     await SettingsWindow.SnapshotPlugins(this, dir);
                 }

@@ -460,7 +460,7 @@ public sealed partial class SettingsWindow
         await Save(Page(), "43-plugin-preview-config", 604);
         if (host.All.FirstOrDefault(e => e.Tier == PluginTier.Process) is { } l3)
             await Save(ConsentBody(l3, PluginPermissions.Escalations(null, PluginGrant.Of(l3.Manifest, l3.EntryHash)), _ => { }, () => { }), "42-plugin-consent-l3", 484);
-        // 5.0 第三波：插件市场（内置离线目录 + 演示用的「已从官方索引刷新」和一个第三方源），全部演示数据
+        // 5.0 第三波：插件市场按默认的「内置离线目录」渲染（不模拟已验签的在线索引）
         if (app.Market is { } market)
         {
             w._plTab = 1; w._plMsg = null;

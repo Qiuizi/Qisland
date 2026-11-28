@@ -325,7 +325,7 @@ public sealed partial class SettingsWindow
                 case "title":
                 {
                     var t = new TextBlock { FontFamily = Theme.Text, FontSize = 13, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.NoWrap, Margin = new Thickness(10, 0, 10, 1), HorizontalAlignment = HorizontalAlignment.Center };
-                    t.Inlines.Add(new Run("晚自习") { Foreground = Theme.Primary, FontWeight = FontWeights.SemiBold });
+                    t.Inlines.Add(new Run("示例曲目") { Foreground = Theme.Primary, FontWeight = FontWeights.SemiBold });
                     t.Inlines.Add(new Run("  示例歌手") { Foreground = Theme.Secondary, FontWeight = FontWeights.Medium });
                     return t;
                 }
@@ -742,6 +742,7 @@ public sealed partial class SettingsWindow
     {
         QuickStore.Demo(IslandWindow.DemoQuick);
         var lay = CapsuleLayout.Default();
+        lay.Set(CapsuleState.Idle, "stats", on: false);
         lay.Set(CapsuleState.Playing, "clock", on: true);
         CapsuleStore.Demo(lay);
         var w = new SettingsWindow(app, new Forms.ContextMenuStrip(), 1);

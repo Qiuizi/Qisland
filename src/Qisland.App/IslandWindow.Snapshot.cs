@@ -83,7 +83,7 @@ public sealed partial class IslandWindow
             new(t0 - TimeSpan.FromSeconds(1), "把没写完的作业吹成了诗", "Turning unfinished homework into poems"),
             new(t0 + TimeSpan.FromSeconds(5), "灯一盏一盏亮起来", "Lights come on one by one"),
         ]);
-        Media.ShowDemo(new MediaState("晚自习", "示例歌手", "网易云音乐", "netease", true, DemoCover(), t0, TimeSpan.FromSeconds(214), DateTime.Now));
+        Media.ShowDemo(new MediaState("示例曲目", "示例歌手", "网易云音乐", "netease", true, DemoCover(), t0, TimeSpan.FromSeconds(214), DateTime.Now));
         OnLyricsChanged();
         await Task.Delay(300);
         await Shot(dir, "13-lyrics-compact", Mode.Compact);
@@ -154,7 +154,7 @@ public sealed partial class IslandWindow
         await Shot(dir, "22-diy-idle-layout", Mode.Idle);
         Media = new MediaWatcher(Dispatcher);
         Lyrics?.ShowDemo([]);
-        Media.ShowDemo(new MediaState("晚自习", "示例歌手", "网易云音乐", "netease", true, DemoCover(), TimeSpan.FromSeconds(40), TimeSpan.FromSeconds(214), DateTime.Now));
+        Media.ShowDemo(new MediaState("示例曲目", "示例歌手", "网易云音乐", "netease", true, DemoCover(), TimeSpan.FromSeconds(40), TimeSpan.FromSeconds(214), DateTime.Now));
         OnMediaChanged();
         await Task.Delay(300);
         await Shot(dir, "23-diy-playing-layout", Mode.Compact);
