@@ -6,7 +6,7 @@
 
 **面向 Windows 开发者与学生的轻量原生灵动岛。该知道的，抬眼就知道。**
 
-![version](https://img.shields.io/badge/version-4.3.0-ff9f0a?style=flat-square)
+![version](https://img.shields.io/badge/version-5.0.0-ff9f0a?style=flat-square)
 ![platform](https://img.shields.io/badge/Windows-10%20%7C%2011-0a84ff?style=flat-square)
 ![.NET](https://img.shields.io/badge/.NET%208-WPF-512bd4?style=flat-square)
 ![license](https://img.shields.io/github/license/Qiuizi/Qisland?style=flat-square&color=30d158)
@@ -34,16 +34,16 @@ Qisland 把屏幕顶上的一颗胶囊变成你的状态栏：Agent 要你批准
 - **截图录屏时隐藏**（默认关）：截图、录屏、共享屏幕里看不到岛，自己屏幕上照常显示。
 - **本地推送 API**：`http://127.0.0.1:9840` 一行 curl 把构建进度、脚本结果推上岛，只监听本机。
 
-## 5.0 预览：DIY、插件和安装包（未发布）
+## 5.0 新增：DIY、插件和安装包
 
-下一版还在开发中，代码在主分支上，还没有发 Release。详细改动见 [更新日志](CHANGELOG.md)。
+详细改动见 [更新日志](CHANGELOG.md)。没有新配置文件时，岛的样子和 4.3 一样。
 
 - **零代码 DIY**：设置里的「布局与 DIY」可以拖动编排收起的胶囊（空闲时和放音乐时各一份）和组件页，带实时预览；`theme.json` 主题包只写想改的字段，导入时校验颜色、对比度和取值范围，附带三套官方主题；组件页可以放最多 12 个快捷按钮。
 - **两级插件**：L2 安全卡片只有一个 `plugin.json`，不运行任何代码，联网由 Qisland 代发且只能访问声明过的至多 3 个公网 https 域名；L3 高级插件沿用旧版的进程插件，会运行本机程序、没有沙箱，启用前单独确认。插件更新后要的权限变多会自动暂停，等你重新确认。规范见 [plugins/README.md](plugins/README.md)。
 - **插件市场**：内置 6 个官方插件和 3 套主题的离线目录，一键安装 / 应用 / 卸载；在线索引和撤销名单都要用程序内置的公钥验过 Ed25519 签名，命中撤销名单的插件会被停用并写明原因。也可以加第三方源，界面上一直标「第三方源 · 未验签」。索引仓库的模板和投稿流程在 [plugins/registry-template](plugins/registry-template/README.md)，远端仓库还没建。
-- **安装包**：除了两个 zip，还会有一个 `Qisland-<版本>-Setup.exe`（Inno Setup），不要管理员权限，默认装到 `%LOCALAPPDATA%\Programs\Qisland`，可选桌面快捷方式和开机自启，卸载时默认保留你的设置。
+- **安装包**：除了两个 zip，还提供 `Qisland-<版本>-Setup.exe`（Inno Setup，中英文界面），不要管理员权限，默认装到 `%LOCALAPPDATA%\Programs\Qisland`，可选桌面快捷方式和开机自启，卸载时默认保留你的设置。
 
-这些都只过了编译、自检和离屏截图：真机上的拖动手感、导入对话框、插件请求真实接口、市场在线刷新和下载、Setup.exe 的实际安装 / 升级 / 卸载还没手动验证过。
+已知限制：官方插件索引仓库还没上线，插件市场目前只显示内置目录；6 个官方插件只用离线样例数据测过，还没对真实接口长时间跑过；Setup.exe 的安装 / 升级 / 卸载、拖动编排和导入对话框还没逐项手动点验过，遇到问题欢迎提 Issue。
 
 ## 看起来是这样
 
@@ -92,14 +92,15 @@ Qisland 把屏幕顶上的一颗胶囊变成你的状态栏：Agent 要你批准
 
 ## 安装
 
-需要 Windows 10 或 11（x64）。在 [最新 Release](https://github.com/Qiuizi/Qisland/releases/latest) 里二选一：
+需要 Windows 10 或 11（x64）。在 [最新 Release](https://github.com/Qiuizi/Qisland/releases/latest) 里三选一：
 
 | 文件 | 适合 | 说明 |
 |---|---|---|
 | `Qisland-<版本>-full-x64.zip` | 大多数人 | 自带 .NET 8 运行时，解压后直接运行 `Qisland.exe`，约 80 MB |
 | `Qisland-<版本>-win-x64.zip` | 已装 [.NET 8 桌面运行时](https://dotnet.microsoft.com/download/dotnet/8.0) | 体积小，约 9 MB |
+| `Qisland-<版本>-Setup.exe` | 想一路「下一步」安装的 | 5.0 起提供，自带运行时，不要管理员权限，默认装到 `%LOCALAPPDATA%\Programs\Qisland`，约 60 MB |
 
-解压到一个你有写权限的文件夹（比如 `文档` 下），运行 `Qisland.exe`。有新版时岛上会提示，点一下自动更新：两种包各自只用同一种包更新，更新失败会回滚到旧版。
+zip 解压到一个你有写权限的文件夹（比如 `文档` 下），运行 `Qisland.exe`。有新版时岛上会提示，点一下自动更新：两种包各自只用同一种包更新，更新失败会回滚到旧版。
 
 - Codex 审批：托盘 → Codex → 「在岛上批准 Codex 请求」，或运行 `scripts\install-codex-hooks.ps1`。
 - DeepSeek Harness：装上 [integrations/dsh-qisland-bridge](integrations/dsh-qisland-bridge)，见 [docs/deepseek-harness.md](docs/deepseek-harness.md)。
