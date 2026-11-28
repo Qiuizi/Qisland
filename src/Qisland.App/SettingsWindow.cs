@@ -495,10 +495,15 @@ public sealed partial class SettingsWindow : Window
 
     private void Other(StackPanel p)
     {
+        _app.RefreshTrayStates();   // 开机自启 / 检查更新 / 跳过新版本 的文字和状态按现在的情况刷一遍
         Mirror(p, "显示歌词", header: false);
         LyricCalibration(p);
         foreach (var prefix in new[] { "通知里的验证码", "显示输入法", "接管音量键", "开机自启" }) Mirror(p, prefix, header: false);
         Mirror(p, "计时");
-        foreach (var prefix in new[] { "编辑倒计时", "检查更新", "打开数据目录" }) Mirror(p, prefix, header: false);
+        Mirror(p, "编辑倒计时", header: false);
+
+        // 托盘右键菜单精简后，这些不常用的入口都收在这里
+        p.Children.Add(Section($"更新与诊断 · Qisland v{Updater.Current}"));
+        foreach (var prefix in new[] { "检查更新", "跳过这个新版本", "发送测试卡片", "清空活动", "打开数据目录" }) Mirror(p, prefix, header: false);
     }
 }

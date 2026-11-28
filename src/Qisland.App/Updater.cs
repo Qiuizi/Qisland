@@ -165,6 +165,9 @@ public sealed class Updater
         catch { return false; }
     }
 
+    /// <summary>发现了一个还没装的新版本时，它的标签（托盘 / 设置里据此显示「跳过」）；没有则为 null。</summary>
+    public string? FoundTag => _found?.Tag;
+
     public void Skip()
     {
         if (_found == null) return;

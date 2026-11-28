@@ -43,6 +43,7 @@ public sealed partial class SettingsWindow
     {
         var t = new TextBlock { Text = glyph, FontFamily = DialogKit.Icons, FontSize = 11, Foreground = fg ?? DialogKit.Fg, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var b = new Border { Width = 26, Height = 26, CornerRadius = new CornerRadius(13), Background = Brushes.Transparent, Child = t, ToolTip = tip, Cursor = enabled ? Cursors.Hand : Cursors.Arrow, Opacity = enabled ? 1 : 0.28, Margin = new Thickness(2, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        DragList.SetNoDrag(b, true);
         if (enabled)
         {
             b.MouseEnter += (_, _) => b.Background = DialogKit.Faint;
@@ -57,6 +58,7 @@ public sealed partial class SettingsWindow
     {
         var sp = new StackPanel { Orientation = Orientation.Horizontal };
         var host = new Border { Background = DialogKit.Faint, CornerRadius = new CornerRadius(8), Padding = new Thickness(2), Child = sp, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 4, 0) };
+        DragList.SetNoDrag(host, true);
         foreach (var (slot, name) in new[] { (CapsuleSlot.Left, "左"), (CapsuleSlot.Center, "中"), (CapsuleSlot.Right, "右") })
         {
             var on = slot == cur;
@@ -114,9 +116,9 @@ public sealed partial class SettingsWindow
         box.Children.Add(head);
 
         // 实时预览：一块像桌面的小舞台，上面一颗按当前主题画的胶囊
-        box.Children.Add(CapsuleStage(layout, st));
-        var cap = Small(st == CapsuleState.Idle ? "左右两槽贴边，中间一槽居中；改动立刻同步到岛上" : "歌名 / 歌词固定在中间、会伸缩；两边放封面、频谱、时间这类小东西");
-        cap.HorizontalAlignment = HorizontalAlignment.Center; cap.Margin = new Thickness(0, 6, 0, 12);
+        box.Children.Add(CapsuleStage(layout, st, (id, slot, k) => PlaceCap(st, id, slot, k)));
+        var cap = DragHint("按住任意一行拖动排序；也可以直接拖上面预览里的小组件，换位置或换左 / 中 / 右" + (st == CapsuleState.Idle ? "。改动立刻同步到岛上" : "。歌名 / 歌词固定在中间"));
+        cap.Margin = new Thickness(0, 8, 0, 10);
         box.Children.Add(cap);
 
         var list = new DragList();
@@ -173,6 +175,78 @@ public sealed partial class SettingsWindow
         p.Children.Add(Card(box));
     }
 
+    /// <summary>一行小提示：蓝色的 ≡ 加一句话，告诉人这里的行能拖。</summary>
+    private static FrameworkElement DragHint(string s)
+    {
+        var g = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.Children.Add(new TextBlock { Text = "\uE76F", FontFamily = DialogKit.Icons, FontSize = 13, Foreground = DialogKit.Accent, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 1, 6, 0) });
+        var t = Small(s); t.TextWrapping = TextWrapping.Wrap; t.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(t, 1); g.Children.Add(t);
+        return g;
+    }
+    /// <summary>预览里拖完一个小组件：放到 slot 槽的第 index 个位置（只数该槽里显示着的、不含它自己）。</summary>
+    private void PlaceCap(CapsuleState st, string id, CapsuleSlot slot, int index)
+    {
+        var l = CapsuleStore.Current.Clone();
+        var list = l.For(st);
+        var i = list.FindIndex(e => e.Id == id);
+        if (i < 0) return;
+        var e0 = list[i] with { Slot = CapsuleLayout.SlotLocked(st, id) ? CapsuleSlot.Center : slot };
+        list.RemoveAt(i);
+        var peers = Enumerable.Range(0, list.Count).Where(j => list[j].Slot == e0.Slot && list[j].On).ToList();
+        var at = index < peers.Count ? peers[index] : list.FindLastIndex(x => x.Slot <= e0.Slot) + 1;
+        list.Insert(at, e0);
+        CapsuleStore.Save(l);
+        Render();
+    }
+
+    /// <summary>给预览里的小组件接上拖动：按住拖，蓝色竖线标出会落在哪，松手生效。</summary>
+    private static void WirePreviewDrag(Grid grid, double h, CapsuleState st, List<(string Id, CapsuleSlot Slot, FrameworkElement El)> items, Action<string, CapsuleSlot, int> place)
+    {
+        var layer = new Canvas { IsHitTestVisible = false };
+        Grid.SetColumnSpan(layer, 3);
+        grid.Children.Add(layer);
+        var marker = new Border { Width = 2.5, Height = Math.Max(10, h - 12), CornerRadius = new CornerRadius(1.25), Background = DialogKit.Accent, Visibility = Visibility.Collapsed };
+        Canvas.SetTop(marker, 6);
+        layer.Children.Add(marker);
+        foreach (var (id, _, el) in items)
+        {
+            var startX = 0.0; var dragging = false;
+            (CapsuleSlot Slot, int Index, double X) Target(double x)
+            {
+                var w = Math.Max(1, grid.ActualWidth);
+                var slot = CapsuleLayout.SlotLocked(st, id) ? CapsuleSlot.Center : x < w / 3 ? CapsuleSlot.Left : x > w * 2 / 3 ? CapsuleSlot.Right : CapsuleSlot.Center;
+                var peers = items.Where(i => i.Slot == slot && i.Id != id).Select(i => i.El).ToList();
+                var k = peers.Count(p => p.TranslatePoint(new Point(p.ActualWidth / 2, 0), grid).X < x);
+                double mx;
+                if (peers.Count == 0) mx = slot == CapsuleSlot.Left ? w / 6 : slot == CapsuleSlot.Right ? w * 5 / 6 : w / 2;
+                else if (k < peers.Count) mx = peers[k].TranslatePoint(new Point(0, 0), grid).X - 5;
+                else { var last = peers[^1]; mx = last.TranslatePoint(new Point(last.ActualWidth, 0), grid).X + 5; }
+                return (slot, k, mx);
+            }
+            void Reset() { dragging = false; el.Opacity = 1; marker.Visibility = Visibility.Collapsed; }
+            el.MouseLeftButtonDown += (_, e) => { startX = e.GetPosition(grid).X; dragging = false; el.CaptureMouse(); e.Handled = true; };
+            el.MouseMove += (_, e) =>
+            {
+                if (!el.IsMouseCaptured) return;
+                var x = e.GetPosition(grid).X;
+                if (!dragging && Math.Abs(x - startX) < 4) return;
+                dragging = true; el.Opacity = 0.4;
+                Canvas.SetLeft(marker, Target(x).X - 1.25);
+                marker.Visibility = Visibility.Visible;
+            };
+            el.MouseLeftButtonUp += (_, e) =>
+            {
+                if (!el.IsMouseCaptured) return;
+                var x = e.GetPosition(grid).X; var was = dragging;
+                el.ReleaseMouseCapture(); Reset();
+                if (was) { var t = Target(x); place(id, t.Slot, t.Index); }
+            };
+            el.LostMouseCapture += (_, _) => Reset();
+        }
+    }
     private void MoveCap(CapsuleState st, int from, int to)
     {
         var l = CapsuleStore.Current.Clone();
@@ -182,7 +256,7 @@ public sealed partial class SettingsWindow
     }
 
     /// <summary>预览舞台：深色桌面一样的渐变底 + 一颗按当前主题、当前编排画出来的胶囊（示例数据）。</summary>
-    private static FrameworkElement CapsuleStage(CapsuleLayout layout, CapsuleState st)
+    private static FrameworkElement CapsuleStage(CapsuleLayout layout, CapsuleState st, Action<string, CapsuleSlot, int>? place = null)
     {
         var stage = new Border
         {
@@ -193,7 +267,7 @@ public sealed partial class SettingsWindow
         // 两团柔光，让玻璃 / 半透明主题在预览里也看得出质感
         g.Children.Add(new Ellipse { Width = 180, Height = 120, Fill = Theme.Freeze(new RadialGradientBrush(Color.FromArgb(0x70, 0xFF, 0xC0, 0x8A), Color.FromArgb(0, 0xFF, 0xC0, 0x8A))), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(-30, -40, 0, 0), VerticalAlignment = VerticalAlignment.Top });
         g.Children.Add(new Ellipse { Width = 200, Height = 140, Fill = Theme.Freeze(new RadialGradientBrush(Color.FromArgb(0x60, 0x7A, 0xC8, 0xFF), Color.FromArgb(0, 0x7A, 0xC8, 0xFF))), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 0, -40, -60), VerticalAlignment = VerticalAlignment.Bottom });
-        var pill = CapsulePreview(layout, st);
+        var pill = CapsulePreview(layout, st, place);
         pill.HorizontalAlignment = HorizontalAlignment.Center; pill.VerticalAlignment = VerticalAlignment.Top; pill.Margin = new Thickness(0, 14, 0, 0);
         g.Children.Add(pill);
         stage.Child = g;
@@ -201,7 +275,7 @@ public sealed partial class SettingsWindow
     }
 
     /// <summary>示例数据画的胶囊（时间 21:45、晴 23°、两节课的倒计时、示例歌曲…，不读任何真实数据）。</summary>
-    internal static FrameworkElement CapsulePreview(CapsuleLayout layout, CapsuleState st)
+    internal static FrameworkElement CapsulePreview(CapsuleLayout layout, CapsuleState st, Action<string, CapsuleSlot, int>? place = null)
     {
         var h = st == CapsuleState.Idle ? 34.0 : 36.0;
         var grid = new Grid { Height = h, MinWidth = st == CapsuleState.Idle ? 176 : 200 };
@@ -266,6 +340,7 @@ public sealed partial class SettingsWindow
             }
             return null;
         }
+        var items = new List<(string Id, CapsuleSlot Slot, FrameworkElement El)>();
         var inset = st == CapsuleState.Idle ? 16.0 : 14.0;
         foreach (var (slot, col) in new[] { (CapsuleSlot.Left, 0), (CapsuleSlot.Center, 1), (CapsuleSlot.Right, 2) })
         {
@@ -280,11 +355,20 @@ public sealed partial class SettingsWindow
             {
                 if (Item(ids[i]) is not { } el) continue;
                 if (sp.Children.Count > 0 && ids[i] != "title") el.Margin = new Thickness(8, el.Margin.Top, el.Margin.Right, el.Margin.Bottom);
-                sp.Children.Add(el);
+                if (place != null)
+                {
+                    // 可拖动的预览：外面包一层透明底，整块（不只是字形）都能按住拖；光标变四向箭头
+                    var host = new Border { Background = Brushes.Transparent, Child = el, Margin = el.Margin, Cursor = Cursors.SizeAll, ToolTip = "按住拖动：换位置，或拖到另一侧换左 / 中 / 右" };
+                    el.Margin = new Thickness(0);
+                    items.Add((ids[i], slot, host));
+                    sp.Children.Add(host);
+                }
+                else sp.Children.Add(el);
             }
             Grid.SetColumn(sp, col);
             grid.Children.Add(sp);
         }
+        if (place != null) WirePreviewDrag(grid, h, st, items, place);
         var pill = new Border { CornerRadius = new CornerRadius(h / 2), Background = Theme.Pill, Child = grid, SnapsToDevicePixels = true };
         if (Theme.Rim != null) { pill.BorderBrush = Theme.Rim; pill.BorderThickness = new Thickness(1); }
         pill.Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 14, ShadowDepth = 3, Opacity = 0.35, Color = Colors.Black };
@@ -302,7 +386,10 @@ public sealed partial class SettingsWindow
         if (island == null) { box.Children.Add(Small("岛还没启动")); p.Children.Add(Card(box)); return; }
         var items = island.WidgetLayout.ToList();
         var reset = DialogKit.Button("恢复默认", () => { island.ResetWidgetLayout(); Render(); });
-        box.Children.Add(HeaderRow("顺序与显示", "按住左边的把手拖动；半宽组件相邻时会两两并排", reset));
+        box.Children.Add(HeaderRow("顺序与显示", null, reset));
+        var wh = DragHint("按住任意一行拖动排序；半宽组件相邻时会两两并排");
+        wh.Margin = new Thickness(0, -4, 0, 8);
+        box.Children.Add(wh);
         var list = new DragList();
         for (var i = 0; i < items.Count; i++)
         {
@@ -658,8 +745,9 @@ public sealed partial class SettingsWindow
         lay.Set(CapsuleState.Playing, "clock", on: true);
         CapsuleStore.Demo(lay);
         var w = new SettingsWindow(app, new Forms.ContextMenuStrip(), 1);
-        foreach (var (state, name) in new[] { (CapsuleState.Idle, "30-settings-diy"), (CapsuleState.Playing, "31-settings-diy-playing") })
+        async Task Shoot(CapsuleState state, string name, Action<List<DragList>>? mutate = null)
         {
+            DragList.Instant = true;
             w._capState = state;
             var body = new StackPanel { Width = 520 };
             var h = DialogKit.Text("布局与 DIY", 20, FontWeights.SemiBold, DialogKit.Fg); h.Margin = new Thickness(0, 0, 0, 12);
@@ -669,6 +757,14 @@ public sealed partial class SettingsWindow
             host.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             host.Arrange(new Rect(host.DesiredSize));
             host.UpdateLayout();
+            if (mutate != null)
+            {
+                var lists = new List<DragList>();
+                void Walk(DependencyObject d) { if (d is DragList dl) lists.Add(dl); foreach (var c in LogicalTreeHelper.GetChildren(d).OfType<DependencyObject>()) Walk(c); }
+                Walk(body);
+                mutate(lists);
+                host.UpdateLayout();
+            }
             await Task.Delay(150);
             const double scale = 2;
             var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(host.ActualWidth * scale), (int)Math.Ceiling(host.ActualHeight * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
@@ -678,6 +774,13 @@ public sealed partial class SettingsWindow
             await using var f = File.Create(System.IO.Path.Combine(dir, name + ".png"));
             enc.Save(f);
         }
+        await Shoot(CapsuleState.Idle, "30-settings-diy");
+        await Shoot(CapsuleState.Playing, "31-settings-diy-playing");
+        // 悬停态（整行淡淡亮起、≡ 变亮）和拖动中（半透明的行跟着走、空位 + 插入线）
+        await Shoot(CapsuleState.Idle, "32-diy-hover", l => { l[0].DemoHover(1); l[1].DemoHover(2); });
+        await Shoot(CapsuleState.Idle, "33-diy-dragging-capsule", l => l[0].DemoDrag(0, 2));
+        await Shoot(CapsuleState.Idle, "34-diy-dragging-widgets", l => l[1].DemoDrag(1, 4));
+        DragList.Instant = false;
         w.Close();
         QuickStore.Demo(null);
         CapsuleStore.Demo(null);

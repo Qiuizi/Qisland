@@ -110,6 +110,7 @@ public sealed partial class App : Application
                 _window.ApplyLook(lk >= 0 && lk + 1 < args.Length && Enum.TryParse<Theme.Look>(args[lk + 1], true, out var look) ? look : Theme.Look.Dark);
                 try { await _window.Snapshot(dir, Demo); } catch (Exception ex) { Log("snapshot: " + ex); }
                 try { await SettingsWindow.SnapshotDiy(this, dir); } catch (Exception ex) { Log("snapshot 设置页: " + ex); }
+                try { SnapshotTray(dir); } catch (Exception ex) { Log("snapshot 托盘: " + ex); }
                 // 5.0 插件：离线样例数据，不联网、不落盘
                 try
                 {
@@ -831,8 +832,6 @@ public sealed partial class App : Application
             foreach (System.Windows.Forms.ToolStripMenuItem i in motion.DropDownItems) i.Checked = (IslandWindow.MotionPref)i.Tag! == IslandWindow.MotionMode;
         };
         menu.Items.Add(motion);
-        menu.Items.Add(DockMenu());
-        menu.Items.Add(ClickLockMenu());
         menu.Items.Add("导入课表（.ics）…", null, (_, _) => Dispatcher.BeginInvoke(ImportTimetable));
         var hwMenu = new System.Windows.Forms.ToolStripMenuItem("作业 DDL");
         var yktLogin = new System.Windows.Forms.ToolStripMenuItem("雨课堂：扫码登录…");
@@ -943,29 +942,80 @@ public sealed partial class App : Application
         var auto = new System.Windows.Forms.ToolStripMenuItem("开机自启");
         // 只走 Run 键时（排队启动，会晚几分钟）点一下是升级成登录计划任务，而不是关掉
         auto.Click += (_, _) => { if (Autostart.TaskOk()) Autostart.Set(false); else Autostart.Set(true); };
-        menu.Opening += (_, _) =>
+        menu.Items.Add(auto);
+        menu.Items.Add("编辑待办", null, (_, _) => Process.Start(new ProcessStartInfo("notepad.exe", "\"" + TodoFile.PathName + "\"") { UseShellExecute = true }));
+        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        var demo = new System.Windows.Forms.ToolStripMenuItem("发送测试卡片") { ToolTipText = "在岛上弹一张演示卡片，看看当前外观、编排和动效是什么样" };
+        demo.Click += (_, _) => Dispatcher.BeginInvoke(Demo);
+        menu.Items.Add(demo);
+        var clear = new System.Windows.Forms.ToolStripMenuItem("清空活动") { ToolTipText = "清掉岛上现在所有的活动卡片和通知（不影响任何设置）" };
+        clear.Click += (_, _) => Dispatcher.BeginInvoke(() => { foreach (var a in _store.Ranked().ToList()) _store.Remove(a.Id); });
+        menu.Items.Add(clear);
+        var check = new System.Windows.Forms.ToolStripMenuItem($"检查更新（当前 v{Updater.Current}）") { ToolTipText = "马上去 GitHub 看有没有新版本；有的话岛上会出现一条，点一下下载并重启" };
+        check.Click += (_, _) => Dispatcher.BeginInvoke(() => _ = _upd.Check(manual: true));
+        menu.Items.Add(check);
+        var skip = new System.Windows.Forms.ToolStripMenuItem("跳过这个新版本") { Enabled = false, ToolTipText = "岛上提示了新版本、这一版暂时不想更新时点这里：这个版本不再自动提醒，更新的版本出来后照常提醒。有新版本时才能点" };
+        skip.Click += (_, _) => Dispatcher.BeginInvoke(() => _upd.Skip());
+        menu.Items.Add(skip);
+        menu.Items.Add("打开数据目录", null, (_, _) => Process.Start(new ProcessStartInfo("explorer.exe", DataDir) { UseShellExecute = true }));
+
+        // 状态刷新：开机自启 / 检查更新 / 跳过这个新版本的文字随当前状态变；托盘每次弹出、设置页每次重画时调用
+        void Refresh()
         {
             var task = Autostart.TaskOk();
             auto.Checked = task || Autostart.Enabled;
             auto.Text = task ? "开机自启" : auto.Checked ? "开机自启（排队中，点击改为登录即启动）" : "开机自启";
-        };
-        menu.Items.Add(auto);
-        menu.Items.Add("编辑待办", null, (_, _) => Process.Start(new ProcessStartInfo("notepad.exe", "\"" + TodoFile.PathName + "\"") { UseShellExecute = true }));
-        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-        menu.Items.Add("发送测试卡片", null, (_, _) => Dispatcher.BeginInvoke(Demo));
-        menu.Items.Add("清空活动", null, (_, _) => Dispatcher.BeginInvoke(() => { foreach (var a in _store.Ranked().ToList()) _store.Remove(a.Id); }));
-        menu.Items.Add($"检查更新（当前 v{Updater.Current}）", null, (_, _) => Dispatcher.BeginInvoke(() => _ = _upd.Check(manual: true)));
-        menu.Items.Add("跳过这个新版本", null, (_, _) => Dispatcher.BeginInvoke(() => _upd.Skip()));
-        menu.Items.Add("打开数据目录", null, (_, _) => Process.Start(new ProcessStartInfo("explorer.exe", DataDir) { UseShellExecute = true }));
-        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-        menu.Items.Add("退出 Qisland", null, (_, _) => Dispatcher.BeginInvoke(Quit));
+            var tag = _upd?.FoundTag;
+            check.Text = tag == null ? $"检查更新（当前 v{Updater.Current}）" : $"检查更新（当前 v{Updater.Current} · 新版 {tag} 可用）";
+            skip.Enabled = tag != null;
+            skip.Text = tag == null ? "跳过这个新版本" : $"跳过这个新版本（{tag}）";
+        }
+        _refreshTray = Refresh;
+
+        var tray = BuildSlimTray(auto, check, skip);
         _tray = new System.Windows.Forms.NotifyIcon
         {
             Text = $"Qisland v{Updater.Current}",
             Icon = TrayIcon(),
-            ContextMenuStrip = menu,
+            ContextMenuStrip = tray,
             Visible = true,
         };
+        _tray.DoubleClick += (_, _) => Dispatcher.BeginInvoke(() => OpenSettings());    }
+
+    /// <summary>托盘右键菜单（精简版）：只留天天会点的几项。完整的功能菜单（SetupTray 里的 menu）不显示，设置窗里每一项都有对应入口；「跳过这个新版本」只在发现了新版本时才出现。</summary>
+    private System.Windows.Forms.ContextMenuStrip BuildSlimTray(System.Windows.Forms.ToolStripMenuItem auto, System.Windows.Forms.ToolStripMenuItem check, System.Windows.Forms.ToolStripMenuItem skip)
+    {
+        var refresh = _refreshTray ?? (() => { });
+        // 只留天天会点的几项；上面那份完整的功能菜单不显示，设置窗里每一项都有对应入口。
+        // 「跳过这个新版本」只在发现了新版本时才出现。
+        var tray = new System.Windows.Forms.ContextMenuStrip();
+        var openSettings = new System.Windows.Forms.ToolStripMenuItem("设置…") { Font = new System.Drawing.Font(tray.Font, System.Drawing.FontStyle.Bold) };
+        openSettings.Click += (_, _) => Dispatcher.BeginInvoke(() => OpenSettings());
+        tray.Items.Add(openSettings);
+        tray.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        tray.Items.Add(ClickLockMenu(tray));
+        var autoTray = new System.Windows.Forms.ToolStripMenuItem("开机自启");
+        autoTray.Click += (_, _) => auto.PerformClick();
+        tray.Items.Add(autoTray);
+        tray.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        var checkTray = new System.Windows.Forms.ToolStripMenuItem(check.Text) { ToolTipText = check.ToolTipText };
+        checkTray.Click += (_, _) => check.PerformClick();
+        tray.Items.Add(checkTray);
+        var skipTray = new System.Windows.Forms.ToolStripMenuItem(skip.Text) { Available = false, ToolTipText = skip.ToolTipText };
+        skipTray.Click += (_, _) => skip.PerformClick();
+        tray.Items.Add(skipTray);
+        tray.Items.Add("打开数据目录", null, (_, _) => Process.Start(new ProcessStartInfo("explorer.exe", DataDir) { UseShellExecute = true }));
+        tray.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        tray.Items.Add("退出 Qisland", null, (_, _) => Dispatcher.BeginInvoke(Quit));
+        Action sync = () =>
+        {
+            autoTray.Checked = auto.Checked; autoTray.Text = auto.Text;
+            checkTray.Text = check.Text;
+            skipTray.Text = skip.Text; skipTray.Available = skip.Enabled;
+        };
+        tray.Tag = sync;   // 快照渲染时不弹菜单，直接调这个把文字对齐
+        tray.Opening += (_, _) => { refresh(); sync(); };
+        return tray;
     }
 
     /// <summary>托盘图标：从内嵌的 qisland.ico 里按系统小图标尺寸（16 / 20 / 24…）取最合适的一帧，比从 exe 取 32 px 再缩清楚。</summary>

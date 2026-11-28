@@ -4,7 +4,7 @@ using Forms = System.Windows.Forms;
 
 namespace Qisland.App;
 
-/// <summary>停靠位置 / 极简模式（layout.txt）和托盘里的「停靠」菜单。</summary>
+/// <summary>停靠位置 / 极简模式（layout.txt）。托盘里不再放停靠菜单，在设置 → 外观与停靠里改。</summary>
 public sealed partial class App
 {
     private static string LayoutFile => Path.Combine(DataDir, "layout.txt");
@@ -26,33 +26,12 @@ public sealed partial class App
 
     public void SetLayout(DockSide dock, bool minimal) => _window?.ApplyLayout(dock, minimal);
 
-    private Forms.ToolStripMenuItem DockMenu()
-    {
-        var m = new Forms.ToolStripMenuItem("停靠");
-        foreach (var d in new[] { DockSide.Top, DockSide.Left, DockSide.Right })
-        {
-            var item = new Forms.ToolStripMenuItem(DockName(d)) { Tag = d, ToolTipText = d == DockSide.Top ? "屏幕顶部正中（默认）" : $"贴在屏幕{DockName(d)}边缘，收起是竖向小胶囊，展开从边上滑出" };
-            item.Click += (_, _) => Dispatcher.BeginInvoke(() => SetLayout(d, IslandWindow.Minimal));
-            m.DropDownItems.Add(item);
-        }
-        m.DropDownItems.Add(new Forms.ToolStripSeparator());
-        var mini = new Forms.ToolStripMenuItem("极简模式") { ToolTipText = "没事时只留一小段线，指针靠近变大、停一下展开；有通知、放音乐时照常显示" };
-        mini.Click += (_, _) => Dispatcher.BeginInvoke(() => SetLayout(IslandWindow.Dock, !IslandWindow.Minimal));
-        m.DropDownItems.Add(mini);
-        m.DropDownOpening += (_, _) =>
-        {
-            foreach (var it in m.DropDownItems.OfType<Forms.ToolStripMenuItem>())
-                it.Checked = it.Tag is DockSide d ? d == IslandWindow.Dock : IslandWindow.Minimal;
-        };
-        return m;
-    }
-
     /// <summary>托盘「锁定点击穿透」：勾上后整座岛不接鼠标（快捷键同一开关）。打开菜单时按岛的实际状态勾选。</summary>
-    private Forms.ToolStripMenuItem ClickLockMenu()
+    private Forms.ToolStripMenuItem ClickLockMenu(Forms.ContextMenuStrip host)
     {
         var it = new Forms.ToolStripMenuItem("锁定点击穿透") { ToolTipText = "整座岛不再接鼠标，点击、悬停、滚轮都落到下面的窗口；通知和音乐照常显示。再点一次或按快捷键解除，重启后自动解除" };
         it.Click += (_, _) => Dispatcher.BeginInvoke(() => _window?.ToggleClickLock("托盘"));
-        _trayMenu!.Opening += (_, _) =>
+        host.Opening += (_, _) =>
         {
             it.Checked = _window?.ClickLocked == true;
             it.ShortcutKeyDisplayString = _window?.ClickLockHotkeyActive == true ? IslandWindow.ClickLockHotkeyText : null;
@@ -63,12 +42,53 @@ public sealed partial class App
 
 public sealed partial class App
 {
+    /// <summary>「功能菜单」：不显示在托盘上，设置窗把它的每一项画成设置行（直接调用同一个菜单项，所以同意弹窗、备份、改动账本这些流程不变）。托盘右键只显示 SetupTray 里另建的精简菜单。</summary>
     private System.Windows.Forms.ContextMenuStrip? _trayMenu;
+    private Action? _refreshTray;
+
+    /// <summary>设置窗打开 / 重画前调用：把「开机自启」「检查更新」「跳过这个新版本」的文字和勾选刷成当前状态。</summary>
+    internal void RefreshTrayStates() => _refreshTray?.Invoke();
     internal CalendarWatcher? CalendarService => _cal;
     internal AiUsageService? UsageService => _usage;
     internal MailOtpService? MailService => _mail;
     internal PeripheralWatcher? DeviceService => _devices;
     internal IslandWindow? Island => _window;
+
+    /// <summary>--snapshot：把精简后的托盘右键菜单离屏画成 PNG（不弹菜单、不建托盘图标）：没有新版本 / 有新版本两张。</summary>
+    internal void SnapshotTray(string dir)
+    {
+        var auto = new System.Windows.Forms.ToolStripMenuItem("开机自启") { Checked = true };
+        var check = new System.Windows.Forms.ToolStripMenuItem("");
+        var skip = new System.Windows.Forms.ToolStripMenuItem("");
+        var found = false;
+        void Fill()
+        {
+            check.Text = found ? $"检查更新（当前 v{Updater.Current} · 新版 v9.9.9 可用）" : $"检查更新（当前 v{Updater.Current}）";
+            skip.Enabled = found;
+            skip.Text = found ? "跳过这个新版本（v9.9.9）" : "跳过这个新版本";
+        }
+        var old = _refreshTray;
+        _refreshTray = Fill;
+        try
+        {
+            foreach (var (name, f) in new[] { ("50-tray-menu", false), ("51-tray-menu-update", true) })
+            {
+                found = f; Fill();
+                var menu = BuildSlimTray(auto, check, skip);
+                ((Action)menu.Tag!)();
+                foreach (var it in menu.Items.OfType<System.Windows.Forms.ToolStripMenuItem>())
+                    if (it.Text.StartsWith("锁定", StringComparison.Ordinal)) it.ShortcutKeyDisplayString = IslandWindow.ClickLockHotkeyText;
+                menu.PerformLayout();
+                menu.Size = menu.GetPreferredSize(System.Drawing.Size.Empty);
+                _ = menu.Handle;
+                using var bmp = new System.Drawing.Bitmap(menu.Width, menu.Height);
+                menu.DrawToBitmap(bmp, new System.Drawing.Rectangle(System.Drawing.Point.Empty, menu.Size));
+                bmp.Save(Path.Combine(dir, name + ".png"), System.Drawing.Imaging.ImageFormat.Png);
+                menu.Dispose();
+            }
+        }
+        finally { _refreshTray = old; }
+    }
     internal LyricsService? LyricsSvc => _lyrics;
 
     /// <summary>打开（或切到）统一设置窗。</summary>
