@@ -167,7 +167,9 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "Inno Setup 编译失败（退出码 $LASTEXITCODE）" }
             if (-not (Test-Path -LiteralPath $setupExe)) { throw "Inno Setup 没有产出 $setupExe" }
             $setupInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path $setupExe))
-            if ($setupInfo.ProductVersion -ne $Version) { throw "Setup.exe 的版本是 $($setupInfo.ProductVersion)，不是 $Version" }
+            # Inno Setup 会把版本字符串用空格补齐到固定长度，比较前先去掉首尾空白
+            $setupVersion = ("$($setupInfo.ProductVersion)").Trim([char]0, ' ')
+            if ($setupVersion -ne $Version) { throw "Setup.exe 的版本是「$setupVersion」，不是 $Version" }
             Write-Host ("打包 → {0}（{1:0.0} MB，安装程序）" -f $setupExe, ((Get-Item $setupExe).Length / 1MB)) -ForegroundColor Cyan
         }
     }
