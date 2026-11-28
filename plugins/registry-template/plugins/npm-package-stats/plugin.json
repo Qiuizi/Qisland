@@ -1,0 +1,32 @@
+{
+  "id": "npm-package-stats",
+  "name": "npm 下载趋势",
+  "version": "1.0.0",
+  "author": "Qisland 官方",
+  "description": "一个 npm 包最近 30 天的每日下载量折线、周下载和周环比。读 api.npmjs.org 公开接口，不需要 Key。",
+  "icon": "▣",
+  "accent": "#FF453A",
+  "tier": "declarative",
+  "permissions": { "domains": ["api.npmjs.org"] },
+  "config_schema": [
+    { "key": "package", "label": "包名", "type": "text", "default": "typescript", "placeholder": "react 或 @scope/name", "pattern": "^(@[a-z0-9-~][a-z0-9-._~]*/)?[a-z0-9-~][a-z0-9-._~]*$" }
+  ],
+  "sources": {
+    "range": { "type": "https", "url": "https://api.npmjs.org/downloads/range/last-month/{{config.package|path}}", "interval_seconds": 3600 }
+  },
+  "error_text": "npm 接口暂时不可用，或包名不存在",
+  "card": [
+    { "type": "header", "title": "{{config.package}}", "subtitle": "近 30 天" },
+    { "type": "metric", "value": "{{range:$.downloads[*].downloads|tail:7|sum|compact}}", "unit": "次 / 周", "label": "最近 7 天下载", "delta": "{{range:$.downloads[*].downloads|growth:7|percent:1|sign}}" },
+    { "type": "sparkline", "points": "range:$.downloads[*].downloads", "last": 30, "label": "每日下载", "tone": "red" },
+    { "type": "badge_row", "badges": [
+      { "text": "月 {{range:$.downloads[*].downloads|sum|compact}}", "tone": "neutral" },
+      { "text": "日均 {{range:$.downloads[*].downloads|avg|compact}}", "tone": "blue" },
+      { "text": "峰值 {{range:$.downloads[*].downloads|max|compact}}", "tone": "amber" }
+    ] },
+    { "type": "action_row", "actions": [
+      { "label": "npm 页面", "icon": "↗", "kind": "open_url", "url": "https://www.npmjs.com/package/{{config.package|path}}" },
+      { "label": "刷新", "icon": "↻", "kind": "refresh" }
+    ] }
+  ]
+}

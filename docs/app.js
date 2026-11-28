@@ -114,6 +114,7 @@
     features: '#features',
     music: '#features',
     agent: '#agent',
+    diy: '#features',
     homework: '#features',
     schedule: '#features',
     api: '#api',

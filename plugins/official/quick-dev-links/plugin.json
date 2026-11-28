@@ -1,0 +1,29 @@
+{
+  "id": "quick-dev-links",
+  "name": "开发者入口",
+  "version": "1.0.0",
+  "author": "Qisland 官方",
+  "description": "四个常用开发文档 / 社区的一键入口。纯本地静态卡片，不联网、不收集任何数据；可当作写自己卡片的最小模板。",
+  "icon": "⌘",
+  "accent": "#BF5AF2",
+  "tier": "declarative",
+  "permissions": { "domains": [] },
+  "sources": {
+    "info": { "type": "static", "data": { "title": "开发者入口", "tip": "改 plugin.json 就能换成你自己的链接", "tags": ["不联网", "0 权限", "纯 JSON"] } }
+  },
+  "card": [
+    { "type": "header", "title": "{{info.title}}", "subtitle": "{{info.tip}}", "status": "ok" },
+    { "type": "badge_row", "badges": [
+      { "text": "{{info.tags[0]}}", "tone": "green" },
+      { "text": "{{info.tags[1]}}", "tone": "teal" },
+      { "text": "{{info.tags[2]}}", "tone": "purple" },
+      { "text": "{{now.date|date:M月d日}} {{now.weekday}}", "tone": "blue" }
+    ] },
+    { "type": "action_row", "actions": [
+      { "label": "GitHub", "icon": "◆", "kind": "open_url", "url": "https://github.com/" },
+      { "label": "MDN", "icon": "▤", "kind": "open_url", "url": "https://developer.mozilla.org/zh-CN/" },
+      { "label": "npm", "icon": "▣", "kind": "open_url", "url": "https://www.npmjs.com/" },
+      { "label": "MS Learn", "icon": "▦", "kind": "open_url", "url": "https://learn.microsoft.com/zh-cn/dotnet/" }
+    ] }
+  ]
+}

@@ -7,12 +7,17 @@
   .\scripts\release.ps1 1.1.0-preview.2 -Notes "试验功能" -ExpectedCommit 1a2b3c4   # 带 - 的版本会标成预发布
   .\scripts\release.ps1 1.0.1 -NotesFile notes.md -ExpectedCommit 1a2b3c4             # 长更新说明放文件里
   .\scripts\release.ps1 1.0.1 "..." -ExpectedCommit 1a2b3c4 -DryRun                    # 只打包，不提交不推送，结束后还原版本号
-  .\scripts\release.ps1 1.0.1 "..." -ExpectedCommit 1a2b3c4 -NoFull                    # 只打依赖运行时的小包，不打自带运行时的包
+  .\scripts\release.ps1 1.0.1 "..." -ExpectedCommit 1a2b3c4 -NoFull                    # 只打依赖运行时的小包，不打自带运行时的包（也就没有 Setup.exe）
+  .\scripts\release.ps1 1.0.1 "..." -ExpectedCommit 1a2b3c4 -SkipInstaller             # 不打 Setup.exe（即使装了 Inno Setup）
 
 每次发两个包（都在 releases\ 里，不进 git）：
 - Qisland-<版本>-win-x64.zip：依赖 .NET 8 桌面运行时，体积小；
 - Qisland-<版本>-full-x64.zip：自带 .NET 8 运行时，解压即用。名字故意不含 win-x64，
   4.2.0 及更早的更新器只认 win-x64，不会误拿它；4.3.0 起自带运行时的安装只用这个包更新（见 Qisland.Core/ReleaseAsset.cs）。
+- Qisland-<版本>-Setup.exe（5.0 起，可选）：本机装了 Inno Setup 6.5+ 时，基于上面自带运行时的发布目录打出来，
+  脚本是 installer\Qisland.iss；默认装到 %LOCALAPPDATA%\Programs\Qisland、免管理员。装好的程序目录里有 hostfxr.dll，
+  更新器把它当自带运行时的安装，之后只用 -full-x64.zip 覆盖；Setup.exe 不是 .zip，任何版本的更新器都不会去下载它。
+  没装 Inno Setup 就跳过这一步（提示一句），不影响两个 zip。所有产物的 SHA-256 写进 releases\SHA256SUMS-<版本>.txt。
 
 安全约定：
 - 开始前工作区必须干净、HEAD 必须正好是 -ExpectedCommit，否则什么都不改；
@@ -28,7 +33,9 @@ param(
     [string]$Remote = "github",
     [Parameter(Mandatory = $true)][string]$ExpectedCommit,
     [switch]$DryRun,
-    [switch]$NoFull
+    [switch]$NoFull,
+    [switch]$SkipInstaller,
+    [string]$Iscc = ""
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -135,6 +142,44 @@ try {
         Compress-Archive -Path "$outFull\*" -DestinationPath $zipFull
         Write-Host ("打包 → {0}（{1:0.0} MB，自带运行时）" -f $zipFull, ((Get-Item $zipFull).Length / 1MB)) -ForegroundColor Cyan
     }
+
+    # 4.6 Setup.exe：基于自带运行时的发布目录（和 full 包同一份文件）。没装 Inno Setup 就跳过，不影响 zip
+    $setupExe = $null
+    if ($NoFull -and -not $SkipInstaller) { Write-Host "-NoFull：没有自带运行时的发布目录，跳过 Setup.exe" -ForegroundColor Yellow }
+    elseif (-not $SkipInstaller) {
+        $isccExe = Find-Iscc $Iscc
+        if (-not $isccExe) {
+            Write-Host "没找到 Inno Setup 6（ISCC.exe），跳过 Setup.exe。装上后重跑即可：winget install --id JRSoftware.InnoSetup -e" -ForegroundColor Yellow
+        } else {
+            $setupName = Get-SetupFileName $Version
+            $setupExe = Join-Path "releases" $setupName
+            if (Test-Path $setupExe) { Remove-Item $setupExe }
+            $isccArgs = @(
+                "/Q",
+                "/DAppVersion=$Version",
+                "/DAppVersionNumeric=$(Get-NumericVersion $Version)",
+                "/DSourceDir=$((Resolve-Path $outFull).Path)",
+                "/DOutputDir=$((Resolve-Path 'releases').Path)",
+                (Join-Path $root "installer\Qisland.iss")
+            )
+            Write-Host "打安装包（$isccExe）…" -ForegroundColor Cyan
+            & $isccExe @isccArgs
+            if ($LASTEXITCODE -ne 0) { throw "Inno Setup 编译失败（退出码 $LASTEXITCODE）" }
+            if (-not (Test-Path -LiteralPath $setupExe)) { throw "Inno Setup 没有产出 $setupExe" }
+            $setupInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path $setupExe))
+            if ($setupInfo.ProductVersion -ne $Version) { throw "Setup.exe 的版本是 $($setupInfo.ProductVersion)，不是 $Version" }
+            Write-Host ("打包 → {0}（{1:0.0} MB，安装程序）" -f $setupExe, ((Get-Item $setupExe).Length / 1MB)) -ForegroundColor Cyan
+        }
+    }
+
+    # 4.7 校验值：每个产物的 SHA-256，打印出来并写进 releases\SHA256SUMS-<版本>.txt（Release 页面也附上）
+    $sums = "releases\SHA256SUMS-$Version.txt"
+    $lines = foreach ($f in @($zip, $zipFull, $setupExe) | Where-Object { $_ }) {
+        $h = (Get-FileHash -Algorithm SHA256 -LiteralPath $f).Hash.ToLowerInvariant()
+        Write-Host "SHA-256  $h  $(Split-Path -Leaf $f)"
+        "$h  $(Split-Path -Leaf $f)"
+    }
+    [IO.File]::WriteAllText((Join-Path $root $sums), (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding $false))
 }
 catch {
     Restore-Csproj
@@ -169,7 +214,7 @@ Invoke-Git tag -a $tag -m "Qisland $tag"
 Invoke-Git -c http.postBuffer=524288000 -c http.version=HTTP/1.1 -c credential.helper= -c "credential.helper=!gh auth git-credential" push $Remote HEAD:main --follow-tags
 
 # 7. 建 Release，附上压缩包
-$assets = @($zip); if ($zipFull) { $assets += $zipFull }
+$assets = @($zip); if ($zipFull) { $assets += $zipFull }; if ($setupExe) { $assets += $setupExe }; $assets += $sums
 $ghArgs = @("release", "create", $tag) + $assets + @("--title", "Qisland $tag", "--notes", $Notes, "--verify-tag")
 if ($pre) { $ghArgs += "--prerelease" } else { $ghArgs += "--latest" }
 gh @ghArgs

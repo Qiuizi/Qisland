@@ -46,3 +46,33 @@ function Assert-ReleaseFromHead([string]$CsprojGit, [string]$Version, [string]$E
     $declared = Get-DeclaredVersion $committed
     if ($declared -ne $Version) { throw "HEAD 里 $CsprojGit 声明的版本是「$declared」，不是要发的 $Version" }
 }
+
+# ───────────── 5.0：Inno Setup 安装包 ─────────────
+
+# 找 ISCC.exe：-Iscc 参数 → 环境变量 ISCC → PATH → 常见安装位置（含 winget 的用户级安装）。找不到返回 $null
+function Find-Iscc([string]$Explicit = "") {
+    $candidates = @()
+    if ($Explicit) { $candidates += $Explicit }
+    if ($env:ISCC) { $candidates += $env:ISCC }
+    $cmd = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) { $candidates += $cmd.Source }
+    $userPrograms = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "Programs" } else { $null }
+    foreach ($base in @(${env:ProgramFiles(x86)}, $env:ProgramFiles, $userPrograms)) {
+        if ($base) { $candidates += (Join-Path $base "Inno Setup 6\ISCC.exe") }
+    }
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path -LiteralPath $c -PathType Leaf)) { return (Resolve-Path -LiteralPath $c).Path }
+    }
+    return $null
+}
+
+# Setup.exe 的文件名，和 Qisland.Core/SetupInfo.cs 的 SetupFileFormat、installer\Qisland.iss 的 OutputBaseFilename 一致
+function Get-SetupFileName([string]$Version) { return "Qisland-$($Version.TrimStart('v'))-Setup.exe" }
+
+# Windows 文件版本号只能是 4 段数字：5.0.0-preview.2 → 5.0.0.0
+function Get-NumericVersion([string]$Version) {
+    $core = (($Version.TrimStart('v')) -split '[-+]')[0]
+    $parts = @($core -split '\.' | ForEach-Object { [int]$_ })
+    while ($parts.Count -lt 4) { $parts += 0 }
+    return ($parts[0..3] -join '.')
+}

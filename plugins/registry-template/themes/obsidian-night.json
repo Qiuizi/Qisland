@@ -1,0 +1,16 @@
+{
+  "format": "qisland-theme/1",
+  "name": "极夜曜石",
+  "author": "Qisland",
+  "version": "1.0",
+  "description": "近黑的曜石底，带一点蓝紫的冷光；长时间盯着也不累眼",
+  "material": "solid",
+  "background": "#14141F",
+  "backgroundEnd": "#06060B",
+  "card": "#B9B4FF14",
+  "accent": "#8C7DFF",
+  "text": "#F2F1FA",
+  "subtext": "#A6A3C2",
+  "radius": 30,
+  "opacity": 1
+}

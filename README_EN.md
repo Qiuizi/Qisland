@@ -36,6 +36,17 @@ Qisland turns a small capsule at the top of your screen into a status bar for th
 - **Hide from screenshots and recordings** (off by default). The island stays visible to you but doesn't appear in screenshots, recordings or screen sharing.
 - **Local push API.** One `curl` to `http://127.0.0.1:9840` puts build progress or script results on the island. Listens on localhost only.
 
+## 5.0 preview: DIY, plugins and an installer (unreleased)
+
+The next version is still in development on the main branch; there is no release yet. See the [changelog](CHANGELOG.md) (Chinese) for details.
+
+- **No-code DIY**: a "Layout & DIY" settings page to drag-arrange the collapsed capsule (idle and music layouts) and the widget page, with a live preview. `theme.json` theme packs only need the fields you want to change and are validated on import (colors, contrast, ranges); three official themes are included. Up to 12 quick-action buttons on the widget page.
+- **Two plugin tiers**: L2 safe cards are a single `plugin.json` and run no code — Qisland makes the requests itself, only to at most 3 declared public https domains. L3 advanced plugins keep the old process-plugin format: they run a local program with no sandbox and need a separate confirmation. If an update asks for more permissions the plugin is paused until you confirm again. Spec: [plugins/README.md](plugins/README.md).
+- **Plugin market**: an offline catalog of the 6 official plugins and 3 themes with one-click install / apply / uninstall. The online index and the revocation list must pass an Ed25519 signature check against the public key built into the app; revoked plugins are disabled with the reason shown. You can add third-party sources, always labelled "third-party · unverified". The index repo template and submission flow live in [plugins/registry-template](plugins/registry-template/README.md); the remote repo does not exist yet.
+- **Installer**: alongside the two zips, a `Qisland-<version>-Setup.exe` (Inno Setup) that needs no admin rights, installs to `%LOCALAPPDATA%\Programs\Qisland` by default, offers a desktop shortcut and start-on-login, and keeps your settings on uninstall unless you choose otherwise.
+
+All of this has only been through compilation, self-tests and off-screen screenshots. Drag-and-drop feel, import dialogs, plugins against real APIs, online market refresh and downloads, and actually installing / upgrading / uninstalling with Setup.exe have not been checked by hand yet.
+
 ## Screenshots
 
 All screenshots are rendered by the app's own `--snapshot` mode with demo data — no real accounts or messages.
@@ -79,7 +90,7 @@ Unzip into a folder you can write to and run `Qisland.exe`. When a new version i
 - Codex approval: tray → Codex → "approve Codex requests on the island", or run `scripts\install-codex-hooks.ps1`.
 - DeepSeek Harness: install [integrations/dsh-qisland-bridge](integrations/dsh-qisland-bridge).
 - Claude Code: run `scripts\install-claude-hooks.ps1` yourself (`scripts/qisland-push` inside WSL2). You'll get a "waiting for you" notice on the island, but approvals stay in the terminal.
-- Uninstall: turn off start-on-login in the tray (a scheduled task named Qisland), then delete the app folder and `%APPDATA%\Qisland\`.
+- Uninstall: turn off start-on-login in the tray (a scheduled task named Qisland), then delete the app folder and `%APPDATA%\Qisland\`. From 5.0, if you installed with Setup.exe, uninstall it from Windows Settings → Apps; it asks whether to remove your settings and data too.
 
 ## Island API
 
@@ -106,6 +117,8 @@ cd Qisland
 dotnet publish src\Qisland.App\Qisland.App.csproj -c Release -r win-x64 --self-contained false -p:PublishReadyToRun=true -o app
 dotnet run --project tests\Qisland.SelfTest
 ```
+
+Releases are built with `scripts\release.ps1`: two zips, plus a Setup.exe and a SHA-256 list from `installer\Qisland.iss` when [Inno Setup 6](https://jrsoftware.org/isinfo.php) is installed (`-SkipInstaller` to skip, `-DryRun` to rehearse without publishing).
 
 ## Credits
 

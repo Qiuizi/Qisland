@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-11-28T00:00:00Z",
+  "items": [
+    {
+      "id": "countdown-milestone",
+      "name": "里程碑倒计时",
+      "version": "1.0.0",
+      "tier": "declarative",
+      "category": "productivity",
+      "author": "Qisland 官方",
+      "description": "给一个目标日期算倒计时和进度：考试、上线、旅行都行。完全在本机计算，不联网。",
+      "icon": "⏳",
+      "download_url": "https://raw.githubusercontent.com/Qiuizi/qisland-plugins/main/plugins/countdown-milestone/plugin.json",
+      "sha256": "218918fe0a958b3107ca50e6ced14667981ed60d9e9dc9429cd728add0585a03",
+      "permissions": {
+        "domains": []
+      },
+      "min_app_version": "5.0.0",
+      "homepage": "https://github.com/Qiuizi/qisland-plugins/tree/main/plugins/countdown-milestone"
+    },
+    {
+      "id": "github-repo-radar",
+      "name": "GitHub 仓库雷达",
+      "version": "1.0.0",
+      "tier": "declarative",
+      "category": "dev",
+      "author": "Qisland 官方",
+      "description": "盯一个公开仓库的 Star、Fork、Issue 和最近推送时间。只读 GitHub 公开接口，不需要登录或 Token。",
+      "icon": "★",
+      "download_url": "https://raw.githubusercontent.com/Qiuizi/qisland-plugins/main/plugins/github-repo-radar/plugin.json",
+      "sha256": "07167d56f34852a3b306ee87ee53e9ec4dbec8dd2cc865091b5518b6b3df7c29",
+      "permissions": {
+        "domains": [
+          "api.github.com"
+        ]
+      },
+      "min_app_version": "5.0.0",
+      "homepage": "https://github.com/Qiuizi/qisland-plugins/tree/main/plugins/github-repo-radar"
+    },
+    {
+      "id": "npm-package-stats",
+      "name": "npm 下载趋势",
+      "version": "1.0.0",
+      "tier": "declarative",
+      "category": "dev",
+      "author": "Qisland 官方",
+      "description": "一个 npm 包最近 30 天的每日下载量折线、周下载和周环比。读 api.npmjs.org 公开接口，不需要 Key。",
+      "icon": "▣",
+      "download_url": "https://raw.githubusercontent.com/Qiuizi/qisland-plugins/main/plugins/npm-package-stats/plugin.json",
+      "sha256": "bdf04ad7f5ae01ea4e1b02ac39cfc6a88a34b8cd8738bc5798bfac4e46bcf293",
+      "permissions": {
+        "domains": [
+          "api.npmjs.org"
+        ]
+      },
+      "min_app_version": "5.0.0",
+      "homepage": "https://github.com/Qiuizi/qisland-plugins/tree/main/plugins/npm-package-stats"
+    },
+    {
+      "id": "quick-dev-links",
+      "name": "开发者入口",
+      "version": "1.0.0",
+      "tier": "declarative",
+      "category": "dev",
+      "author": "Qisland 官方",
+      "description": "四个常用开发文档 / 社区的一键入口。纯本地静态卡片，不联网、不收集任何数据；可当作写自己卡片的最小模板。",
+      "icon": "⌘",
+      "download_url": "https://raw.githubusercontent.com/Qiuizi/qisland-plugins/main/plugins/quick-dev-links/plugin.json",
+      "sha256": "9c2b6fe7e747a6fba1408a5441706d8016ca75b7f913455d5a0555a376034ca0",
+      "permissions": {
+        "domains": []
+      },
+      "min_app_version": "5.0.0",
+      "homepage": "https://github.com/Qiuizi/qisland-plugins/tree/main/plugins/quick-dev-links"
+    },
+    {
+      "id": "exchange-rate-watch",
+      "name": "汇率速览",
+      "version": "1.0.0",
+      "tier": "declarative",
+      "category": "info",
+      "author": "Qisland 官方",
+      "description": "常见外币兑人民币（或你选的本币）的参考汇率，每天更新一次的公开数据，不需要 API Key。仅供参考，不作交易依据。",
+      "icon": "¥",
+      "download_url": "https://raw.githubusercontent.com/Qiuizi/qisland-plugins/main/plugins/exchange-rate-watch/plugin.json",
+      "sha256": "a771773731faf7367df5bce28a40d261760db1afe1478727a7111d44918a91af",
+      "permissions": {
+        "domains": [
+          "open.er-api.com"
+        ]
+      },
+      "min_app_version": "5.0.0",
+      "homepage": "https://github.com/Qiuizi/qisland-plugins/tree/main/plugins/exchange-rate-watch"
+    },
+    {
+      "id": "hn-top-pulse",
+      "name": "Hacker News 热榜",
+      "version": "1.0.0",
+      "tier": "declarative",
+      "category": "info",
+      "author": "Qisland 官方",
+      "description": "Hacker News 榜首在聊什么：标题、分数、评论数。读官方 Firebase 公开 JSON 接口，不需要 Key。",
+      "icon": "Y",
+      "download_url": "https://raw.githubusercontent.com/Qiuizi/qisland-plugins/main/plugins/hn-top-pulse/plugin.json",
+      "sha256": "7e570560a6cb1d3e73b99d2f30baa1eed4e1c846e6791cbed5fbee1c826e58df",
+      "permissions": {
+        "domains": [
+          "hacker-news.firebaseio.com"
+        ]
+      },
+      "min_app_version": "5.0.0",
+      "homepage": "https://github.com/Qiuizi/qisland-plugins/tree/main/plugins/hn-top-pulse"
+    },
+    {
+      "id": "obsidian-night",
+      "name": "极夜曜石",
+      "version": "1.0",
+      "tier": "declarative",
+      "category": "theme",
+      "author": "Qisland 官方",
+      "description": "近黑的曜石底，带一点蓝紫的冷光；长时间盯着也不累眼",
+      "icon": "◐",
+      "download_url": "https://raw.githubusercontent.com/Qiuizi/qisland-plugins/main/themes/obsidian-night.json",
+      "sha256": "d0b2aa4ce0b30864f15a5bf5b7fb293e7788dcc7bea12f29bcd9b80bd806c436",
+      "permissions": {
+        "domains": []
+      },
+      "min_app_version": "5.0.0",
+      "homepage": "https://github.com/Qiuizi/qisland-plugins/tree/main/themes"
+    },
+    {
+      "id": "mist-lime",
+      "name": "晨雾青柠",
+      "version": "1.0",
+      "tier": "declarative",
+      "category": "theme",
+      "author": "Qisland 官方",
+      "description": "清晨薄雾一样的浅色磨砂，青柠绿点睛；亮色桌面上最清爽",
+      "icon": "◐",
+      "download_url": "https://raw.githubusercontent.com/Qiuizi/qisland-plugins/main/themes/mist-lime.json",
+      "sha256": "ea047912b4ffd2343f8ea077444fd37e5dbf00ab81cfbd2b8ff443b11dcc5440",
+      "permissions": {
+        "domains": []
+      },
+      "min_app_version": "5.0.0",
+      "homepage": "https://github.com/Qiuizi/qisland-plugins/tree/main/themes"
+    },
+    {
+      "id": "amber-gold",
+      "name": "琥珀暗金",
+      "version": "1.0",
+      "tier": "declarative",
+      "category": "theme",
+      "author": "Qisland 官方",
+      "description": "深咖底色配暖金强调，像夜里的一盏台灯；圆角收得更利落",
+      "icon": "◐",
+      "download_url": "https://raw.githubusercontent.com/Qiuizi/qisland-plugins/main/themes/amber-gold.json",
+      "sha256": "d569c96ad1f4f7b71201fa26cb9ff483263e0a1502bc68aa64da3697ce5b2780",
+      "permissions": {
+        "domains": []
+      },
+      "min_app_version": "5.0.0",
+      "homepage": "https://github.com/Qiuizi/qisland-plugins/tree/main/themes"
+    }
+  ]
+}

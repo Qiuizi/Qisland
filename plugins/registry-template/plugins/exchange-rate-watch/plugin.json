@@ -1,0 +1,33 @@
+{
+  "id": "exchange-rate-watch",
+  "name": "汇率速览",
+  "version": "1.0.0",
+  "author": "Qisland 官方",
+  "description": "常见外币兑人民币（或你选的本币）的参考汇率，每天更新一次的公开数据，不需要 API Key。仅供参考，不作交易依据。",
+  "icon": "¥",
+  "accent": "#30D158",
+  "tier": "declarative",
+  "permissions": { "domains": ["open.er-api.com"] },
+  "config_schema": [
+    { "key": "home", "label": "本币", "type": "select", "default": "CNY", "options": ["CNY", "HKD", "USD", "EUR", "JPY"] },
+    { "key": "main", "label": "主看外币", "type": "select", "default": "USD", "options": ["USD", "EUR", "JPY", "GBP", "HKD", "KRW", "SGD"] }
+  ],
+  "sources": {
+    "rx": { "type": "https", "url": "https://open.er-api.com/v6/latest/{{config.home}}", "interval_seconds": 3600 }
+  },
+  "error_text": "汇率接口暂时不可用，稍后自动重试",
+  "card": [
+    { "type": "header", "title": "{{config.main}} → {{config.home}}", "subtitle": "更新于 {{rx.time_last_update_unix|unix|ago}}" },
+    { "type": "metric", "value": "{{rx.rates.{main}|inv|fixed:4}}", "unit": "{{config.home}}", "label": "1 {{config.main}} 可换" },
+    { "type": "badge_row", "badges": [
+      { "text": "USD {{rx.rates.USD|inv|fixed:3}}", "tone": "green" },
+      { "text": "EUR {{rx.rates.EUR|inv|fixed:3}}", "tone": "blue" },
+      { "text": "JPY×100 {{rx.rates.JPY|inv|mul:100|fixed:2}}", "tone": "purple" },
+      { "text": "HKD {{rx.rates.HKD|inv|fixed:3}}", "tone": "neutral" }
+    ] },
+    { "type": "action_row", "actions": [
+      { "label": "数据来源", "icon": "↗", "kind": "open_url", "url": "https://www.exchangerate-api.com/docs/free" },
+      { "label": "刷新", "icon": "↻", "kind": "refresh" }
+    ] }
+  ]
+}

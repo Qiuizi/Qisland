@@ -1,0 +1,28 @@
+{
+  "id": "countdown-milestone",
+  "name": "里程碑倒计时",
+  "version": "1.0.0",
+  "author": "Qisland 官方",
+  "description": "给一个目标日期算倒计时和进度：考试、上线、旅行都行。完全在本机计算，不联网。",
+  "icon": "⏳",
+  "accent": "#FF9F0A",
+  "tier": "declarative",
+  "permissions": { "domains": [] },
+  "config_schema": [
+    { "key": "title", "label": "事件名", "type": "text", "default": "期末考试", "placeholder": "比如：v5.0 上线" },
+    { "key": "date", "label": "目标日期", "type": "date", "default": "2027-01-15" },
+    { "key": "start", "label": "从哪天算起", "type": "date", "default": "2026-09-01" }
+  ],
+  "sources": {
+    "cd": { "type": "countdown", "target": "{{config.date}}", "start": "{{config.start}}" }
+  },
+  "card": [
+    { "type": "header", "title": "{{config.title}}", "subtitle": "{{cd.target|date:M月d日}} {{cd.weekday}}", "status": "live" },
+    { "type": "metric", "value": "{{cd.days}}", "unit": "天", "label": "还剩 {{cd.days}} 天 {{cd.hours}} 小时" },
+    { "type": "progress", "value": "{{cd.progress}}", "label": "已走过 {{cd.elapsed_days}} / {{cd.total_days}} 天", "tone": "amber" },
+    { "type": "badge_row", "badges": [
+      { "text": "起点 {{cd.start|date:M月d日}}", "tone": "neutral" },
+      { "text": "今天 {{now.date|date:M月d日}} {{now.weekday}}", "tone": "blue" }
+    ] }
+  ]
+}

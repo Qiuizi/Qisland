@@ -1,0 +1,36 @@
+name: validate-plugin
+
+# PR：校验 plugin.json 结构、L2 安全边界、registry.json 里的 SHA-256 与仓库文件一致（签名只提示，合并后由维护者重签）。
+# main：在上面的基础上严格要求 registry.json.sig / revoked.json.sig 和当前内容一致，没重签就红。
+on:
+  pull_request:
+    paths: ["plugins/**", "themes/**", "registry.json", "revoked.json", "tools/**", ".github/workflows/**"]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: plugin.json / theme.json / registry.json / revoked.json
+        if: github.event_name == 'pull_request'
+        run: python tools/qisland_registry.py validate
+      - name: 同上 + 严格验签（main）
+        if: github.event_name != 'pull_request'
+        run: python tools/qisland_registry.py validate --strict-sig
+      - name: L3 高级插件需要人工审核
+        if: github.event_name == 'pull_request'
+        run: |
+          if grep -rlE '"tier"[[:space:]]*:[[:space:]]*"process"' plugins/ registry.json >/dev/null 2>&1; then
+            echo "::notice::这个 PR 包含 L3 高级插件（会运行本机程序、未沙箱）。CI 只做格式检查，合并前必须由维护者逐行审过源码和 zip 内容。"
+          fi

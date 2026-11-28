@@ -1,0 +1,3 @@
+# 统一用 LF 存 JSON / 签名：GitHub raw 返回的字节和签名时一致（客户端验签前也会去掉 \r，双保险）
+* text=auto eol=lf
+*.zip binary

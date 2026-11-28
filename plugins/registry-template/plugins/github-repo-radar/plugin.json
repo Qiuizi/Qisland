@@ -1,0 +1,38 @@
+{
+  "id": "github-repo-radar",
+  "name": "GitHub 仓库雷达",
+  "version": "1.0.0",
+  "author": "Qisland 官方",
+  "description": "盯一个公开仓库的 Star、Fork、Issue 和最近推送时间。只读 GitHub 公开接口，不需要登录或 Token。",
+  "icon": "★",
+  "accent": "#5AC8FA",
+  "tier": "declarative",
+  "permissions": { "domains": ["api.github.com"] },
+  "config_schema": [
+    { "key": "repo", "label": "仓库", "type": "text", "default": "Qiuizi/Qisland", "placeholder": "owner/repo", "pattern": "^[A-Za-z0-9_.-]{1,39}/[A-Za-z0-9_.-]{1,100}$" }
+  ],
+  "sources": {
+    "repo": {
+      "type": "https",
+      "url": "https://api.github.com/repos/{{config.repo|path}}",
+      "headers": { "Accept": "application/vnd.github+json" },
+      "interval_seconds": 900
+    }
+  },
+  "error_text": "GitHub 暂时连不上，或仓库不存在",
+  "card": [
+    { "type": "header", "title": "{{config.repo}}", "subtitle": "{{repo.language|default:公开仓库}}" },
+    { "type": "metric", "value": "{{repo.stargazers_count|num}}", "unit": "Star", "label": "{{repo.description|trim:46|default:—}}" },
+    { "type": "badge_row", "badges": [
+      { "text": "Fork {{repo.forks_count|compact}}", "tone": "blue" },
+      { "text": "Issue {{repo.open_issues_count|compact}}", "tone": "amber" },
+      { "text": "关注 {{repo.subscribers_count|compact}}", "tone": "neutral" },
+      { "text": "推送 {{repo.pushed_at|ago}}", "tone": "green" }
+    ] },
+    { "type": "action_row", "actions": [
+      { "label": "打开仓库", "icon": "↗", "kind": "open_url", "url": "https://github.com/{{config.repo|path}}" },
+      { "label": "Issues", "icon": "◎", "kind": "open_url", "url": "https://github.com/{{config.repo|path}}/issues" },
+      { "label": "刷新", "icon": "↻", "kind": "refresh" }
+    ] }
+  ]
+}

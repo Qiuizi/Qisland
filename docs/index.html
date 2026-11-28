@@ -105,6 +105,7 @@
   <a class="rail-dot" href="#features" data-sec="features" aria-label="功能概览"><span class="rail-tip">功能</span></a>
   <a class="rail-dot" href="#music" data-sec="music" aria-label="音乐歌词"><span class="rail-tip">音乐</span></a>
   <a class="rail-dot" href="#agent" data-sec="agent" aria-label="AI 审批"><span class="rail-tip">审批</span></a>
+  <a class="rail-dot" href="#diy" data-sec="diy" aria-label="5.0 预览：DIY 与插件"><span class="rail-tip">DIY</span></a>
   <a class="rail-dot" href="#homework" data-sec="homework" aria-label="课业雷达"><span class="rail-tip">课业</span></a>
   <a class="rail-dot" href="#schedule" data-sec="schedule" aria-label="日程与会议"><span class="rail-tip">日程</span></a>
   <a class="rail-dot" href="#api" data-sec="api" aria-label="本机推送接口"><span class="rail-tip">接口</span></a>
@@ -311,6 +312,42 @@
         <img src="assets/shots/4.3.0/20-devices.png" width="1016" height="1152" alt="组件页最上面的设备电量卡：鼠标 18%、耳机 64%、键盘 76%（演示数据）" loading="lazy">
         <figcaption>设备电量 · 演示数据</figcaption>
       </figure>
+    </div>
+  </div>
+</section>
+
+<!-- 4.5 5.0 预览：DIY、插件、安装包 -->
+<section class="band band-cobalt feat" id="diy" data-island="small" aria-labelledby="diy-title">
+  <div class="wrap two">
+    <div>
+      <p class="eyebrow">5.0 预览 · 还没发布</p>
+      <h2 id="diy-title" class="big">岛，<br>改成<span class="hl hl-lime">你的样子</span>。</h2>
+      <p class="body">下一版在主分支上开发中。不写代码就能编排胶囊、换主题；想要新卡片，从插件市场装一个，或者照着规范自己写一个 <code>plugin.json</code>。</p>
+      <div class="pill-slots">
+        <article class="feat-card feat-lime">
+          <span class="feat-mark">DIY</span>
+          <h3>拖一拖，换一身</h3>
+          <p>收起的胶囊和组件页都能拖动编排、实时预览；<code>theme.json</code> 主题包只写想改的字段，导入时校验颜色和对比度，附带三套官方主题。</p>
+        </article>
+        <article class="feat-card feat-ink">
+          <span class="feat-mark">L2 · L3</span>
+          <h3>两级插件，一眼分清</h3>
+          <p>L2 安全卡片只是一个 JSON，不运行代码，只能访问声明过的至多 3 个 https 域名；L3 高级插件会运行本机程序、没有沙箱，启用前单独确认。</p>
+        </article>
+      </div>
+    </div>
+    <div class="pill-slots">
+      <article class="feat-card feat-pink">
+        <span class="feat-mark">插件市场</span>
+        <h3>验过签才算官方</h3>
+        <p>6 个官方插件和 3 套主题内置离线可装。在线索引和撤销名单都要过 Ed25519 验签，被撤销的插件自动停用并写明原因；第三方源一直标着「未验签」。</p>
+      </article>
+      <article class="feat-card feat-lime">
+        <span class="feat-mark">Setup.exe</span>
+        <h3>也可以一路下一步</h3>
+        <p>除了两个 zip，还会有一个不要管理员权限的安装包：默认装到用户目录，可选桌面快捷方式和开机自启，卸载时默认保留你的设置。</p>
+      </article>
+      <p class="fine">以上只过了编译、自检和离屏截图，真机上的安装、市场在线刷新和插件请求还没手动验证。</p>
     </div>
   </div>
 </section>
@@ -587,7 +624,7 @@
       <h2 id="d-title" class="mega">抬眼，<br>就知道。</h2>
       <ol class="steps">
         <li><span class="lat">1</span><div><h3>下载</h3><p>到 GitHub Releases 下载 <code>Qisland-版本号-full-x64.zip</code>（自带运行时，约 80 MB）；已装 .NET 8 桌面运行时的可以选小的 <code>Qisland-版本号-win-x64.zip</code>（约 9 MB）。</p></div></li>
-        <li><span class="lat">2</span><div><h3>解压</h3><p>放到一个你有写权限的文件夹，自动更新要用。</p></div></li>
+        <li><span class="lat">2</span><div><h3>解压</h3><p>放到一个你有写权限的文件夹，自动更新要用。5.0 起也可以下载 <code>Qisland-版本号-Setup.exe</code> 一路安装，不要管理员权限。</p></div></li>
         <li><span class="lat">3</span><div><h3>运行</h3><p>双击 <code>Qisland.exe</code>，屏幕顶上就多了一座岛。用小包时如果提示缺少 <a class="inline-link" href="https://dotnet.microsoft.com/download/dotnet/8.0" target="_blank" rel="noopener noreferrer">.NET 8 桌面运行时</a>，按提示安装，或者换自带运行时的包。</p></div></li>
       </ol>
     </div>

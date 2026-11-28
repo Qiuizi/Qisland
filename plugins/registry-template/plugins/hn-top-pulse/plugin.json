@@ -1,0 +1,31 @@
+{
+  "id": "hn-top-pulse",
+  "name": "Hacker News 热榜",
+  "version": "1.0.0",
+  "author": "Qisland 官方",
+  "description": "Hacker News 榜首在聊什么：标题、分数、评论数。读官方 Firebase 公开 JSON 接口，不需要 Key。",
+  "icon": "Y",
+  "accent": "#FF6600",
+  "tier": "declarative",
+  "permissions": { "domains": ["hacker-news.firebaseio.com"] },
+  "sources": {
+    "top": { "type": "https", "url": "https://hacker-news.firebaseio.com/v0/topstories.json", "interval_seconds": 900 },
+    "s1": { "type": "https", "url": "https://hacker-news.firebaseio.com/v0/item/{{top:$[0]}}.json", "interval_seconds": 900 },
+    "s2": { "type": "https", "url": "https://hacker-news.firebaseio.com/v0/item/{{top:$[1]}}.json", "interval_seconds": 900 }
+  },
+  "error_text": "Hacker News 暂时连不上",
+  "card": [
+    { "type": "header", "title": "HN 榜首", "subtitle": "{{s1.time|ago}}" },
+    { "type": "metric", "value": "{{s1.score}}", "unit": "分", "label": "{{s1.title|trim:58}}" },
+    { "type": "badge_row", "badges": [
+      { "text": "{{s1.descendants|default:0}} 条评论", "tone": "amber" },
+      { "text": "by {{s1.by|trim:16}}", "tone": "neutral" },
+      { "text": "#2 {{s2.title|trim:26}}", "tone": "neutral" }
+    ] },
+    { "type": "action_row", "actions": [
+      { "label": "讨论", "icon": "↗", "kind": "open_url", "url": "https://news.ycombinator.com/item?id={{top:$[0]}}" },
+      { "label": "首页", "icon": "☰", "kind": "open_url", "url": "https://news.ycombinator.com/news" },
+      { "label": "刷新", "icon": "↻", "kind": "refresh" }
+    ] }
+  ]
+}
