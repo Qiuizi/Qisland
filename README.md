@@ -11,7 +11,7 @@
 ![.NET](https://img.shields.io/badge/.NET%208-WPF-512bd4?style=flat-square)
 ![license](https://img.shields.io/github/license/Qiuizi/Qisland?style=flat-square&color=30d158)
 
-[下载最新版](https://github.com/Qiuizi/Qisland/releases/latest) · [介绍页](https://qiuizi.github.io/Qisland/) · [更新日志](CHANGELOG.md) · [English](README_EN.md)
+[下载最新版](https://github.com/Qiuizi/Qisland/releases/latest) · [5.0 宣传片](https://qiuizi.github.io/Qisland/#film) · [介绍页](https://qiuizi.github.io/Qisland/) · [更新日志](CHANGELOG.md) · [English](README_EN.md)
 
 <img src="docs/media/qisland-4.3-hero.png" width="860" alt="Qisland 4.3：收起的歌词胶囊、封面取色的音乐卡片、Codex 审批卡、AI 额度页（演示数据）">
 
@@ -37,6 +37,12 @@ Qisland 把屏幕顶上的一颗胶囊变成你的状态栏：Agent 要你批准
 ## 5.0 新增：DIY、插件和安装包
 
 详细改动见 [更新日志](CHANGELOG.md)。没有新配置文件时，岛的样子和 4.3 一样。
+
+<p align="center">
+  <a href="https://qiuizi.github.io/Qisland/#film"><img src="docs/media/qisland-v5-poster.jpg" width="860" alt="Qisland 5.0 宣传片（52 秒，演示数据）"></a>
+</p>
+
+[在介绍页观看 5.0 宣传片](https://qiuizi.github.io/Qisland/#film)。
 
 - **零代码 DIY**：设置里的「布局与 DIY」可以拖动编排收起的胶囊（空闲时和放音乐时各一份）和组件页，带实时预览；`theme.json` 主题包只写想改的字段，导入时校验颜色、对比度和取值范围，附带三套官方主题；组件页可以放最多 12 个快捷按钮。
 - **两级插件**：L2 安全卡片只有一个 `plugin.json`，不运行任何代码，联网由 Qisland 代发且只能访问声明过的至多 3 个公网 https 域名；L3 高级插件沿用旧版的进程插件，会运行本机程序、没有沙箱，启用前单独确认。插件更新后要的权限变多会自动暂停，等你重新确认。规范见 [plugins/README.md](plugins/README.md)。

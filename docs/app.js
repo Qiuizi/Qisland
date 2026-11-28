@@ -670,8 +670,8 @@
   keepFallback();
   if (typeof window.fetch !== 'function') return;
 
-  var defaultSrc = video.getAttribute('data-src') || 'assets/media/qisland-4.1.mp4';
-  var defaultPoster = video.getAttribute('data-poster') || 'assets/media/qisland-4.1-poster.jpg';
+  var defaultSrc = video.getAttribute('data-src') || 'media/qisland-v5.mp4';
+  var defaultPoster = video.getAttribute('data-poster') || 'media/qisland-v5-poster.jpg';
 
   function attachAndShow(videoSrc, posterSrc) {
     if (posterSrc) video.setAttribute('poster', posterSrc);

@@ -11,7 +11,7 @@
 ![.NET](https://img.shields.io/badge/.NET%208-WPF-512bd4?style=flat-square)
 ![license](https://img.shields.io/github/license/Qiuizi/Qisland?style=flat-square&color=30d158)
 
-[Download latest](https://github.com/Qiuizi/Qisland/releases/latest) · [Website](https://qiuizi.github.io/Qisland/) · [Changelog (Chinese)](CHANGELOG.md) · [中文](README.md)
+[Download latest](https://github.com/Qiuizi/Qisland/releases/latest) · [5.0 trailer](https://qiuizi.github.io/Qisland/#film) · [Website](https://qiuizi.github.io/Qisland/) · [Changelog (Chinese)](CHANGELOG.md) · [中文](README.md)
 
 <img src="docs/media/qisland-4.3-hero.png" width="860" alt="Qisland 4.3: collapsed lyrics capsule, album-tinted music card, Codex approval card, AI usage page (demo data)">
 
@@ -39,6 +39,12 @@ Qisland turns a small capsule at the top of your screen into a status bar for th
 ## New in 5.0: DIY, plugins and an installer
 
 See the [changelog](CHANGELOG.md) (Chinese) for details. Without any new config files the island looks the same as 4.3.
+
+<p align="center">
+  <a href="https://qiuizi.github.io/Qisland/#film"><img src="docs/media/qisland-v5-poster.jpg" width="860" alt="Qisland 5.0 trailer (52 seconds, demo data)"></a>
+</p>
+
+[Watch the 5.0 trailer on the website](https://qiuizi.github.io/Qisland/#film).
 
 - **No-code DIY**: a "Layout & DIY" settings page to drag-arrange the collapsed capsule (idle and music layouts) and the widget page, with a live preview. `theme.json` theme packs only need the fields you want to change and are validated on import (colors, contrast, ranges); three official themes are included. Up to 12 quick-action buttons on the widget page.
 - **Two plugin tiers**: L2 safe cards are a single `plugin.json` and run no code — Qisland makes the requests itself, only to at most 3 declared public https domains. L3 advanced plugins keep the old process-plugin format: they run a local program with no sandbox and need a separate confirmation. If an update asks for more permissions the plugin is paused until you confirm again. Spec: [plugins/README.md](plugins/README.md).
