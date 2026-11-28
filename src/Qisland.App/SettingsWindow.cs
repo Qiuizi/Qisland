@@ -32,6 +32,7 @@ public sealed partial class SettingsWindow : Window
         [
             ("外观与停靠", "\uE771", Look),
             ("布局与 DIY", "\uE8A9", Diy),
+            ("插件", "\uEA86", PluginsPage),
             ("隐藏与穿透", "\uE890", HideAndThrough),
             ("岛上提示", "\uEA8F", p => Mirror(p, "岛上提示")),
             ("天气", "\uE706", Weather),

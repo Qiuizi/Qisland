@@ -39,6 +39,16 @@
     <EmbeddedResource Include="Assets\qisland.ico" LogicalName="qisland.ico" />
     <!-- 5.0 官方示例主题包：仓库 themes/ 目录，内置进程序 -->
     <EmbeddedResource Include="..\..\themes\*.json" LogicalName="theme.%(Filename).json" />
+    <!-- 5.0 官方示例插件（L2 声明式卡片）：仓库 plugins/official/，内置进程序，插件页一键打开 -->
+    <EmbeddedResource Include="..\..\plugins\official\github-repo-radar\plugin.json" LogicalName="plugin.official.github-repo-radar.json" />
+    <EmbeddedResource Include="..\..\plugins\official\countdown-milestone\plugin.json" LogicalName="plugin.official.countdown-milestone.json" />
+    <EmbeddedResource Include="..\..\plugins\official\exchange-rate-watch\plugin.json" LogicalName="plugin.official.exchange-rate-watch.json" />
+    <EmbeddedResource Include="..\..\plugins\official\hn-top-pulse\plugin.json" LogicalName="plugin.official.hn-top-pulse.json" />
+    <EmbeddedResource Include="..\..\plugins\official\npm-package-stats\plugin.json" LogicalName="plugin.official.npm-package-stats.json" />
+    <EmbeddedResource Include="..\..\plugins\official\quick-dev-links\plugin.json" LogicalName="plugin.official.quick-dev-links.json" />
+    <!-- 5.0 插件市场的内置离线目录与撤销名单：和社区索引仓库模板 plugins/registry-template/ 是同一份文件 -->
+    <EmbeddedResource Include="..\..\plugins\registry-template\registry.json" LogicalName="market.builtin.registry.json" />
+    <EmbeddedResource Include="..\..\plugins\registry-template\revoked.json" LogicalName="market.builtin.revoked.json" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="QRCoder" Version="1.8.1" />

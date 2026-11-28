@@ -140,8 +140,29 @@ public sealed class Updater
         if (a.Id != Id) return false;
         if (_found == null || _busy) return true;
         if (_found.ZipUrl == null) { Process.Start(new ProcessStartInfo(_found.Url) { UseShellExecute = true }); return true; }
+        // 程序目录写不进去（比如被手动放进了 Program Files）：不硬覆盖，打开发布页让用户下载新的 Setup.exe
+        if (!AppDirWritable(AppContext.BaseDirectory))
+        {
+            App.Log("更新: 程序目录不可写，改为打开发布页 " + AppContext.BaseDirectory);
+            Say("程序目录需要管理员权限", "已打开发布页，下载新版 Setup.exe 覆盖安装即可", ActivityKind.Info);
+            Process.Start(new ProcessStartInfo(_found.Url) { UseShellExecute = true })?.Dispose();
+            return true;
+        }
         _ = Install(_found);
         return true;
+    }
+
+    /// <summary>能不能在程序目录里建文件：Setup.exe 默认装在 %LOCALAPPDATA%\Programs\Qisland（可写），zip 解压到哪都行，只有放进受保护目录时才会是 false。</summary>
+    internal static bool AppDirWritable(string dir)
+    {
+        try
+        {
+            var probe = Path.Combine(dir, ".qisland-write-test-" + Environment.ProcessId);
+            File.WriteAllText(probe, "");
+            File.Delete(probe);
+            return true;
+        }
+        catch { return false; }
     }
 
     public void Skip()
@@ -363,38 +384,5 @@ public sealed class Updater
             App.Current.Dispatcher.BeginInvoke(() =>
                 _store.Upsert(new IslandActivity(Id, "update", "更新没成功", reason, ActivityKind.Error, 60, DurationSeconds: 0), sticky: true, quiet: true));
         }
-    }
-}
-
-/// <summary>够用的语义化版本比较：1.0.0-preview &lt; 1.0.0-preview.2 &lt; 1.0.0 &lt; 1.0.1。</summary>
-public static class SemVer
-{
-    public static int Compare(string a, string b)
-    {
-        static (int[] core, string[] pre) Split(string v)
-        {
-            v = v.Trim().TrimStart('v', 'V');
-            var plus = v.IndexOf('+'); if (plus >= 0) v = v[..plus];
-            var dash = v.IndexOf('-');
-            var core = (dash >= 0 ? v[..dash] : v).Split('.').Select(x => int.TryParse(x, out var n) ? n : 0).ToArray();
-            var pre = dash >= 0 ? v[(dash + 1)..].Split('.') : [];
-            return (core, pre);
-        }
-        var (ca, pa) = Split(a); var (cb, pb) = Split(b);
-        for (var i = 0; i < Math.Max(ca.Length, cb.Length); i++)
-        {
-            var x = i < ca.Length ? ca[i] : 0; var y = i < cb.Length ? cb[i] : 0;
-            if (x != y) return x.CompareTo(y);
-        }
-        if (pa.Length == 0 && pb.Length == 0) return 0;
-        if (pa.Length == 0) return 1;   // 正式版比同号预览版新
-        if (pb.Length == 0) return -1;
-        for (var i = 0; i < Math.Min(pa.Length, pb.Length); i++)
-        {
-            var na = int.TryParse(pa[i], out var ia); var nb = int.TryParse(pb[i], out var ib);
-            var c = na && nb ? ia.CompareTo(ib) : na ? -1 : nb ? 1 : string.CompareOrdinal(pa[i], pb[i]);
-            if (c != 0) return c;
-        }
-        return pa.Length.CompareTo(pb.Length);
     }
 }

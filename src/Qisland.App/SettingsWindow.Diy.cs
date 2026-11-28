@@ -321,6 +321,7 @@ public sealed partial class SettingsWindow
             {
                 "quick" => QuickStore.Current.Count == 0 ? "还没有按钮，下面加一个就会出现" : $"{QuickStore.Current.Count} 个按钮 · 整行",
                 "devices" => "整行 · 读到外设电量时才出现",
+                _ when id.StartsWith("p:", StringComparison.Ordinal) => "插件卡片 · 整行 · 在「插件」页开关",
                 _ => half ? "半宽" : "整行",
             };
             var st = Small(sub); st.FontSize = 11; name.Children.Add(st);

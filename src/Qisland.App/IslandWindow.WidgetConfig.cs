@@ -122,13 +122,13 @@ public sealed partial class IslandWindow
         try { if (File.Exists(WidgetFile)) lines = File.ReadAllLines(WidgetFile); }
         catch (Exception ex) { App.Log("读取 widgets.txt: " + ex.Message); }
         // 新版本加的组件、文件里漏掉的组件：插在默认顺序里它前一个组件的后面（比如「课程」紧跟天气），默认显示
-        return _widgetList = WidgetOrder.Parse(lines, WidgetDefs.Select(d => d.Id).ToList());
+        return _widgetList = WidgetOrder.Parse(lines, WidgetIds());
     }
 
     private void SaveWidgets()
     {
         if (SnapshotMode) return;   // 渲染素材时只改内存
-        try { File.WriteAllLines(WidgetFile, WidgetOrder.Serialize(Widgets(), WidgetDefs.Select(d => d.Id))); }
+        try { File.WriteAllLines(WidgetFile, WidgetOrder.Serialize(Widgets(), WidgetIds())); }
         catch (Exception ex) { App.Log("保存 widgets.txt: " + ex.Message); }
     }
 
@@ -141,16 +141,15 @@ public sealed partial class IslandWindow
     /// <summary>设置页改了顺序 / 显隐：存盘并立刻刷新展开页（正开着组件页就当场重排）。</summary>
     internal void SetWidgetLayout(IEnumerable<(string Id, bool On)> list)
     {
-        var known = WidgetDefs.Select(d => d.Id).ToList();
-        _widgetList = WidgetOrder.Parse(list.Select(w => (w.On ? "" : "-") + w.Id), known);
+        _widgetList = WidgetOrder.Parse(list.Select(w => (w.On ? "" : "-") + w.Id), WidgetIds());
         SaveWidgets();
         _pageCache.Remove(Page.Widgets);
         if (_mode == Mode.Expanded && !_animating) RebuildExpanded(); else _expDirty = true;
     }
 
-    internal void ResetWidgetLayout() => SetWidgetLayout(WidgetDefs.Select(d => (d.Id, true)));
+    internal void ResetWidgetLayout() => SetWidgetLayout(WidgetIds().Select(id => (id, true)));
 
-    private static WidgetDef Def(string id) => WidgetDefs.First(d => d.Id == id);
+    private WidgetDef Def(string id) => WidgetDefs.FirstOrDefault(d => d.Id == id) ?? PluginDef(id);
 
     private void BuildWidgets(StackPanel stack)
     {
@@ -158,6 +157,7 @@ public sealed partial class IslandWindow
         _wxIcons.Clear();
         _cpuT = _memT = _batT = null; _netT = null; _calHost = null; _timerCard = null; _sun = null; _sunHint = null; _wxBody = null;
         _wView = null; _healthT = null;
+        _pluginCards.Clear();
         if (_widgetEdit) { BuildWidgetEditor(stack); return; }
 
         // 内容比视口高时必须顶端对齐：WPF 默认会把超高的子元素居中，上面的天气和下面的系统行会被同时裁掉
@@ -259,6 +259,7 @@ public sealed partial class IslandWindow
             case "health": return HealthWidget();
             case "devices": return DevicesWidget();
             case "quick": return QuickWidget();
+            case var p when p.StartsWith("p:", StringComparison.Ordinal): return PluginWidget(p);
             default: return ClipWidget();
         }
     }
@@ -299,6 +300,11 @@ public sealed partial class IslandWindow
 
     internal static Border WidgetIcon(string id, double size)
     {
+        if (id.StartsWith("p:", StringComparison.Ordinal))
+        {
+            var pe = PluginHost.Current?.FindByKey(id);
+            return CardRenderer.Tile(pe?.Manifest.Icon ?? "◆", pe?.Manifest.Accent ?? "", size);
+        }
         static Color C(uint v) => Color.FromRgb((byte)(v >> 16), (byte)(v >> 8), (byte)v);
         var (top, bottom) = id switch
         {

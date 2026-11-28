@@ -192,6 +192,54 @@ internal static class ThemeStore
         catch (Exception ex) { error = ex.Message; return null; }
     }
 
+    // ───────────── 5.0 插件市场 ─────────────
+
+    /// <summary>市场装的主题存成 themes\&lt;id&gt;.json（原样字节，SHA-256 可复核）；返回已装版本，没装返回 null。</summary>
+    public static string? InstalledVersion(string id)
+    {
+        var f = MarketFile(id);
+        if (f == null || !File.Exists(f)) return null;
+        return ThemePack.Parse(DiyFiles.Read(f, ThemePack.MaxBytes), out _, out _) is { } p ? (p.Version.Length > 0 ? p.Version : "0") : null;
+    }
+
+    private static string? MarketFile(string id) => PluginManifest.IdRx.IsMatch(id) ? Path.Combine(UserDir, id + ".json") : null;
+
+    /// <summary>校验通过才落盘；返回错误，成功返回 null。</summary>
+    public static string? InstallFromMarket(string id, byte[] bytes)
+    {
+        if (MarketFile(id) is not { } f) return "主题 id 不合法";
+        if (BuiltinNames.Contains(id, StringComparer.OrdinalIgnoreCase)) return "不能覆盖内置主题";
+        if (bytes.Length > ThemePack.MaxBytes) return "主题包超过 32 KB";
+        var text = Encoding.UTF8.GetString(MarketTrust.Canonical(bytes));
+        if (ThemePack.Parse(text, out var error, out _) == null) return "主题包不合格：" + error;
+        try
+        {
+            Directory.CreateDirectory(UserDir);
+            DiyFiles.Write(f, text);
+            return null;
+        }
+        catch (Exception ex) { return "保存失败：" + ex.Message; }
+    }
+
+    public static bool Uninstall(string id)
+    {
+        if (MarketFile(id) is not { } f) return false;
+        try { if (File.Exists(f)) File.Delete(f); return true; }
+        catch (Exception ex) { App.Log("卸载主题: " + ex.Message); return false; }
+    }
+
+    /// <summary>主题文件的规整 SHA-256（撤销名单按哈希命中用）；内置主题按编进程序的字节算。</summary>
+    public static string? FileSha256(string key)
+    {
+        try
+        {
+            if (key.StartsWith("user:", StringComparison.Ordinal) && Path.GetFileName(key[5..]) is { Length: > 0 } n && File.Exists(Path.Combine(UserDir, n)))
+                return MarketTrust.PackageSha256(File.ReadAllBytes(Path.Combine(UserDir, n)));
+        }
+        catch { }
+        return null;
+    }
+
     /// <summary>
     /// 导出「当前配置」：用着主题包就导出它；没用就把当前外观的颜色整理成一份起步模板，改几个字段就是自己的主题。
     /// </summary>

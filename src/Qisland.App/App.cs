@@ -110,6 +110,17 @@ public sealed partial class App : Application
                 _window.ApplyLook(lk >= 0 && lk + 1 < args.Length && Enum.TryParse<Theme.Look>(args[lk + 1], true, out var look) ? look : Theme.Look.Dark);
                 try { await _window.Snapshot(dir, Demo); } catch (Exception ex) { Log("snapshot: " + ex); }
                 try { await SettingsWindow.SnapshotDiy(this, dir); } catch (Exception ex) { Log("snapshot 设置页: " + ex); }
+                // 5.0 插件：离线样例数据，不联网、不落盘
+                try
+                {
+                    Plugins = new PluginHost(Dispatcher);
+                    Plugins.Demo(IslandWindow.DemoPluginMocks(), IslandWindow.DemoProcessPlugin());
+                    Market = new MarketService(Plugins, null);
+                    Market.Demo();
+                    await _window.SnapshotPlugins(dir, Plugins);
+                    await SettingsWindow.SnapshotPlugins(this, dir);
+                }
+                catch (Exception ex) { Log("snapshot 插件: " + ex); }
                 Shutdown();
             };
             _window.Show();
@@ -119,6 +130,7 @@ public sealed partial class App : Application
         if (Updater.RecoverInterruptedUpdate()) { Shutdown(); return; }
         Autostart.InstallCrashRestart();
         Autostart.EnsureDefault();
+        SyncSetupVersion();
         if (args.Contains("--restarted")) Log("已自动重启");
 
         // WPF 默认按 60 fps 出帧；这台屏是 120 Hz，60 帧的弹簧动画看起来就是「有点卡」。
@@ -138,6 +150,7 @@ public sealed partial class App : Application
         catch { }
         _window = new IslandWindow(_store) { Ai = _ai };
         _window.Show();
+        StartPlugins();
 
         var approvalKey = ApprovalKeyFile.Rotate(DataDir, out var keyError);
         if (approvalKey == null) Log("审批密钥: " + keyError);
@@ -172,6 +185,57 @@ public sealed partial class App : Application
         try { var n = ChangeLedger.Sync().Count; if (n > 0) Log($"改动账本: 对其他软件有 {n} 处改动（托盘 → 对其他软件的改动）"); } catch (Exception ex) { Log("改动账本: " + ex.Message); }
         if (args.Contains("--demo")) Demo();
         TrimSoon();
+    }
+
+    // ───────────── 5.0 插件 ─────────────
+    internal PluginHost? Plugins { get; private set; }
+    internal MarketService? Market { get; private set; }
+
+    private void StartPlugins()
+    {
+        try
+        {
+            Plugins = new PluginHost(Dispatcher)
+            {
+                Active = () => _window is { IsVisible: true },
+                Confirm = SettingsWindow.AskConsent,
+            };
+            // 市场先建好：启动时就拿缓存里验过签的撤销名单比一遍已装插件，命中的立即停用
+            Market = new MarketService(Plugins, key => SetThemePack(key));
+            Plugins.RevocationCheck = Market.RevocationFor;
+            Plugins.Revoked += hits =>
+            {
+                var first = hits[0];
+                _store.Upsert(new IslandActivity("market:revoked", "plugin", hits.Count == 1 ? $"插件「{first.Entry.Manifest.Name}」已被撤销并停用" : $"{hits.Count} 个插件已被撤销并停用",
+                    first.Reason, ActivityKind.Warning, 60, DurationSeconds: 12, ResetTtl: true));
+            };
+            Market.ThemeRevoked += (id, reason) => Dispatcher.BeginInvoke(() =>
+                _store.Upsert(new IslandActivity("market:theme-revoked", "plugin", "主题包已被撤销，已换回默认外观", reason, ActivityKind.Warning, 60, DurationSeconds: 12, ResetTtl: true)));
+            _window!.Plugins = Plugins;
+            Plugins.Start();
+            Market.CheckThemeRevocation();
+            _ = MarketLoop();
+        }
+        catch (Exception ex) { Log("插件: " + ex); }
+    }
+
+    /// <summary>
+    /// 后台刷新市场（主要是为了及时拿到撤销名单）：只在你装过 / 打开过插件、或者用着市场主题时才联网，
+    /// 启动 2 分钟后一次，之后每 12 小时一次；连不上就继续用上次验过签的缓存。
+    /// </summary>
+    private async Task MarketLoop()
+    {
+        await Task.Delay(TimeSpan.FromMinutes(2));
+        while (Market != null && Plugins != null)
+        {
+            var used = Plugins.All.Any(e => Plugins.IsEnabled(e) || e.Receipt != null) || ThemeStore.ActiveKey?.StartsWith("user:", StringComparison.Ordinal) == true;
+            if (used)
+            {
+                try { var r = await Market.Refresh(); Log("市场: 后台刷新 " + r.Replace('\n', ' ')); }
+                catch (Exception ex) { Log("市场: 后台刷新 " + ex.Message); }
+            }
+            await Nap(TimeSpan.FromHours(12));
+        }
     }
 
     // ───────────── 睡眠唤醒 / 时间变化 ─────────────
